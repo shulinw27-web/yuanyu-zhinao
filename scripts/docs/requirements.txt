@@ -1,0 +1,2 @@
+# Separate document-tool environment; not needed by the business API.
+python-docx==1.2.0

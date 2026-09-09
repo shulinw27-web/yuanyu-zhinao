@@ -1,0 +1,21 @@
+{
+  "name": "@healthcare-ai/mobile-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5175",
+    "build": "vite build",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@healthcare-ai/agent-sdk": "*",
+    "@healthcare-ai/agent-workbench": "*",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "vite": "^6.0.5"
+  }
+}

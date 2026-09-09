@@ -1,0 +1,77 @@
+{
+  "name": "@healthcare-ai/desktop-app",
+  "version": "0.3.0",
+  "description": "元域智脑 Web 与 Electron 企业私有 Agent 工作台",
+  "author": "Yuanyuan Health AI Platform Team",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite --port 5184",
+    "dev:web": "vite --port 5184",
+    "dev:electron": "node scripts/dev-electron.mjs",
+    "build:icon": "node scripts/build-icon.mjs",
+    "build": "vite build",
+    "build:web": "vite build",
+    "start:electron": "electron .",
+    "pack:electron": "npm run build:icon && npm run build && electron-builder --dir",
+    "dist:electron": "npm run build:icon && npm run build && electron-builder",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@healthcare-ai/agent-sdk": "*",
+    "@healthcare-ai/agent-workbench": "*",
+    "docx": "^9.7.1",
+    "jszip": "^3.10.1",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "electron": "43.4.1",
+    "electron-builder": "^26.0.12",
+    "sharp": "0.35.3",
+    "vite": "^6.0.5"
+  },
+  "build": {
+    "appId": "com.yuanyuanhealth.zhinao",
+    "productName": "元域智脑",
+    "asar": true,
+    "directories": {
+      "output": "release/v0.3.0"
+    },
+    "electronDist": "../../node_modules/electron/dist",
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "artifactName": "YuanyuZhinao-Setup-${version}-${arch}.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "元域智脑"
+    },
+    "portable": {
+      "artifactName": "YuanyuZhinao-Portable-${version}-${arch}.${ext}"
+    }
+  }
+}

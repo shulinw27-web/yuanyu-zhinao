@@ -1,0 +1,23 @@
+[
+  {
+    "id": "confirmed-cross-system", "kind": "identity_mapping", "at": "2026-09-03T00:00:00Z", "knownAt": "2026-09-03T00:00:00Z", "expected": "same_entity",
+    "query": { "left": { "system": "ERP", "objectType": "Material", "id": "M-01" }, "right": { "system": "WMS", "objectType": "Material", "id": "SKU-001" } },
+    "records": [
+      { "id": "M-01", "system": "ERP", "objectType": "Material", "tenantId": "demo-enterprise", "organizationId": "org-quality-dept", "classification": "质量受限", "version": "synthetic-1", "occurredAt": "2026-09-01T00:00:00Z" },
+      { "id": "SKU-001", "system": "WMS", "objectType": "Material", "tenantId": "demo-enterprise", "organizationId": "org-quality-dept", "classification": "质量受限", "version": "synthetic-1", "occurredAt": "2026-09-01T00:00:00Z" }
+    ],
+    "mappings": [
+      { "id": "synthetic-map-1", "version": "1", "system": "ERP", "source": { "system": "ERP", "objectType": "Material", "id": "M-01" }, "canonical": { "objectType": "Material", "id": "CANON-M1" }, "granularity": "master", "tenantId": "demo-enterprise", "organizationId": "org-quality-dept", "classification": "质量受限", "occurredAt": "2026-09-01T00:00:00Z", "validFrom": "2026-09-01T00:00:00Z", "validTo": null, "recordedAt": "2026-09-02T00:00:00Z", "provenanceType": "confirmed", "evidenceIds": ["synthetic-confirmation-1"] },
+      { "id": "synthetic-map-2", "version": "1", "system": "WMS", "source": { "system": "WMS", "objectType": "Material", "id": "SKU-001" }, "canonical": { "objectType": "Material", "id": "CANON-M1" }, "granularity": "master", "tenantId": "demo-enterprise", "organizationId": "org-quality-dept", "classification": "质量受限", "occurredAt": "2026-09-01T00:00:00Z", "validFrom": "2026-09-01T00:00:00Z", "validTo": null, "recordedAt": "2026-09-02T00:00:00Z", "provenanceType": "confirmed", "evidenceIds": ["synthetic-confirmation-2"] }
+    ]
+  },
+  {
+    "id": "same-number-without-crosswalk", "kind": "identity_mapping", "at": "2026-09-03T00:00:00Z", "knownAt": "2026-09-03T00:00:00Z", "expected": "unresolved",
+    "query": { "left": { "system": "ERP", "objectType": "Material", "id": "001" }, "right": { "system": "WMS", "objectType": "Material", "id": "001" } },
+    "records": [
+      { "id": "001", "system": "ERP", "objectType": "Material", "tenantId": "demo-enterprise", "organizationId": "org-quality-dept", "classification": "质量受限", "version": "synthetic-1", "occurredAt": "2026-09-01T00:00:00Z" },
+      { "id": "001", "system": "WMS", "objectType": "Material", "tenantId": "demo-enterprise", "organizationId": "org-quality-dept", "classification": "质量受限", "version": "synthetic-1", "occurredAt": "2026-09-01T00:00:00Z" }
+    ],
+    "mappings": []
+  }
+]

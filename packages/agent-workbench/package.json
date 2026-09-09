@@ -1,0 +1,14 @@
+{
+  "name": "@healthcare-ai/agent-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./style.css": "./src/style.css"
+  },
+  "dependencies": {
+    "@healthcare-ai/agent-sdk": "*",
+    "vue": "^3.5.13"
+  }
+}

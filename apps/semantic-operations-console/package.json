@@ -1,0 +1,70 @@
+{
+  "name": "@healthcare-ai/semantic-operations-console",
+  "private": true,
+  "version": "0.2.0",
+  "description": "元域智脑独立语义运营 Agent Web 与 Electron 桌面工作台",
+  "author": "Yuanyuan Health AI Platform Team",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "dev:web": "vite --port 5174",
+    "dev:electron": "node scripts/dev-electron.mjs",
+    "build:icon": "node scripts/build-icon.mjs",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start:electron": "electron .",
+    "pack:electron": "npm run build:icon && npm run build && electron-builder --dir",
+    "dist:electron": "npm run build:icon && npm run build && electron-builder",
+    "test": "node --test test/*.test.cjs"
+  },
+  "dependencies": {
+    "@healthcare-ai/api-contracts": "*",
+    "@healthcare-ai/semantic-operations-sdk": "*",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "electron": "43.4.1",
+    "electron-builder": "^26.0.12",
+    "sharp": "0.35.3",
+    "vite": "^6.0.5"
+  },
+  "build": {
+    "appId": "com.yuanyuanhealth.semanticoperations",
+    "productName": "元域语义运营 Agent",
+    "asar": true,
+    "directories": {
+      "output": "release/v0.2.0"
+    },
+    "electronDist": "../../node_modules/electron/dist",
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "artifactName": "Yuanyu-Semantic-Ops-Setup-${version}-${arch}.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "元域语义运营 Agent"
+    },
+    "portable": {
+      "artifactName": "Yuanyu-Semantic-Ops-Portable-${version}-${arch}.${ext}"
+    }
+  }
+}

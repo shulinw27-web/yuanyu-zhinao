@@ -1,0 +1,11 @@
+{
+  "name": "@healthcare-ai/agent-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.js",
+  "dependencies": {
+    "@healthcare-ai/api-contracts": "*",
+    "@healthcare-ai/client-runtime": "*"
+  }
+}

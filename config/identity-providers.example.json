@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "defaultBearerProviderId": "company-sso",
+  "providers": [
+    { "id": "dingtalk", "type": "dingtalk", "name": "钉钉", "enabled": false },
+    {
+      "id": "company-sso",
+      "type": "oidc",
+      "name": "企业统一身份",
+      "enabled": true,
+      "tenantId": "REPLACE_WITH_PLATFORM_TENANT_ID",
+      "issuer": "https://sso.example.com/realms/company",
+      "jwksUri": "https://sso.example.com/realms/company/protocol/openid-connect/certs",
+      "audience": "zhinao-api",
+      "bindings": [
+        { "subject": "REPLACE_WITH_VERIFIED_SUBJECT", "account": "REPLACE_WITH_EXISTING_PLATFORM_ACCOUNT" }
+      ]
+    }
+  ]
+}

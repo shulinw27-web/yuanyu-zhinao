@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "养源智脑桌面端",
+  "version": "0.1.0",
+  "identifier": "com.healthcareai.agent.desktop",
+  "build": { "beforeDevCommand": "npm run dev", "devUrl": "http://localhost:5184", "beforeBuildCommand": "npm run build", "frontendDist": "../dist" },
+  "app": { "windows": [{ "title": "养源智脑 · 企业私有 Agent", "width": 1360, "height": 880, "minWidth": 1024, "minHeight": 680 }], "security": { "csp": "default-src 'self'; connect-src 'self' http://localhost:3001 https:; style-src 'self' 'unsafe-inline'" } },
+  "bundle": { "active": true, "targets": "all" }
+}

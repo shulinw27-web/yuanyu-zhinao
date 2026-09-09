@@ -1,0 +1,50 @@
+# Dependencies and build output
+node_modules/
+dist/
+release/
+target/
+coverage/
+.venv*/
+__pycache__/
+*.py[cod]
+
+# Local runtime data and generated reports
+backend/.data/
+backend/runtime-data/
+.runtime/
+output/
+tmp/
+.playwright-cli/
+*.log
+
+# Private configuration; keep committed templates
+.env
+.env.*
+!.env.example
+!*.env.example
+
+# Local credentials, databases and model weights must never enter a commit
+ark.json
+*.local.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.gguf
+*.safetensors
+secrets/
+private/
+
+# Document render caches (published files stay in docs/reference/exports)
+docs/.qa-*/
+docs/.lo-*/
+docs/.artifact-build/
+docs/_manual_render/
+*.inspect.ndjson
+.DS_Store
+Thumbs.db

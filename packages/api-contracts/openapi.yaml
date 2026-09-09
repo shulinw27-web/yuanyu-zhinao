@@ -1,0 +1,895 @@
+openapi: 3.1.0
+info:
+  title: 元域智脑核心 API
+  version: 0.1.0
+  description: 多人协作阶段的核心契约基线；其他模块按 docs/modules 中的 API 文档逐步纳入。
+servers:
+  - url: /api
+security:
+  - sessionHeader: []
+  - oidcBearer: []
+tags:
+  - { name: Identity, description: 身份、会话与演示角色目录 }
+  - { name: IAM, description: 有效权限、人员角色与数据权限 }
+  - { name: Risk, description: 风险识别、详情和处置 }
+  - { name: Agent, description: 智脑任务、执行确认与运行记录 }
+  - { name: Evidence, description: 智脑证据链与审计追踪 }
+  - { name: Alerting, description: 告警分级、通知与虚拟电话 }
+  - { name: Procurement, description: 采购协同受控动作 }
+  - { name: Simulation, description: Mock 场景、连接器故障与系统数据 }
+  - { name: Governance, description: 元模型与世界模型治理 }
+  - { name: SemanticOperations, description: 独立语义运营任务、证据、巡检、通知与受控报告 }
+  - { name: Platform, description: 平台运行状态与配置 }
+paths:
+  /meta-models/oa-governance/case-replay:
+    get:
+      tags: [Governance]
+      operationId: getOntologyCaseReplay
+      x-page-permission: page.world.view
+      x-button-permission: meta_model.draft.validate
+      description: 读取当前租户与主体最近的只读样本回放报告，不含原始记录。
+      responses:
+        '200': { description: 报告或 not_run, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '403': { description: 无校验权限 }
+    post:
+      tags: [Governance]
+      operationId: runOntologyCaseReplay
+      x-page-permission: page.world.view
+      x-button-permission: meta_model.draft.validate
+      description: 对 1–100 个授权样本运行草稿与已发布定义。身份来自认证请求，不接受正文身份覆盖；样本不提交模型、不执行业务写入。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [candidateFingerprint, cases]
+              properties:
+                candidateFingerprint: { type: string, minLength: 24, maxLength: 24 }
+                cases:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [id, at, expected]
+                    oneOf:
+                      - required: [objectType, record]
+                        properties:
+                          kind: { type: string, const: decision }
+                          expected: { type: string, enum: [needs_review, closed, in_progress, investigation_recommended, review_recommended] }
+                      - required: [kind, knownAt, query, records, relations]
+                        properties:
+                          kind: { type: string, const: relation_history }
+                          expected: { type: string, enum: [related, not_related, conflict, needs_review] }
+                      - required: [kind, knownAt, query, records, mappings]
+                        properties:
+                          kind: { type: string, const: identity_mapping }
+                          expected: { type: string, enum: [same_entity, different_entity, unresolved, conflict, needs_review] }
+                    properties:
+                      id: { type: string }
+                      kind: { type: string, enum: [decision, relation_history, identity_mapping] }
+                      objectType: { type: string }
+                      at: { type: string, format: date-time }
+                      knownAt: { type: string, format: date-time, description: 历史已知截止时间，不早于 at }
+                      expected: { type: string }
+                      record: { $ref: '#/components/schemas/GenericObject' }
+                      query:
+                        oneOf:
+                          - { type: object, required: [from, to, predicate], properties: { from: { $ref: '#/components/schemas/GenericObject' }, to: { $ref: '#/components/schemas/GenericObject' }, predicate: { type: string } } }
+                          - { type: object, required: [left, right], properties: { left: { $ref: '#/components/schemas/GenericObject' }, right: { $ref: '#/components/schemas/GenericObject' } } }
+                      records: { type: array, minItems: 1, maxItems: 200, items: { $ref: '#/components/schemas/GenericObject' } }
+                      relations: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/GenericObject' } }
+                      mappings: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/GenericObject' } }
+      responses:
+        '200': { description: passed 或 failed 报告；失败不是业务执行失败，未执行任何业务动作, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '403': { description: 无校验权限 }
+        '409': { description: 草稿版本已变化或身份不完整 }
+  /health:
+    get:
+      tags: [Platform]
+      security: []
+      operationId: getHealth
+      responses:
+        '200': { description: API 与运行时存储健康状态, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+  /health/live:
+    get:
+      tags: [Platform]
+      security: []
+      operationId: getPlatformLiveness
+      responses:
+        '200': { description: API 进程存活, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+  /health/ready:
+    get:
+      tags: [Platform]
+      security: []
+      operationId: getPlatformReadiness
+      responses:
+        '200': { description: 核心运行依赖就绪, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '503': { description: 核心运行依赖未就绪, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+  /system/capabilities:
+    get:
+      tags: [Platform]
+      operationId: getSystemCapabilities
+      x-page-permission: page.config.view
+      responses:
+        '200': { description: 非敏感平台能力与部署约束, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /auth/local/login:
+    post:
+      tags: [Identity]
+      security: []
+      operationId: loginWithLocalAccount
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LocalLoginRequest' } } }
+      responses:
+        '200': { description: 登录成功并返回身份会话, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /roles:
+    get:
+      tags: [Identity]
+      security: []
+      operationId: listDemoRoles
+      responses:
+        '200': { description: 演示角色目录, content: { application/json: { schema: { $ref: '#/components/schemas/GenericArray' } } } }
+  /access/me:
+    get:
+      tags: [IAM]
+      operationId: getEffectiveAccess
+      responses:
+        '200':
+          description: 当前主体有效权限
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EffectiveAccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /permission-management:
+    get:
+      tags: [IAM]
+      operationId: getPermissionManagementWorkspace
+      x-page-permission: page.permissions.view
+      responses:
+        '200': { description: 组织、人员、角色、权限目录与授权审计工作区, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /permission-management/users/{id}/roles:
+    post:
+      tags: [IAM]
+      operationId: assignPermissionUserRoles
+      x-page-permission: page.permissions.view
+      x-button-permission: permission.user.assign
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PermissionRoleAssignment' } } }
+      responses:
+        '200': { $ref: '#/components/responses/MutationSucceeded' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /permission-management/roles/{id}/policy:
+    post:
+      tags: [IAM]
+      operationId: savePermissionRolePolicy
+      x-page-permission: page.permissions.view
+      x-button-permission: permission.policy.save
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RolePolicyMutation' } } }
+      responses:
+        '200': { $ref: '#/components/responses/MutationSucceeded' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /dashboard:
+    get:
+      tags: [Risk]
+      operationId: getDashboard
+      x-page-permission: page.dashboard.view
+      responses:
+        '200': { description: 当前组织数据域内的运营总览, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /agent/message:
+    post:
+      tags: [Agent]
+      operationId: runAgent
+      x-button-permission: agent.prompt.run
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/LegacyAgentMessageRequest'
+                - $ref: '#/components/schemas/AgentMessageRequest'
+      responses:
+        '200':
+          description: Agent 结果；业务拒绝也保持稳定展示契约
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /agent/execute:
+    post:
+      tags: [Agent]
+      operationId: executeAgentCommand
+      x-button-permission: agent.command.execute
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgentExecuteRequest' }
+      responses:
+        '200': { description: 服务端执行回执 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /agent/desktop-tools:
+    get:
+      tags: [Agent]
+      operationId: listAgentDesktopTools
+      responses:
+        '200': { description: 文本、Word、Excel、HTTPS 导航等端侧工具的风险等级、启用状态及严格输入 Schema, content: { application/json: { schema: { $ref: '#/components/schemas/GenericArray' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /agent/desktop-receipt:
+    post:
+      tags: [Agent]
+      operationId: completeAgentDesktopExecution
+      x-button-permission: agent.command.execute
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [commandId, runId, dispatchId, receipt]
+              properties:
+                commandId: { type: string }
+                runId: { type: string }
+                dispatchId: { type: string }
+                receipt: { $ref: '#/components/schemas/GenericObject' }
+      responses:
+        '200': { description: 端侧执行结果、产物证据与闭环后的哈希证据链 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /agent/desktop-endpoint:
+    get:
+      tags: [Agent]
+      operationId: getAgentDesktopEndpointStatus
+      responses:
+        '200': { description: 当前用户、会话和设备绑定的端侧在线、版本及服务器信任状态, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /agent/desktop-endpoint/heartbeat:
+    post:
+      tags: [Agent]
+      operationId: registerAgentDesktopEndpointHeartbeat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [protocolVersion, endpointId, appVersion, platform, packaged, trustClaim, keyProtection, capabilityManifestHash, observedAt, publicKey, signature]
+              properties:
+                protocolVersion: { type: string, const: endpoint-runtime.v1 }
+                endpointId: { type: string, pattern: '^endpoint-[0-9a-f-]{36}$' }
+                appVersion: { type: string }
+                platform: { type: string, enum: [win32, darwin, linux] }
+                packaged: { type: boolean }
+                trustClaim: { type: string, enum: [development_untrusted, packaged_unverified] }
+                keyProtection: { type: string, enum: [file_system, os_user_bound] }
+                capabilityManifestHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+                observedAt: { type: string, format: date-time }
+                publicKey: { type: string, description: Ed25519 SPKI DER 的 Base64URL 编码 }
+                signature: { type: string, description: 固定字段心跳载荷的 Ed25519 签名 }
+      responses:
+        '200': { description: 心跳签名有效，返回服务器评估后的在线、版本和信任状态 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /agent/runtime-tasks:
+    get:
+      tags: [Agent]
+      operationId: listAgentRuntimeTasks
+      responses:
+        '200': { description: 当前用户、会话和设备绑定的持久化长任务队列 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /agent/runtime-tasks/{id}/{action}:
+    post:
+      tags: [Agent]
+      operationId: controlAgentRuntimeTask
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
+        - name: action
+          in: path
+          required: true
+          schema: { type: string, enum: [pause, resume, cancel, claim] }
+      responses:
+        '200': { description: 已原子更新任务状态；claim 仅向可信在线端点返回短时派发 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 当前状态不允许该操作或 Worker 领取失败 }
+  /agent/conversations:
+    get:
+      tags: [Agent]
+      operationId: listAgentConversations
+      responses:
+        '200': { description: 当前租户和主体可见的并行任务窗口, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Agent]
+      operationId: createAgentConversation
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { title: { type: string, maxLength: 120 } } } } }
+      responses:
+        '201': { description: 已创建任务窗口, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /agent/conversations/{id}:
+    get:
+      tags: [Agent]
+      operationId: getAgentConversation
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      responses:
+        '200': { description: 已按主体边界裁剪的任务窗口, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /agent/conversations/{id}/pin:
+    post:
+      tags: [Agent]
+      operationId: pinAgentConversationGoal
+      x-button-permission: agent.prompt.run
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      responses:
+        '200': { description: 已将当前用户明确固定的任务目标写入长期记忆；企业数据和模型推测不会写入 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /agent/runs:
+    get:
+      tags: [Agent]
+      operationId: listAgentRuns
+      responses:
+        '200': { description: 当前有效角色和主体可见的运行记录, content: { application/json: { schema: { $ref: '#/components/schemas/GenericArray' } } } }
+  /agent/memory:
+    get:
+      tags: [Agent]
+      operationId: listAgentLongTermMemory
+      responses:
+        '200': { description: 当前主体可查看和删除的长期用户目标，不包含模型推测或系统凭据, content: { application/json: { schema: { $ref: '#/components/schemas/GenericArray' } } } }
+  /agent/memory/{id}:
+    delete:
+      tags: [Agent]
+      operationId: forgetAgentLongTermMemory
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      responses:
+        '200': { description: 用户已删除自己的长期记忆 }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /agent/learning-profile:
+    get:
+      tags: [Agent]
+      operationId: getAgentLearningProfile
+      responses:
+        '200': { description: 当前主体的学习授权、最小化工作流信号和企业数据使用边界, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Agent]
+      operationId: updateAgentLearningProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [settings]
+              properties:
+                expectedVersion: { type: [integer, 'null'], minimum: 1 }
+                settings:
+                  type: object
+                  additionalProperties: false
+                  minProperties: 1
+                  properties:
+                    personalizationEnabled: { type: boolean }
+                    workflowLearningEnabled: { type: boolean }
+      responses:
+        '200': { description: 学习授权已更新；关闭工作流学习会同步清除个人学习信号 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { description: 设置版本冲突 }
+  /agent/learning-signals/{id}:
+    delete:
+      tags: [Agent]
+      operationId: forgetAgentWorkflowLearningSignal
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      responses:
+        '200': { description: 用户已撤销自己的工作流学习信号 }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /agent/learning-signals/{id}/feedback:
+    post:
+      tags: [Agent]
+      operationId: recordAgentWorkflowLearningFeedback
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [helpful]
+              properties:
+                helpful: { type: boolean }
+      responses:
+        '200': { description: 已记录用户对个人工作流建议的反馈；负反馈会抑制该建议 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /agent/orchestrations:
+    get:
+      tags: [Agent]
+      operationId: listAgentOrchestrations
+      responses:
+        '200': { description: 当前主体可见的单次和周期任务编排, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+    post:
+      tags: [Agent]
+      operationId: createAgentOrchestration
+      x-button-permission: agent.prompt.run
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgentOrchestrationRequest' }
+      responses:
+        '201': { description: 编排已创建；只读和分析步骤可自动运行，提案步骤仍需本人确认 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /agent/orchestrations/{id}/{action}:
+    post:
+      tags: [Agent]
+      operationId: controlAgentOrchestration
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
+        - { name: action, in: path, required: true, schema: { enum: [pause, resume, cancel] } }
+      responses:
+        '200': { description: 编排状态已更新 }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /agent/traces:
+    get:
+      tags: [Evidence]
+      operationId: listAgentEvidenceTraces
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200': { description: 当前主体可见的证据链列表, content: { application/json: { schema: { $ref: '#/components/schemas/GenericArray' } } } }
+  /agent/traces/{id}:
+    get:
+      tags: [Evidence]
+      operationId: getAgentEvidenceTrace
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      responses:
+        '200': { description: 单次执行的完整证据和审计追踪, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /risk-cases:
+    get:
+      tags: [Risk]
+      operationId: listRiskCases
+      x-page-permission: page.risks.view
+      responses:
+        '200':
+          description: 当前数据域内的风险列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /risk-cases/{id}:
+    get:
+      tags: [Risk]
+      operationId: getRiskCase
+      x-page-permission: page.risks.view
+      x-button-permission: risk.detail.view
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: 已按组织和字段策略裁剪的风险 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /notifications:
+    get:
+      tags: [Alerting]
+      operationId: listNotifications
+      responses:
+        '200': { description: 当前主体可见的告警通知, content: { application/json: { schema: { $ref: '#/components/schemas/GenericArray' } } } }
+  /alerting/workspace:
+    get:
+      tags: [Alerting]
+      operationId: getAlertingWorkspace
+      x-page-permission: page.channels.view
+      responses:
+        '200': { description: 告警策略、值班表、外呼提供商和审计工作区, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /alerting/configuration:
+    post:
+      tags: [Alerting]
+      operationId: saveAlertingConfiguration
+      x-button-permission: notification.policy.publish
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '200': { $ref: '#/components/responses/MutationSucceeded' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /alerting/simulations:
+    post:
+      tags: [Alerting]
+      operationId: simulateAlertRoute
+      x-button-permission: notification.simulate
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '200': { $ref: '#/components/responses/MutationSucceeded' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /procurement/scenario:
+    get:
+      tags: [Procurement]
+      operationId: getProcurementScenario
+      responses:
+        '200': { description: Mock 采购协同场景, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+  /procurement/launch:
+    post:
+      tags: [Procurement]
+      operationId: launchProcurement
+      x-button-permission: procurement.launch
+      responses:
+        '200': { $ref: '#/components/responses/MutationSucceeded' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /procurement/approve:
+    post:
+      tags: [Procurement]
+      operationId: approveProcurement
+      x-button-permission: procurement.approve
+      responses:
+        '200': { $ref: '#/components/responses/MutationSucceeded' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /simulation/overview:
+    get:
+      tags: [Simulation]
+      operationId: getSimulationOverview
+      responses:
+        '200': { description: Mock 连接器、场景、审批与事件流, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+  /simulation/scenarios/{id}/run:
+    post:
+      tags: [Simulation]
+      operationId: runSimulationScenario
+      x-button-permission: simulation.run
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      responses:
+        '200': { $ref: '#/components/responses/MutationSucceeded' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /system-data/{systemId}/records:
+    get:
+      tags: [Simulation]
+      operationId: listSystemDataRecords
+      parameters:
+        - { name: systemId, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        '200': { description: 按系统与数据权限过滤的模拟业务记录, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /key-center/overview:
+    get:
+      tags: [Platform]
+      operationId: getKeyCenterOverview
+      responses:
+        '200': { description: 脱敏后的密钥策略和租约状态, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+  /domain-events/outbox:
+    get:
+      tags: [Platform]
+      operationId: listDomainEventOutbox
+      x-page-permission: page.config.view
+      x-button-permission: event.outbox.view
+      parameters:
+        - { name: status, in: query, schema: { enum: [pending, processing, published, dead_letter] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: 当前租户的领域事件及送达契约
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, metrics, consumers, deliveryContract]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/DomainEvent' } }
+                  metrics: { $ref: '#/components/schemas/GenericObject' }
+                  consumers: { type: array, items: { $ref: '#/components/schemas/GenericObject' } }
+                  deliveryContract: { $ref: '#/components/schemas/GenericObject' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /domain-events/contracts:
+    get:
+      tags: [Platform]
+      operationId: listDomainEventContracts
+      x-page-permission: page.config.view
+      x-button-permission: event.outbox.view
+      responses:
+        '200': { description: 已注册的领域事件版本与必填载荷字段, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /domain-events/outbox/{id}/replay:
+    post:
+      tags: [Platform]
+      operationId: replayDomainEventDeadLetter
+      x-button-permission: event.outbox.replay
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 300 }
+      responses:
+        '200': { description: 死信已恢复为待消费状态, content: { application/json: { schema: { $ref: '#/components/schemas/DomainEvent' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 事件不存在或当前状态不可重放, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /semantic-operations/tasks:
+    get:
+      tags: [SemanticOperations]
+      operationId: listSemanticOperationsTasks
+      responses:
+        '200': { description: 当前身份可见的连续语义任务, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+    post:
+      tags: [SemanticOperations]
+      operationId: createSemanticOperationsTask
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SemanticTaskRequest' } } }
+      responses:
+        '201': { description: 已创建只读结果或待确认语义任务, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+  /semantic-operations/tasks/{id}/trace:
+    get:
+      tags: [SemanticOperations, Evidence]
+      operationId: getSemanticOperationsTaskTrace
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: 当前身份可见的哈希证据链, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /semantic-operations/tasks/{id}/confirmation:
+    post:
+      tags: [SemanticOperations]
+      operationId: confirmSemanticOperationsTask
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: 签发一次性、指纹绑定的确认凭证, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /semantic-operations/tasks/{id}/execute:
+    post:
+      tags: [SemanticOperations]
+      operationId: executeSemanticOperationsTask
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [confirmationToken], properties: { confirmationToken: { type: string } } } } } }
+      responses:
+        '200': { description: 已执行受控语义命令, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /semantic-operations/inspections:
+    get:
+      tags: [SemanticOperations]
+      operationId: listSemanticInspectionSchedules
+      responses: { '200': { description: 只读巡检计划, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } } }
+    post:
+      tags: [SemanticOperations]
+      operationId: createSemanticInspectionSchedule
+      x-button-permission: meta_model.draft.validate
+      responses: { '201': { description: 已创建只读巡检计划, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } } }
+  /semantic-operations/notifications:
+    get:
+      tags: [SemanticOperations]
+      operationId: listSemanticOperationsNotifications
+      responses: { '200': { description: 当前身份的语义运营通知, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } } }
+  /semantic-operations/tasks/{id}/report-export:
+    post:
+      tags: [SemanticOperations, Evidence]
+      operationId: recordSemanticOperationsReportExport
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: 已记录桌面端受控导出哈希回执, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } } }
+components:
+  securitySchemes:
+    sessionHeader:
+      type: apiKey
+      in: header
+      name: x-oa-session
+    oidcBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 企业 OIDC Access Token；服务端通过 JWKS、issuer、audience、租户和算法白名单验证。
+  parameters:
+    ResourceId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+  schemas:
+    GenericObject:
+      type: object
+      additionalProperties: true
+    GenericArray:
+      type: array
+      items: { $ref: '#/components/schemas/GenericObject' }
+    DomainEvent:
+      type: object
+      required: [eventId, type, version, tenantId, aggregateType, aggregateId, status, occurredAt]
+      properties:
+        eventId: { type: string, format: uuid }
+        type: { type: string }
+        version: { type: integer, minimum: 1 }
+        tenantId: { type: string }
+        organizationId: { type: [string, 'null'] }
+        aggregateType: { type: string }
+        aggregateId: { type: string }
+        correlationId: { type: [string, 'null'] }
+        causationId: { type: [string, 'null'] }
+        actor: { $ref: '#/components/schemas/GenericObject' }
+        payload: { $ref: '#/components/schemas/GenericObject' }
+        status: { enum: [pending, processing, published, dead_letter] }
+        attempts: { type: integer, minimum: 0 }
+        replayCount: { type: integer, minimum: 0 }
+        lastReplay: { type: [object, 'null'], additionalProperties: true }
+        occurredAt: { type: string, format: date-time }
+    LocalLoginRequest:
+      type: object
+      required: [account, password]
+      properties:
+        account: { type: string, minLength: 1 }
+        password: { type: string, minLength: 1, writeOnly: true }
+    PermissionRoleAssignment:
+      type: object
+      required: [version, roleIds, orgUnitId]
+      properties:
+        version: { type: integer, minimum: 1 }
+        roleIds: { type: array, minItems: 1, uniqueItems: true, items: { type: string } }
+        orgUnitId: { type: string }
+    RolePolicyMutation:
+      type: object
+      required: [version, menuIds, pagePermissionIds, buttonPermissionIds, dataScope]
+      properties:
+        version: { type: integer, minimum: 1 }
+        menuIds: { type: array, uniqueItems: true, items: { type: string } }
+        pagePermissionIds: { type: array, uniqueItems: true, items: { type: string } }
+        buttonPermissionIds: { type: array, uniqueItems: true, items: { type: string } }
+        dataScope:
+          type: object
+          required: [mode]
+          properties:
+            mode: { enum: [self, current_org, org_and_descendants, selected_orgs, all] }
+            organizationIds: { type: array, uniqueItems: true, items: { type: string } }
+    ApiError:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+        code: { type: [string, 'null'] }
+        requestId: { type: [string, 'null'] }
+        details: { type: object, additionalProperties: true }
+    EffectiveAccess:
+      type: object
+      required: [roleIds, menuIds, pagePermissionIds, buttonPermissionIds, allowedOrgIds]
+      properties:
+        primaryRoleId: { type: [string, 'null'] }
+        roleIds: { type: array, items: { type: string } }
+        menuIds: { type: array, items: { type: string } }
+        pagePermissionIds: { type: array, items: { type: string } }
+        buttonPermissionIds: { type: array, items: { type: string } }
+        allowedOrgIds: { type: array, items: { type: string } }
+      additionalProperties: true
+    AgentInput:
+      type: object
+      properties:
+        text: { type: string }
+        conversationId: { type: string }
+        attachments:
+          type: array
+          items:
+            type: object
+            required: [name, mimeType, dataUrl]
+            properties:
+              name: { type: string }
+              mimeType: { type: string }
+              dataUrl: { type: string }
+    SemanticTaskRequest:
+      type: object
+      properties:
+        text: { type: string, maxLength: 4000 }
+        parentTaskId: { type: string }
+        attachments:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            required: [name, mimeType, dataUrl]
+            properties:
+              name: { type: string }
+              mimeType: { type: string }
+              dataUrl: { type: string }
+    AgentMessageRequest:
+      type: object
+      required: [input]
+      properties:
+        input: { $ref: '#/components/schemas/AgentInput' }
+    LegacyAgentMessageRequest:
+      type: object
+      properties:
+        text: { type: string }
+        conversationId: { type: string }
+        attachments: { type: array, items: { type: object } }
+    AgentExecuteRequest:
+      type: object
+      required: [runId, commandId, confirmationToken]
+      properties:
+        runId: { type: string }
+        commandId: { type: string }
+        confirmationToken: { type: string }
+    AgentOrchestrationRequest:
+      type: object
+      additionalProperties: false
+      required: [goal, schedule, steps]
+      properties:
+        title: { type: string, maxLength: 120 }
+        goal: { type: string, minLength: 1, maxLength: 2000 }
+        schedule:
+          type: object
+          additionalProperties: true
+          required: [type]
+          properties:
+            type: { enum: [once, interval] }
+            runAt: { type: string, format: date-time }
+            startAt: { type: string, format: date-time }
+            intervalMinutes: { type: integer, minimum: 15, maximum: 43200 }
+            timezone: { type: string, maxLength: 80 }
+        steps:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, title, mode]
+            properties:
+              id: { type: string, maxLength: 80 }
+              title: { type: string, maxLength: 160 }
+              mode: { enum: [read, analysis, proposal] }
+              dependsOn: { type: array, uniqueItems: true, items: { type: string } }
+    AgentResponse:
+      type: object
+      required: [text, agent, evidence, plan, command]
+      properties:
+        text: { type: string }
+        agent: { type: object, additionalProperties: true }
+        evidence: { type: array, items: { type: object, additionalProperties: true } }
+        plan: { type: array, items: { type: object, additionalProperties: true } }
+        command: { oneOf: [{ type: 'null' }, { type: object, additionalProperties: true }] }
+        runId: { type: [string, 'null'] }
+      additionalProperties: true
+  responses:
+    MutationSucceeded:
+      description: 受控业务动作执行成功并返回审计信息
+      content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } }
+    BadRequest:
+      description: 请求格式错误
+      content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } }
+    Unauthorized:
+      description: 未认证或会话失效
+      content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } }
+    Forbidden:
+      description: 页面、按钮、数据域或业务权限拒绝
+      content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } }
+    Conflict:
+      description: 乐观锁版本冲突或状态冲突
+      content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } }
+    NotFound:
+      description: 资源不存在或不可见
+      content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } }

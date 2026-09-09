@@ -1,0 +1,1 @@
+{ "$schema": "../gen/schemas/mobile-schema.json", "identifier": "mobile-default", "description": "移动端默认能力；录音与推送在生产构建中由专用最小权限插件启用。", "windows": ["main"], "platforms": ["iOS", "android"], "permissions": ["core:default"] }

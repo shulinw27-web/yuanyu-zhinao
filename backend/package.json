@@ -1,0 +1,28 @@
+{
+  "name": "healthcare-ai-demo-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/app.js",
+    "start": "node src/app.js",
+    "migrate:postgres": "node scripts/migrate-postgres.mjs",
+    "migrate:verify": "node scripts/verify-postgres-migrations.mjs",
+    "rollback:postgres": "node scripts/rollback-postgres.mjs",
+    "reset:runtime": "node scripts/reset-runtime-state.mjs"
+  },
+  "dependencies": {
+    "@healthcare-ai/api-contracts": "*",
+    "@napi-rs/canvas": "0.1.100",
+    "amqplib": "^2.0.1",
+    "jose": "^6.2.10",
+    "jszip": "^3.10.1",
+    "kafkajs": "^2.2.4",
+    "pdfjs-dist": "^5.4.149",
+    "pg": "^8.23.0",
+    "xml-js": "1.6.11",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "pg-mem": "^3.0.14"
+  }
+}

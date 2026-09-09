@@ -1,0 +1,28 @@
+[
+  {
+    "id": "before-late-correction", "kind": "relation_history",
+    "at": "2026-09-03T00:00:00Z", "knownAt": "2026-09-03T00:00:00Z", "expected": "related",
+    "query": { "from": { "objectType": "Material", "id": "M1" }, "to": { "objectType": "RawMaterialBatch", "id": "B1" }, "predicate": "hasBatch" },
+    "records": [
+      { "id": "M1", "objectType": "Material", "system": "ERP", "tenantId": "demo-enterprise", "organizationId": "org-quality-dept", "classification": "质量受限", "version": "synthetic-1", "occurredAt": "2026-09-01T00:00:00Z" },
+      { "id": "B1", "objectType": "RawMaterialBatch", "system": "WMS", "tenantId": "demo-enterprise", "organizationId": "org-quality-dept", "classification": "质量受限", "version": "synthetic-1", "occurredAt": "2026-09-01T00:00:00Z" }
+    ],
+    "relations": [
+      { "id": "synthetic-link-1", "version": "1", "system": "ERP", "tenantId": "demo-enterprise", "organizationId": "org-quality-dept", "classification": "质量受限", "occurredAt": "2026-09-01T00:00:00Z", "from": { "objectType": "Material", "id": "M1" }, "to": { "objectType": "RawMaterialBatch", "id": "B1" }, "predicate": "hasBatch", "validFrom": "2026-09-01T00:00:00Z", "validTo": null, "recordedAt": "2026-09-02T00:00:00Z", "provenanceType": "observed", "evidenceIds": ["synthetic-evidence-1"] },
+      { "id": "synthetic-link-1", "version": "2", "system": "ERP", "tenantId": "demo-enterprise", "organizationId": "org-quality-dept", "classification": "质量受限", "occurredAt": "2026-09-01T00:00:00Z", "from": { "objectType": "Material", "id": "M1" }, "to": { "objectType": "RawMaterialBatch", "id": "B1" }, "predicate": "hasBatch", "validFrom": "2026-09-01T00:00:00Z", "validTo": "2026-09-03T00:00:00Z", "recordedAt": "2026-09-05T00:00:00Z", "provenanceType": "confirmed", "evidenceIds": ["synthetic-correction-2"] }
+    ]
+  },
+  {
+    "id": "after-late-correction", "kind": "relation_history",
+    "at": "2026-09-03T00:00:00Z", "knownAt": "2026-09-06T00:00:00Z", "expected": "not_related",
+    "query": { "from": { "objectType": "Material", "id": "M1" }, "to": { "objectType": "RawMaterialBatch", "id": "B1" }, "predicate": "hasBatch" },
+    "records": [
+      { "id": "M1", "objectType": "Material", "system": "ERP", "tenantId": "demo-enterprise", "organizationId": "org-quality-dept", "classification": "质量受限", "version": "synthetic-1", "occurredAt": "2026-09-01T00:00:00Z" },
+      { "id": "B1", "objectType": "RawMaterialBatch", "system": "WMS", "tenantId": "demo-enterprise", "organizationId": "org-quality-dept", "classification": "质量受限", "version": "synthetic-1", "occurredAt": "2026-09-01T00:00:00Z" }
+    ],
+    "relations": [
+      { "id": "synthetic-link-1", "version": "1", "system": "ERP", "tenantId": "demo-enterprise", "organizationId": "org-quality-dept", "classification": "质量受限", "occurredAt": "2026-09-01T00:00:00Z", "from": { "objectType": "Material", "id": "M1" }, "to": { "objectType": "RawMaterialBatch", "id": "B1" }, "predicate": "hasBatch", "validFrom": "2026-09-01T00:00:00Z", "validTo": null, "recordedAt": "2026-09-02T00:00:00Z", "provenanceType": "observed", "evidenceIds": ["synthetic-evidence-1"] },
+      { "id": "synthetic-link-1", "version": "2", "system": "ERP", "tenantId": "demo-enterprise", "organizationId": "org-quality-dept", "classification": "质量受限", "occurredAt": "2026-09-01T00:00:00Z", "from": { "objectType": "Material", "id": "M1" }, "to": { "objectType": "RawMaterialBatch", "id": "B1" }, "predicate": "hasBatch", "validFrom": "2026-09-01T00:00:00Z", "validTo": "2026-09-03T00:00:00Z", "recordedAt": "2026-09-05T00:00:00Z", "provenanceType": "confirmed", "evidenceIds": ["synthetic-correction-2"] }
+    ]
+  }
+]

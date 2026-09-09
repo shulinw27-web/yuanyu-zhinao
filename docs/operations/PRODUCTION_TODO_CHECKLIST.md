@@ -1,0 +1,383 @@
+# 元域智脑生产化与投产后待办 Checklist
+
+> 文档版本：v1.6  
+> 更新日期：2026-09-09  
+> 适用范围：管理 Web、智脑 Web、移动端、Electron、Node API、Agent Runtime、Key Center、语义服务、领域事件 Worker，以及 OA/MES/LIMS/QMS/ERP/OMS 等企业连接器。  
+> 当前结论：项目已具备可运行的 Mock 演练与生产适配边界，但**尚不满足真实生产上线条件**。所有 P0 阻断项关闭并完成签字前，不得连接生产系统或处理真实敏感数据。
+
+## 1. 使用规则
+
+2026-09-09 本体增量已有开发与本地回归，见 [验收记录](../development/ONTOLOGY_MODELING_ACCEPTANCE.md)。下面独立列出其后续工作，不以合成案例通过关闭生产事项。
+
+### 本体业务闭环后续项
+
+- [x] 通用场景/OA 校验分离、目标与问题录入、粒度和关系证据元数据。
+- [x] 内置质量处置判断、只读合成回放、发布定义版本关联和模拟回执澄清。
+- [x] 质量判断直接字段映射、受限等级/新鲜度参数、版本指纹与界面配置；禁止任意代码直执行。
+- [x] 1–100 条授权样本回放、草稿/发布版本差异、主体隔离和可选发布门禁；不持久化原始 payload。
+- [x] 人工与 Agent 发布共用固定版本、回执指纹核对、并发拦截和只读对账重试；草稿漂移不误发布。
+- [ ] 扩充已注册业务判断场景、受控值转换与通用参数审批；当前仅质量处置判断，不是通用规则平台。
+- [ ] 模型到受控工具的完整适配和跨模型复用；当前声明绑定不会自动增加可执行工具。
+- [x] 有界跨系统编号显式映射核验、来源命名空间隔离、类型/粒度约束、双时间修订与冲突识别；接入运营端回放，不自动合并。
+- [ ] 企业主数据/批次/库存项历史拆分、权威编号注册库及跨系统映射迁移；现有锚点编号保持兼容。
+- [x] 有界实例样本的有效/记录时间查询、修订/撤回、基数与修订竞争冲突检查；接入版本回放，不写回事实。
+- [ ] 企业全量实例历史采集、数据库时态索引、多跳查询及跨系统冲突处置验收。
+- [ ] 外部消费者依赖扫描、迁移演练和平台/独立语义服务跨服务发布一致性。
+- [ ] 真实 ERP/WMS 回执对账、幂等重试、补偿和业务完成状态验收。
+- [ ] 历史业务案例与真实多轮对话回放，按误判、重复动作、人工修改及处理时长验收。
+
+新增样本回放是本地开发能力，企业历史采集、真实性证明、全量实例时态、跨系统身份迁移、外部自动补偿仍未完成。不能用 Semantica 发布对账代替 ERP/WMS 业务回执验收。最新证据与测试数量见上方验收记录。
+
+### 其他最新增量
+
+2026-09-08 [身份源适配与本地回归](../development/IDENTITY_PROVIDER_ACCEPTANCE_2026-09-08.md)已完成开发基线。真实企业身份、账号绑定核验、目录停用联动、宿主单点注销及跨节点配置发布仍需企业验收，不据此关闭生产身份接入事项。
+
+2026-09-07 双端会话与语义理解专项已完成开发修复与 Mock/方舟回归，见 [专项验收记录](../development/AGENT_INTELLIGENCE_REPAIR_2026-09-07.md)。这不关闭下列企业环境、真实连接器、多模态审批和生产上线事项。
+
+同日补充 [多模态开发与合成验证](../development/AGENT_MULTIMODAL_ACCEPTANCE_2026-09-07.md)。支持格式的解析/视觉路径、截断提示及原图独立准入已补齐；企业 AV/DLP 服务、真实材料验收及图片出网审批仍未关闭。测试中的合成哈希扫描替身不能作为生产依赖。
+
+- `[ ]`：未完成；`[x]`：已有开发基线，不代表已完成企业环境验收。
+- P0：生产阻断项；P1：首批上线必须完成或由风险责任人书面接受；P2：稳定性与规模化优化项。
+- 每个事项关闭时必须附工单、测试报告、截图、配置版本、审计记录或签字单之一，不能只口头确认。
+- 责任角色是默认建议，可在项目 RACI 中重新分配，但必须落实到具体姓名和替补人。
+- 任何涉及真实凭据、个人信息、商业秘密或生产数据的材料不得写入 Git、普通工单正文和聊天记录。
+
+## 2. 当前开发基线
+
+- [x] Mock OA、MES、LIMS、QMS、ERP、OMS 数据和状态化流程可用于演练。
+- [x] 管理 Web、智脑 Web、移动端和 Electron 共用 Agent SDK/Workbench 核心协议。
+- [x] 页面、按钮、多角色和组织数据权限具备 Demo 闭环。
+- [x] OIDC Bearer 已具备 JWKS、issuer、audience、tenant、算法及时效校验边界。
+- [x] PostgreSQL Schema、异步 Repository、身份会话灰度能力和 IAM 异步事务底座已实现。
+- [x] 领域事件 Outbox、幂等 Worker、Kafka/RabbitMQ/Webhook 适配边界已实现。
+- [x] Key Center 已具备远程凭据 Broker、opaque handle、超时失败关闭和就绪探针。
+- [x] Agent 提示词安全、回答治理、确认执行、证据链、服务端工具 Schema、持久任务和可撤销长期记忆已形成开发基线；自动化数量以对应运行记录为准。
+- [x] 语义运营端已形成独立认证与设备会话、多附件、共享 SDK、执行追踪、连续任务、巡检通知和受控报告导出的开发基线。
+
+以上勾选项仍需要在企业测试环境使用真实基础设施重新验证。
+
+### 2.1 2026-09-01 仓库核验记录
+
+- 本次按“实现代码 + 自动化测试 + 对应技术文档”三类证据复核；仅有设计说明、仅有 Mock 页面或依赖企业侧资源的事项不勾选。
+- 当前共有 43 个 `[x]` 开发基线事项；后续只在实现、专项测试和文档证据同时存在时勾选。
+- 自动化证据以 `npm run test:all` 为统一入口；2026-09-01 最近一次完整基线为 231/231 通过。详细条目同时注明专项测试。`[x]` 仍不代表企业环境验收或生产签字。
+- 真实 IdP、PostgreSQL/Redis/Broker 集群、Vault/KMS/HSM、电话 Provider、代码签名、MDM、SIEM、WORM、企业网络及真实连接器相关事项保持未完成。
+- 2026-09-01 开始按“清单校准、安全头、CI、安全治理、连接器、审计、数据库、多模态、多端兼容、非功能测试、生产文档”的顺序补齐仍可在仓库内完成的开发项；真实企业基础设施继续保留为外部验收边界。
+- 本轮可在仓库内独立实现、自动化验证并形成文档证据的事项已全部闭环。剩余未勾选项需要企业组织决策或外部环境，包括合规/范围签字，企业 IdP/HR 主数据，Vault/KMS/HSM、WORM、SIEM 和高可用集群，真实 OA/ERP/MES/WMS/LIMS/QMS/OMS 与通知 Provider，证书/客户端签名/MDM，以及预生产 UAT、渗透、灾备、混沌和 72 小时运行验收；这些事项不能用 Mock、代码适配器或开发机测试替代。
+
+## 3. 生产启动前的项目治理
+
+最新仓库增量见 [Agent 改进记录第四批](../development/AGENT_RUNTIME_IMPROVEMENT_2026-09-06.md)：298 项自动化通过。9 月 1 日核验段落只记录当时状态，不代表后续不能继续补充开发能力。真实模型、企业环境和桌面实机验收均不能由该数量推导为通过。
+
+### 3.1 范围、责任与合规
+
+- [ ] **P0** 确认首期上线业务范围、组织范围、用户数量、并发量、数据范围和明确不做事项。（责任：产品负责人；证据：范围基线签字）
+- [ ] **P0** 为身份、Agent、审计、告警、连接器、数据平台和客户端指定模块 Owner 与替补人。（责任：项目经理；证据：RACI）
+- [ ] **P0** 明确生产数据 Owner、系统 Owner、审批人、运维人、安全责任人和审计责任人。（责任：项目经理/信息安全；证据：责任矩阵）
+- [ ] **P0** 完成个人信息、商业秘密、健康相关数据和监管数据分类分级。（责任：数据治理/法务；证据：数据分类清单）
+- [ ] **P0** 完成隐私影响评估、AI 使用合规评估、跨境传输判断和供应商合规审查。（责任：法务/合规；证据：评估报告）
+- [ ] **P0** 明确 Agent 可以读取、建议、创建草稿、提交审批和禁止自动执行的动作边界。（责任：业务 Owner/风控；证据：动作白名单）
+- [ ] **P0** 定义 P0/P1/P2 告警的业务口径、响应时限、升级路径和最终责任人。（责任：业务 Owner/运维；证据：SLA/OLA）
+- [ ] **P1** 建立需求、架构、API、数据模型和配置变更的评审流程。（责任：架构负责人；证据：变更流程）
+- [ ] **P1** 建立生产发布审批、紧急变更和回滚授权机制。（责任：运维负责人；证据：发布制度）
+- [ ] **P1** 完成第三方模型、电话、短信、推送、云服务和开源许可证清单。（责任：采购/法务/架构；证据：软件物料清单）
+
+## 4. P0 生产技术改造
+
+### 4.1 PostgreSQL、缓存与运行状态
+
+- [ ] **P0** 把访问控制、角色目录、权限管理路由和全部 IAM 读取者迁移到异步 IAM 应用服务。（责任：IAM 后端；证据：代码评审与回归报告）
+- [ ] **P0** 确保 IAM 聚合、权限审计和 Outbox 使用同一个 PostgreSQL 事务，禁止跨库伪原子提交。（责任：IAM/平台后端；证据：事务故障测试）
+- [ ] **P0** 将 Agent Run、Evidence Trace、确认 Token、工作项、风险、告警、模型治理和领域 Outbox 从同步 SQLite 迁移到 PostgreSQL。（责任：各模块后端；证据：迁移清单）
+- [ ] **P0** 拆分 JSONB 迁移桥梁，建立带 tenant key、外键、唯一键和业务索引的正式领域表。（责任：数据架构师；证据：DDL 评审）
+- [ ] **P0** 为所有租户数据启用数据库 RLS 或等效强制隔离，并补充跨租户拒绝测试。（责任：数据库/安全；证据：RLS 测试报告）
+- [ ] **P0** 完成数据库 TLS、应用账号最小权限、密码轮换、连接池和慢查询阈值配置。（责任：DBA/平台；证据：配置审计）
+- [x] **P0（开发基线已完成）** 建立正式迁移工具、版本表、checksum 校验、向前迁移、有界回滚和应用/Schema 兼容策略。（仓库证据：`backend/scripts/migrate-postgres.mjs`、`backend/scripts/verify-postgres-migrations.mjs`、`backend/scripts/rollback-postgres.mjs`、`backend/test/postgres-migration-governance.test.js`、`docs/operations/DEPLOYMENT_ROLLBACK_RUNBOOK.md`；生产仍需在预生产 PostgreSQL 演练）
+- [ ] **P0** 执行 Mock SQLite 到预生产 PostgreSQL 的全量迁移和校验演练，但不得把 Mock 数据混入生产事实库。（责任：DBA/QA；证据：校验报告）
+- [ ] **P0** 引入 Redis 或等效服务承担分布式限流、短期撤销、幂等辅助和缓存，不能继续使用进程内 Map。（责任：平台后端；证据：多节点测试）
+- [x] **P1（开发基线已完成）** 已实现连接池/语句超时配置和 PostgreSQL 序列化冲突、死锁有界重试。（仓库证据：`backend/src/repositories/postgres-runtime-repository.js`、`backend/test/postgres-migration-governance.test.js`；生产仍需真实集群故障注入与连接耗尽验证）
+- [ ] **P1** 制定数据保留、冷热分层、归档、删除例外和 Legal Hold 策略。（责任：数据治理/DBA；证据：保留策略）
+
+### 4.2 企业身份、人员与权限
+
+- [ ] **P0** 获取企业 IdP 的 issuer、client、JWKS、tenant、回调域、Scope 和测试账号。（责任：IAM/企业 IT；证据：接入确认单）
+- [ ] **P0** 完成 Authorization Code + PKCE 登录、静默续期、全局注销和异常会话处理。（责任：IAM/客户端；证据：端到端测试）
+- [ ] **P0** 对权限配置、生产写入、密钥管理和死信重放启用 MFA/step-up。（责任：IAM/安全；证据：高风险动作测试）
+- [ ] **P0** 接入 HR/OA 权威人员、组织、岗位、在离职和调岗数据同步。（责任：IAM/集成；证据：同步对账）
+- [ ] **P0** 定义账号唯一映射规则，处理同名、邮箱变更、工号复用、外包和服务账号。（责任：IAM/数据治理；证据：映射规则）
+- [ ] **P0** 生产环境彻底关闭 Mock 登录、Demo 密码、Demo Role Header 和角色基线 fallback。（责任：IAM/安全；证据：启动配置与渗透测试）
+- [ ] **P0** 建立人员/角色/组织变更后的会话集中撤销和策略缓存精准失效。（责任：IAM 后端；证据：撤权时延测试）
+- [ ] **P0** 验证 SELF、CURRENT_ORG、ORG_AND_DESCENDANTS、SELECTED_ORGS、ALL 在真实组织树下的边界。（责任：IAM/QA；证据：权限矩阵）
+- [ ] **P0** 进行角色冲突、职责分离、最后管理员保护和特权账号定期复核。（责任：安全/内审；证据：SoD 报告）
+- [ ] **P1** 建立 Joiner/Mover/Leaver 自动流程和临时权限到期回收。（责任：IAM/HR IT；证据：流程记录）
+- [ ] **P1** 为服务账号使用工作负载身份，禁止共享人员账号和长期静态 Token。（责任：平台/安全；证据：服务身份清单）
+
+### 4.3 Key Center 与凭据
+
+- [ ] **P0** 独立部署 Key Center，不与业务 API 共进程。（责任：平台/安全；证据：部署拓扑）
+- [ ] **P0** 接入真实 Vault、KMS 或 HSM，应用只获取短期租约或不透明句柄。（责任：安全平台；证据：Provider 联调报告）
+- [ ] **P0** 使用 mTLS、SPIFFE 或云工作负载身份认证业务 API 与 Key Center。（责任：平台/安全；证据：双向认证测试）
+- [ ] **P0** 清除仓库、构建产物、镜像层、日志和历史工单中的真实 Secret。（责任：安全；证据：Secret 扫描报告）
+- [ ] **P0** 建立 Secret 创建、审批、轮换、吊销、过期和紧急封禁流程。（责任：安全平台；证据：轮换演练）
+- [x] **P0（开发基线已完成）** 验证 KMS 不可用时所有高风险操作失败关闭，且不会创建有效租约。（责任：QA/安全；仓库证据：`backend/src/services/key-center/kms-adapter.js`、`backend/test/security-regression.test.js` 的 external KMS fail-closed 用例；生产仍需对真实 Provider 做故障注入）
+- [ ] **P1** 将 Key Center 审计发送到独立审计仓和 SIEM。（责任：安全运营；证据：日志查询）
+
+### 4.4 OA、MES、LIMS、QMS、ERP、OMS 真实连接器
+
+- [ ] **P0** 每个系统提供 Owner、环境地址、接口协议、认证方式、网络策略和维护窗口。（责任：集成负责人；证据：系统接入卡）
+- [ ] **P0** 获取字段字典、主数据编码、枚举、时区、金额/数量精度和数据分级。（责任：数据治理/系统 Owner；证据：字段映射表）
+- [ ] **P0** 明确全量、增量、Webhook、消息、CDC 和轮询的同步方式及延迟目标。（责任：集成架构师；证据：同步方案）
+- [ ] **P0** 为每类写入定义业务幂等键、版本号、重试、补偿、撤销和人工对账方式。（责任：集成/业务 Owner；证据：写入契约）
+- [ ] **P0** 所有写操作先创建草稿或审批任务，不允许 Agent 绕过 OA/BPM 审批直接提交正式业务结果。（责任：业务架构/Agent 后端；证据：流程测试）
+- [ ] **P0** 连接器只接收经权限裁剪的数据范围和短期凭据，不接收客户端声明的组织或权限。（责任：集成/安全；证据：越权测试）
+- [ ] **P0** 建立来源、业务主键、对象版本、发生时间、采集时间、密级和哈希等 provenance 字段。（责任：数据平台；证据：数据契约）
+- [ ] **P0** 建立删除、停用、冲销、退货、召回和批次状态逆转等生命周期规则。（责任：系统 Owner/业务；证据：状态机）
+- [ ] **P0** 在各系统沙箱完成契约、权限、超时、限流、重复事件、乱序和断网恢复测试。（责任：集成 QA；证据：测试报告）
+- [x] **P0（开发基线已完成）** 生产配置强制隔离 Mock 与真实 Connector，防止 Mock 回执进入生产。（仓库证据：`backend/src/services/system-integration-service.js`、`backend/test/connector-governance.test.js`；生产仍需真实连接器联调）
+- [ ] **P1** 建立每日数据对账、差异工单、补采和重放流程。（责任：数据运营；证据：对账报表）
+- [x] **P1（开发基线已完成）** 已为各系统建立并发隔离舱、超时、熔断恢复和运行时 SLA 遥测。（仓库证据：`backend/src/services/system-integration-service.js`、`backend/src/services/agent-operations-service.js`、`backend/test/connector-governance.test.js`；生产仍需接入监控面板并按供应商 SLA 标定）
+
+### 4.5 大模型、Agent 与语义服务
+
+- [x] **P1（开发基线已完成）** 明确历史时点查询使用有效时间及来源完整覆盖声明；缺声明、范围/元数据异常、无效区间和版本重叠时阻止历史结论及写入。（证据：[接入指南](../development/SEMANTIC_DATA_CONTRACT_GUIDE.md)、`backend/test/agent-targeted-query.test.js`；仍需来源历史真实性与覆盖范围联调，不含跨源权威裁决）
+- [x] **P1（后端入口已完成）** 支持对调用方提供的受控样本执行字段映射核验，保留来源版本与抽样覆盖范围；未取得样本、派生未执行和主键/类型错误不能计为通过。（证据：[接入指南](../development/SEMANTIC_DATA_CONTRACT_GUIDE.md)、`backend/test/semantic-operations-agent.test.js`；未接入运营端真实上传或全量对账，不关闭 4.4 节的真实接入验收项）
+
+- [ ] **P0** 确定生产模型供应商、部署区域、数据使用条款、保留策略、SLA 和退出方案。（责任：AI 架构/法务；证据：模型准入单）
+- [x] **P0（开发基线已完成）** 已配置精确模型白名单、版本固定、并发、主体日调用/Token 限额和成本估算；网关超时、重试与熔断沿用受控策略。（仓库证据：`backend/src/services/model-governance-service.js`、`backend/src/services/local-model-gateway.js`、`backend/test/model-governance.test.js`；生产仍需选定供应商并标定价格/SLA）
+- [x] **P0（开发基线已完成）** 模型版本不在准入表时失败关闭，并输出升级门禁元数据，阻止静默版本变化。（仓库证据：`backend/src/services/model-governance-service.js`、`backend/test/model-governance.test.js`；生产仍需接入企业评测集和审批）
+- [x] **P0（开发基线已完成）** 长耗时任务已迁移到 Worker，支持取消、租约、重试、恢复、幂等和数据库级 transition lease。（仓库证据：`services/agent-runtime-worker/app.js`、`services/agent-run-transition-worker/app.js`、`backend/test/agent-long-task-runtime.test.js`、`backend/test/postgres-runtime-repository.test.js`；生产仍需 Broker/多节点压测）
+- [x] **P0（开发基线已完成）** 为工具调用建立服务器端工具注册表、允许动作、参数/核心对象约束、数据域和工作流联合门禁；客户端只能确认服务端原任务已经提出的命令，不能注入新命令。（责任：Agent/安全；仓库证据：`backend/src/services/agent-tool-registry.js`、`backend/src/services/private-agent-service.js`、`backend/test/security-regression.test.js`；生产仍需按真实 Connector 契约扩充 Schema）
+- [x] **P0（开发基线已完成）** 高风险动作继续绑定原任务、主体、角色、会话、设备、命令、一次性确认和有效期。（责任：Agent 后端；仓库证据：`backend/test/security-regression.test.js` 的隔离、一次性确认、客户端命令注入与 HTTP 重放用例；生产仍需企业 SSO 会话复验）
+- [ ] **P0** 接入企业内容安全、文件杀毒、图片/PDF 沙箱、OCR 安全解析和 DLP。（责任：安全/AI 平台；证据：恶意文件测试）
+- [x] **P0（开发基线已完成）** 建立直接/间接提示词注入、编码/模糊混淆、越权、数据泄露、错误工具调用、确认绕过和不安全记忆污染的自动化攻击样本基线。（责任：AI 安全；仓库证据：`backend/test/security-regression.test.js`、`docs/architecture/AGENT_PROMPT_SECURITY.md`；生产前仍需独立红队扩样与签字）
+- [x] **P0（开发基线已完成）** 检索前执行角色与组织数据权限裁剪，检索结果携带来源、业务标识和授权上下文，生成后脱敏不作为主要授权手段。（责任：语义服务/IAM；仓库证据：`backend/src/services/semantic-context-service.js`、`backend/src/services/private-agent-service.js`、`backend/test/security-regression.test.js`；生产仍需真实组织树与语义索引越权测试）
+- [ ] **P0** 独立部署语义服务，使用 mTLS、服务身份、持久化图/索引和按租户隔离。（责任：数据平台；证据：部署与隔离测试）
+- [x] **P0（开发基线已完成）** 已定义引用、基于证据的置信等级、不确定性、拒答、人工复核和不可覆盖原记录的纠错策略，并作为服务端统一返回契约。（仓库证据：`backend/src/services/agent-answer-governance-service.js`、`backend/test/agent-answer-governance.test.js`、`docs/architecture/AGENT_ANSWER_GOVERNANCE.md`；生产仍需业务口径签字）
+- [x] **P1（离线基线已完成）** 已建立确定性离线控制评测，覆盖证据引用、数据域边界、确认门禁、拒答准确性和提示词攻击。（仓库证据：`backend/src/services/agent-evaluation-service.js`、`backend/test/security-regression.test.js`；生产仍需脱敏真实业务集和线上抽检平台）
+- [x] **P1（开发基线已完成）** 设定上下文上限、自动压缩阈值、摘要版本/哈希、近期消息保留、权限变化重置和污染隔离策略；默认产品预算 128K tokens、Provider 窗口上限 1.05M tokens，实际取两者较小值。（责任：Agent 架构；仓库证据：`backend/src/services/agent-conversation-service.js`、`backend/test/agent-conversation.test.js`；生产需按选定模型重新标定）
+- [ ] **P1** 建立模型成本、延迟、限额和降级模型看板。（责任：AI 平台/FinOps；证据：成本面板）
+
+### 4.6 证据链、审计与安全运营
+
+- [ ] **P0** 将 Evidence Trace 迁移到只追加审计仓，禁止普通业务账号修改历史记录。（责任：审计平台；证据：权限测试）
+- [ ] **P0** 使用企业 KMS/HSM 对批次头签名，并接入可信时间戳。（责任：安全平台；证据：签名验证报告）
+- [ ] **P0** 启用 WORM/Object Lock、跨区域归档、保留期和 Legal Hold。（责任：存储/合规；证据：存储策略）
+- [x] **P0（开发基线已完成）** 保证每次拒绝、澄清、授权、检索、模型调用、确认、工具调用、失败和成功回执都有可关联记录，并用哈希链与 Manifest 校验完整性。（责任：Agent/审计；仓库证据：`backend/src/services/agent-evidence-trace-service.js`、`backend/src/services/private-agent-service.js`、`backend/test/evidence-trace.test.js`；生产仍需迁移至只追加审计仓并使用 KMS/HSM 签名）
+- [x] **P0（开发基线已完成）** 应用安全事件采用摘要化、脱敏结构，源码扫描阻断常见 Token/Secret，SIEM Outbox 不保存 Prompt 原文。（仓库证据：`scripts/security-source-scan.mjs`、`backend/test/observability-siem.test.js`；生产仍需日志平台和 DLP 抽检）
+- [x] **P0（开发基线已完成）** 认证、权限、Key Center、连接器、Agent 和管理操作具备脱敏 SIEM Outbox/导出 Worker 适配边界。（仓库证据：`services/siem-export-worker/app.js`、`backend/test/observability-siem.test.js`；生产仍需真实 SIEM 查询验收）
+- [x] **P0（开发基线已完成）** 审计导出要求独立权限、申请理由、四眼审批、租户隔离、水印和最多 50 条 Trace。（仓库证据：`backend/src/services/audit-governance-service.js`、`backend/test/audit-governance.test.js`；生产仍需企业审计角色验收）
+- [x] **P1（开发基线已完成）** 已建立关键事件、重复提示词攻击和审计积压检测规则。（仓库证据：`backend/src/services/security-detection-service.js`、`backend/test/audit-governance.test.js`；生产仍需 SOC 调优）
+- [x] **P1（开发基线已完成）** 已提供审计哈希链、Manifest 与导出文件哈希的周期完整性 Worker。（仓库证据：`services/audit-integrity-worker/app.js`、`backend/src/services/audit-governance-service.js`、`backend/test/audit-governance.test.js`；KMS 签名、时间戳和 WORM 仍需企业平台）
+
+### 4.7 告警、虚拟电话和通知
+
+- [x] **P0（开发基线已完成）** 修正告警定义并固化为 P0 紧急、P1 中风险、P2 低风险，P0 才允许立即触发电话，P2 配置为立即电话会被拒绝。（责任：产品/业务 Owner；仓库证据：`docs/architecture/ALERTING_VIRTUAL_VOICE.md`、`backend/test/alerting-orchestration.test.js`；生产仍需业务 Owner 签署 SLA/OLA）
+- [ ] **P0** 接入生产电话 Provider、主叫号码、模板报备、录音/隐私规则和费用预算。（责任：通知平台/法务；证据：Provider 验收）
+- [ ] **P0** 同步真实责任人和值班表，并为无人值班、号码缺失、拒接和关机定义升级链。（责任：运维/HR IT；证据：排班演练）
+- [ ] **P0** 验证 P0 自动电话、P1/P2 通知策略、重试、升级和最大呼叫次数。（责任：QA/业务；证据：告警演练）
+- [x] **P0（开发基线已完成）** DTMF/语音回执只能确认收到，不能替代业务审批或高风险授权；回执审计明确记录 `highRiskApprovalGranted=false`。（责任：告警后端/安全；仓库证据：`backend/test/alerting-orchestration.test.js`；生产仍需真实电话 Provider 回调验收）
+- [ ] **P0** 电话内容使用脱敏模板，不播报患者、员工、配方、批次敏感细节或密钥。（责任：合规/产品；证据：模板评审）
+- [ ] **P1** 接入企业短信、邮件、App Push 或 IM，定义渠道降级顺序和去重规则。（责任：通知平台；证据：多渠道演练）
+- [ ] **P1** 建立送达率、接通率、确认时延、升级次数和 Provider 失败率指标。（责任：运维；证据：监控面板）
+
+### 4.8 Web、移动端和 Electron
+
+- [ ] **P0** 三端接入企业 SSO，并验证登录、续期、注销、撤权和设备丢失场景。（责任：客户端/IAM；证据：端到端测试）
+- [x] **P0（开发基线已完成）** Web/API 已配置 CSP、生产 HSTS、CORS Allowlist、Referrer/Permissions Policy、nosniff、COOP/CORP 和防点击劫持响应头。（仓库证据：`backend/src/http/http-utils.js`、`backend/test/http-security-headers.test.js`；生产仍需 Gateway 和安全 Cookie 联合扫描）
+- [x] **P0（开发基线已完成）** Electron 已启用 contextIsolation、sandbox、webSecurity，禁用 nodeIntegration/webview/非受信导航与下载；preload 仅暴露应用信息、窗口控制和经校验的 API 地址，外链仅允许 HTTPS。（责任：桌面端/安全；仓库证据：`apps/desktop/electron/main.cjs`、`apps/desktop/electron/preload.cjs`；生产仍需第三方桌面安全评审和签名包复验）
+- [ ] **P0** 完成 Windows 代码签名、安装包签名、更新清单签名和企业软件分发。（责任：桌面端/IT；证据：签名安装包）
+- [ ] **P0** Refresh Token 或长期凭据只进入系统凭据库/安全宿主，不能暴露给渲染进程或 localStorage。（责任：客户端/安全；证据：存储检查）
+- [ ] **P0** 移动端完成企业签名、MDM/MAM、设备合规、截屏/复制策略和远程擦除。（责任：移动端/终端安全；证据：设备策略）
+- [x] **P0（开发基线已完成）** 三端共用 SDK/Workbench 协议，并建立权限、并行任务、上下文、附件、确认和证据链兼容矩阵自动回归。（仓库证据：`packages/client-runtime`、`backend/test/client-compatibility-matrix.test.js`、`docs/development/CLIENT_COMPATIBILITY_MATRIX.md`；真实设备与企业 SSO 仍需验收）
+- [x] **P1（开发基线已完成）** 已建立服务端最低客户端版本和 HTTP 426 强制升级门禁，并记录灰度/回滚兼容策略。（仓库证据：`backend/src/services/client-version-policy-service.js`、`backend/test/client-version-policy.test.js`、`docs/development/CLIENT_COMPATIBILITY_MATRIX.md`；崩溃平台和签名分发仍需企业接入）
+- [ ] **P1** 完成无障碍、弱网、断线重连、后台恢复和低性能设备测试。（责任：客户端 QA；证据：专项报告）
+
+### 4.9 基础设施、网络与供应链安全
+
+- [ ] **P0** 确认开发、测试、预生产、生产严格隔离，账号、证书、数据库和消息主题不复用。（责任：平台；证据：环境矩阵）
+- [ ] **P0** 部署 API、Worker、Key Center、语义服务、PostgreSQL、Redis 和 Broker 的高可用实例。（责任：平台/SRE；证据：部署清单）
+- [ ] **P0** 配置私网、网络策略、WAF/API Gateway、出口白名单、DNS、证书和 mTLS。（责任：网络/安全；证据：网络验收）
+- [x] **P0（部署模板基线已完成）** API 采用固定 Node slim 多阶段镜像、非 root 用户；Kubernetes 模板要求只读根文件系统、丢弃 capabilities、RuntimeDefault seccomp 和 digest 引用。（仓库证据：`deploy/Dockerfile.api`、`deploy/k8s/api-deployment.yaml`；正式 digest、镜像签名和集群扫描仍需发布流水线生成）
+- [x] **P0（开发基线已完成）** 已生成 CycloneDX SBOM，并在 CI 建立 CodeQL、SCA、Secret、许可证、镜像和 IaC 高危失败门禁。（仓库证据：`.github/workflows/security.yml`、`scripts/security-source-scan.mjs`、`scripts/generate-license-inventory.mjs`、`docs/operations/SOFTWARE_SUPPLY_CHAIN.md`；正式制品仍需签名和扫描报告归档）
+- [x] **P0（部署模板基线已完成）** 已提供 API CPU/内存/临时存储限制、三副本和 CPU/内存 HPA 阈值，并已暴露连接池、队列与 Outbox 遥测。（仓库证据：`deploy/k8s/api-deployment.yaml`、`deploy/k8s/api-policy.yaml`、`backend/src/services/agent-operations-service.js`；阈值仍需预生产压测标定）
+- [x] **P0（开发基线已完成）** Liveness 与 Readiness 已分离；生产 Readiness 检查 PostgreSQL/身份会话、Key Center 等强依赖并暴露 Worker/Outbox 状态。（仓库证据：`backend/src/app.js`、`backend/test/runtime-persistence.test.js`、`backend/test/permission-management.test.js`；生产仍需集群探针演练）
+- [ ] **P1** 建立 Infrastructure as Code、配置 Schema、漂移检测和双人审批。（责任：平台；证据：IaC 仓与审计）
+- [ ] **P1** 配置 NTP/可信时间源，确保事件、审计和签名时间一致。（责任：基础设施；证据：时间同步监控）
+
+## 5. 上线前测试与验收
+
+### 5.1 功能、数据和业务验收
+
+- [ ] **P0** 用脱敏或合成的真实形态数据完成 OA/MES/LIMS/QMS/ERP/OMS 全链路 UAT。（责任：业务 Owner/QA；证据：UAT 签字）
+- [ ] **P0** 验证正常、拒绝、重复、乱序、超时、撤回、补偿和人工接管路径。（责任：QA；证据：场景矩阵）
+- [ ] **P0** 验证组织、人员、角色、按钮和数据权限组合，不只测试管理员。（责任：IAM QA；证据：权限覆盖报告）
+- [ ] **P0** 核对关键报表、告警、待办、审批状态和源系统事实一致。（责任：业务/数据 QA；证据：对账结果）
+- [ ] **P0** 确认所有高风险动作均有人工确认、审批、外部回执和完整证据链。（责任：风控/内审；证据：抽样记录）
+
+### 5.2 非功能与安全验收
+
+- [x] **P0（开发工具基线已完成）** 已提供并发、吞吐、错误率、P50/P95/P99 阈值的 HTTP 压测工具及契约测试。（仓库证据：`scripts/nonfunctional/http-load-runner.mjs`、`scripts/nonfunctional/run-load-smoke.mjs`、`backend/test/nonfunctional-baseline.test.js`；生产容量结论仍需预生产压测报告）
+- [ ] **P0** 完成数据库故障、Redis 故障、Broker 故障、模型超时、KMS 故障和 Connector 断网演练。（责任：SRE/QA；证据：混沌报告）
+- [ ] **P0** 完成认证绕过、越权、IDOR、租户逃逸、注入、SSRF、文件上传和供应链渗透测试。（责任：安全测试；证据：渗透报告）
+- [ ] **P0** 完成 Agent 红队测试：提示词注入、间接注入、工具参数污染、敏感数据诱导和审批绕过。（责任：AI 安全；证据：红队报告）
+- [ ] **P0** 高危和严重问题全部关闭；中危问题必须有责任人、期限和书面风险接受。（责任：安全负责人；证据：缺陷清单）
+- [ ] **P0** 验证 RPO、RTO、备份、时间点恢复、跨区恢复和恢复后数据一致性。（责任：DBA/SRE；证据：灾备演练）
+- [ ] **P1** 连续运行不少于 72 小时，确认无内存泄漏、连接泄漏和不可恢复队列积压。（责任：SRE/QA；证据：稳定性报告）
+
+### 5.3 文档、培训和运维准备
+
+- [x] **P0（仓库文档基线已完成）** 已完成生产部署、回滚和主要故障处置手册。（仓库证据：`docs/operations/DEPLOYMENT_ROLLBACK_RUNBOOK.md`；值班表与应急通讯录需企业现场补充）
+- [ ] **P0** 完成管理员、审计员、业务用户、值班人员和一线支持培训。（责任：产品/运维；证据：培训签到）
+- [ ] **P0** 建立服务台分类、响应 SLA、升级路径、已知问题和 FAQ。（责任：运维服务台；证据：服务目录）
+- [ ] **P0** 为所有仪表盘和告警指定 Owner、阈值、通知组和处置 Runbook。（责任：SRE/模块 Owner；证据：监控目录）
+- [x] **P1（仓库文档基线已完成）** 已更新整体架构图、写入数据流、资产/端口/证书/依赖准备清单。（仓库证据：`docs/operations/PRODUCTION_ARCHITECTURE_AND_OPERATIONS.md`）
+
+## 6. Go-Live 切换 Checklist
+
+### 6.1 T-7 天至 T-1 天
+
+- [ ] 冻结生产范围、数据库 Schema、API 契约、模型版本和客户端版本。（责任：发布经理）
+- [ ] 确认所有 P0 已关闭，P1 风险均有签字接受和到期日。（责任：项目负责人/安全负责人）
+- [ ] 完成生产备份、恢复抽测和回滚环境检查。（责任：DBA/SRE）
+- [ ] 校验证书、域名、Secret、工作负载身份、消息主题和网络白名单。（责任：平台/安全）
+- [ ] 核对初始组织、人员、角色、值班表、告警策略和数据范围。（责任：IAM/业务 Owner）
+- [ ] 在生产只读模式完成 Connector 冒烟，不执行正式写入。（责任：集成负责人）
+- [ ] 通知业务、服务台、供应商和应急联系人上线窗口及冻结要求。（责任：发布经理）
+
+### 6.2 T0 切换窗口
+
+- [ ] 记录发布单、负责人、开始时间、版本、配置摘要和变更工单号。（责任：发布经理）
+- [ ] 执行数据库迁移并校验 migration version、行数、约束和关键索引。（责任：DBA）
+- [ ] 按 PostgreSQL/Redis/Broker → Key Center/语义服务 → API/Worker → Web/客户端顺序部署。（责任：SRE）
+- [ ] 验证 Liveness、Readiness、能力清单、日志、指标和 Trace 链路。（责任：SRE）
+- [ ] 使用普通用户、业务负责人、管理员和审计员分别完成登录与权限冒烟。（责任：IAM QA）
+- [ ] 完成只读查询、告警、Agent 回答、人工确认、审批草稿和外部回执冒烟。（责任：业务 QA）
+- [ ] 验证 Mock 登录、Mock Connector、Demo KMS 和 Demo Role Header 在生产均不可用。（责任：安全 QA）
+- [ ] 对首个真实写流程实施双人监控并完成源系统对账。（责任：业务 Owner/集成）
+- [ ] 满足回滚阈值时立即停止写入、保全证据并按已批准 Runbook 回滚。（责任：发布经理）
+
+### 6.3 Go/No-Go 签字
+
+- [ ] 产品负责人确认功能和业务范围。
+- [ ] 架构负责人确认技术边界和容量。
+- [ ] 安全负责人确认安全与剩余风险。
+- [ ] 数据负责人确认数据质量和权限。
+- [ ] 运维负责人确认监控、值班、备份和回滚。
+- [ ] 业务 Owner 确认流程、告警和人工接管。
+- [ ] 发布经理记录最终 Go/No-Go 决策、时间和签字链接。
+
+## 7. 真实生产上线后的待办
+
+### 7.1 D+0 至 D+1：上线观察期
+
+- [ ] 启动上线 War Room，保持产品、开发、SRE、安全、数据和系统 Owner 在线。（责任：发布经理）
+- [ ] 每 30 分钟检查错误率、P95/P99、模型延迟、Token 成本、队列积压和连接池。（责任：SRE/AI 平台）
+- [ ] 检查登录成功率、撤权时延、403/401 异常增长和特权操作。（责任：IAM/SOC）
+- [ ] 检查 Connector 成功率、重复写入、乱序、回执缺失和源系统限流。（责任：集成负责人）
+- [ ] 对所有真实写入进行逐笔或批次对账，发现差异立即暂停相应写能力。（责任：业务/数据运营）
+- [ ] 检查 P0/P1/P2 告警分类、电话接通、确认和升级是否符合预期。（责任：告警运营）
+- [ ] 抽查 Agent 回答来源、拒答、确认卡、工具参数和证据链完整性。（责任：AI QA/内审）
+- [ ] 检查日志、Trace、SIEM 中是否出现 Token、Secret 或未脱敏敏感数据。（责任：SOC/DLP）
+- [ ] 每个生产问题创建工单并记录影响、时间线、临时措施、Owner 和下一次更新时间。（责任：服务台）
+- [ ] 在 D+1 形成首日运行报告并决定继续、限制功能或回滚。（责任：项目负责人）
+
+### 7.2 D+2 至 D+7：稳定化
+
+- [ ] 每日核对业务数据、Outbox、Broker、消费者检查点和死信。（责任：数据运营/SRE）
+- [ ] 分析权限拒绝、身份映射失败、组织映射异常和离职账号残留。（责任：IAM）
+- [ ] 分析模型错误、幻觉、引用缺失、无效拒答和用户纠错反馈。（责任：AI 产品/QA）
+- [ ] 调整告警阈值和路由，但任何 P0 降级必须经过业务与风险审批。（责任：告警 Owner）
+- [ ] 复核容量、数据库索引、慢查询、缓存命中和队列扩容阈值。（责任：DBA/SRE）
+- [ ] 完成首周漏洞、Secret、镜像和依赖增量扫描。（责任：DevSecOps）
+- [ ] 关闭上线临时权限、临时白名单、调试日志和应急账号。（责任：安全/平台）
+- [ ] 更新已知问题、Runbook、FAQ 和培训材料。（责任：服务台/产品）
+- [ ] 召开 D+7 稳定性评审，决定是否扩大用户、组织或写操作范围。（责任：变更委员会）
+
+### 7.3 D+8 至 D+30：运营基线
+
+- [ ] 建立生产 SLO 基线：可用性、延迟、任务成功率、工具成功率、送达率和对账正确率。（责任：SRE/产品）
+- [ ] 建立模型质量基线：正确率、引用完整率、拒答准确率、人工接管率和安全拦截率。（责任：AI 治理）
+- [ ] 完成首月权限复核、特权账号复核、服务账号复核和离职账号清理。（责任：IAM/内审）
+- [ ] 完成首月成本复盘：模型、电话、短信、存储、数据库、Broker 和终端分发。（责任：FinOps/产品）
+- [ ] 对生产提示词攻击、越权尝试、异常下载和密钥申请做趋势分析。（责任：SOC/AI 安全）
+- [ ] 验证备份可恢复、归档可读取、签名可校验和 WORM 策略有效。（责任：SRE/内审）
+- [ ] 对首月事故和高频工单完成根因分析，不以重启作为永久解决方案。（责任：模块 Owner）
+- [ ] 清理不再使用的 Feature Flag、旧模型版本、旧客户端版本和过期配置。（责任：平台/客户端）
+- [ ] 召开 D+30 生产复盘，确定下一阶段扩容、功能开放和技术债优先级。（责任：项目委员会）
+
+### 7.4 持续运营：每日、每周、每月、每季度
+
+#### 每日
+
+- [ ] 检查核心 SLO、死信、对账差异、KMS 健康、Connector 健康和 P0 告警。（责任：值班 SRE）
+- [ ] 检查安全告警、异常登录、越权拒绝、DLP 和提示词攻击。（责任：SOC）
+- [ ] 检查模型限额、费用异常和供应商状态。（责任：AI 平台）
+
+#### 每周
+
+- [ ] 复盘事故、失败任务、人工接管、重复告警和用户反馈。（责任：产品/运营）
+- [ ] 抽样验证证据链、外部回执和源系统数据一致性。（责任：内审/数据运营）
+- [ ] 复核死信重放、补偿操作和紧急变更的审批证据。（责任：运维/内审）
+- [ ] 更新攻击样本、内容安全规则和 Agent 离线评测集。（责任：AI 安全）
+
+#### 每月
+
+- [ ] 执行人员、角色、组织范围、特权账号和服务账号权限复核。（责任：IAM/内审）
+- [ ] 执行 Secret/证书到期检查和轮换计划。（责任：安全平台）
+- [ ] 执行依赖、镜像、主机和应用漏洞扫描并跟踪修复 SLA。（责任：DevSecOps）
+- [ ] 执行容量、成本、数据增长、索引和归档评审。（责任：SRE/DBA/FinOps）
+- [ ] 生成模型质量、安全、成本和业务价值月报。（责任：AI 治理/产品）
+
+#### 每季度
+
+- [ ] 执行灾备切换、数据库恢复和关键依赖故障演练。（责任：SRE/DBA）
+- [ ] 执行 Agent 红队、权限穿透和高风险流程桌面演练。（责任：安全/业务 Owner）
+- [ ] 复核数据分类、保留、删除、Legal Hold 和跨境处理。（责任：法务/数据治理）
+- [ ] 复核模型供应商、电话 Provider、云服务和关键开源依赖风险。（责任：采购/架构/安全）
+- [ ] 复核 SLO、容量和架构演进计划，淘汰临时兼容分支。（责任：架构委员会）
+
+## 8. 事故响应与回滚 Checklist
+
+- [ ] 明确事故等级、Incident Commander、技术负责人、沟通负责人和记录人。
+- [ ] 第一时间限制受影响写能力、吊销相关租约或隔离相关 Connector。
+- [ ] 保留 Evidence Trace、审计日志、Outbox、Worker 检查点和源系统回执，禁止先清理现场。
+- [ ] 判断是否涉及敏感数据泄露、错误审批、重复写入、漏告警或监管报告义务。
+- [ ] 使用 Feature Flag、路由隔离或上一版本回滚，禁止未经评审直接修改生产数据。
+- [ ] 所有补偿和数据修复必须有脚本评审、备份、双人执行和前后对账。
+- [ ] 在约定时限内向业务、管理层、安全、法务和供应商同步事实状态。
+- [ ] 事故关闭后完成根因、影响、时间线、纠正措施、预防措施和责任人。
+- [ ] 将事故样本加入自动化测试、Agent 评测、监控规则和 Runbook。
+
+## 9. 生产就绪完成定义
+
+只有同时满足下列条件，项目才可标记为“生产就绪”：
+
+- [ ] 所有 P0 项完成并附可复核证据。
+- [ ] 所有生产依赖使用真实高可用基础设施，不使用 SQLite、Demo KMS、Mock 身份或 Mock Connector。
+- [ ] 企业 IdP、人员组织、数据权限和服务身份完成真实环境验证。
+- [ ] 所有生产写动作具备审批、幂等、回执、补偿、对账和证据链。
+- [ ] 安全、性能、稳定性、灾备、红队和 UAT 验收通过。
+- [ ] 监控、值班、Runbook、服务台、培训和供应商支持已经生效。
+- [ ] Go/No-Go 由产品、架构、安全、数据、运维和业务 Owner 共同签字。
+- [ ] 上线后的 D+1、D+7、D+30 检查已有负责人和会议日程。
+
+## 10. 关联文档
+
+- [整体架构说明](../architecture/ARCHITECTURE.md)
+- [近期开发路线](../development/DEVELOPMENT_ROADMAP.md)
+- [生产运行时持久化演进](RUNTIME_PERSISTENCE.md)
+- [IAM 权限中心](../architecture/IAM_PERMISSION_CENTER.md)
+- [Agent 架构技术说明](../architecture/ZHINAO_AGENT_ARCHITECTURE_V2.md)
+- [提示词与上下文安全](../architecture/AGENT_PROMPT_SECURITY.md)
+- [执行证据链](../architecture/AGENT_EVIDENCE_TRACE.md)
+- [告警与虚拟电话](../architecture/ALERTING_VIRTUAL_VOICE.md)
+- [Key Center](../architecture/KEY_CENTER_MICROSERVICE.md)
+- [Mock 演练运行时](../development/MOCK_SIMULATION_RUNTIME.md)
+- [模块化协作架构](../modules/COLLABORATION_ARCHITECTURE.md)
+- [运行平台配置](../modules/11-runtime-platform/CONFIGURATION.md)
+- [生产架构与运行说明](PRODUCTION_ARCHITECTURE_AND_OPERATIONS.md)
+- [部署、回滚与故障处置手册](DEPLOYMENT_ROLLBACK_RUNBOOK.md)
+- [非功能测试指南](../development/NONFUNCTIONAL_TEST_GUIDE.md)
+- [客户端兼容与发布矩阵](../development/CLIENT_COMPATIBILITY_MATRIX.md)
+- [软件供应链安全基线](SOFTWARE_SUPPLY_CHAIN.md)
+- [智脑回答治理规范](../architecture/AGENT_ANSWER_GOVERNANCE.md)

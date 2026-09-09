@@ -1,0 +1,13 @@
+# 首次接入 GitHub/GitHub Enterprise 时，将下列团队句柄替换为真实组织团队。
+*                                      @healthcare-ai/platform-maintainers
+/backend/src/domains/agent/            @healthcare-ai/agent-team
+/backend/src/domains/alerting/         @healthcare-ai/alerting-team
+/backend/src/domains/iam/              @healthcare-ai/iam-security-team
+/backend/src/domains/risk/             @healthcare-ai/risk-team
+/backend/src/domains/governance/       @healthcare-ai/data-governance-team
+/frontend/                             @healthcare-ai/web-team
+/apps/desktop/                         @healthcare-ai/desktop-team
+/apps/mobile/                          @healthcare-ai/mobile-team
+/packages/api-contracts/               @healthcare-ai/api-governance-team
+/docs/modules/                         @healthcare-ai/architecture-team
+

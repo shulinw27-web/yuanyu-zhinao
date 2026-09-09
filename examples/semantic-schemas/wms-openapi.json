@@ -1,0 +1,47 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "WMS 仓储语义建模样例",
+    "version": "1.0.0"
+  },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "Warehouse": {
+        "type": "object",
+        "required": ["warehouseId", "warehouseCode"],
+        "properties": {
+          "warehouseId": { "type": "string", "x-primary-key": true, "description": "仓库稳定标识" },
+          "warehouseCode": { "type": "string", "description": "仓库业务编码" },
+          "warehouseName": { "type": "string", "description": "仓库名称" },
+          "organizationId": { "type": "string", "description": "所属组织" },
+          "status": { "type": "string", "description": "仓库状态" }
+        }
+      },
+      "InventoryLot": {
+        "type": "object",
+        "required": ["inventoryLotId", "materialBatchId", "warehouse"],
+        "properties": {
+          "inventoryLotId": { "type": "string", "x-primary-key": true, "description": "库存批次稳定标识" },
+          "materialBatchId": { "type": "string", "description": "原料批次标识" },
+          "warehouse": { "$ref": "#/components/schemas/Warehouse" },
+          "locationCode": { "type": "string", "description": "库位编码" },
+          "quantity": { "type": "number", "description": "当前数量" },
+          "status": { "type": "string", "description": "库存批次状态" }
+        }
+      },
+      "InboundReceipt": {
+        "type": "object",
+        "required": ["receiptId", "purchaseOrderId", "inventoryLot"],
+        "properties": {
+          "receiptId": { "type": "string", "x-primary-key": true, "description": "入库单稳定标识" },
+          "purchaseOrderId": { "type": "string", "description": "ERP采购订单标识" },
+          "inventoryLot": { "$ref": "#/components/schemas/InventoryLot" },
+          "receivedQty": { "type": "number", "description": "实收数量" },
+          "receivedAt": { "type": "string", "format": "date-time", "description": "收货时间" },
+          "status": { "type": "string", "description": "入库状态" }
+        }
+      }
+    }
+  }
+}

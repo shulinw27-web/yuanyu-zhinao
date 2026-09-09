@@ -1,0 +1,23 @@
+import { createApp } from 'vue';
+import App from './App.vue';
+import './styles/main.css';
+import './styles/ai-theme.css';
+import './styles/layout-density.css';
+import './styles/action-center.css';
+import './styles/mobile-assistant.css';
+import './styles/private-agent.css';
+import './styles/model-connection.css';
+import './styles/world-template.css';
+import './styles/meta-model.css';
+import './styles/core-meta-objects.css';
+import './styles/account-permission.css';
+import './styles/console-redesign.css';
+import './styles/key-center.css';
+import './styles/semantic-context.css';
+import './styles/simulation-center.css';
+import './styles/permission-management.css';
+import './styles/alerting-center.css';
+import './styles/alerting-oncall.css';
+import './styles/severity-levels.css';
+
+createApp(App).mount('#root');

@@ -1,0 +1,41 @@
+.oncall-enabled {
+  margin-left: auto;
+  color: #83a7be;
+  font-size: 9px;
+}
+
+.oncall-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.oncall-fields label,
+.escalation-steps label {
+  display: grid;
+  gap: 4px;
+  color: #7f9fb6;
+  font-size: 8px;
+}
+
+.oncall-fields select,
+.escalation-steps select,
+.escalation-steps input {
+  min-width: 0;
+  width: 100%;
+  padding: 6px;
+  border: 1px solid #2f6687;
+  border-radius: 5px;
+  background: #071d31;
+  color: #dff6ff;
+  font-size: 9px;
+}
+
+.escalation-steps > div {
+  grid-template-columns: 24px 1fr 78px;
+}
+
+.escalation-steps > div > small {
+  grid-column: 2 / 4;
+}

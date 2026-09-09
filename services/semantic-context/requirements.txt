@@ -1,0 +1,2 @@
+# Semantica runtime for the independently deployable semantic-context-service.
+semantica==0.6.5

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "元域智脑",
+  "version": "0.1.0",
+  "identifier": "com.healthcareai.agent.mobile",
+  "build": { "beforeDevCommand": "npm run dev", "devUrl": "http://localhost:5175", "beforeBuildCommand": "npm run build", "frontendDist": "../dist" },
+  "app": { "windows": [{ "title": "元域智脑", "width": 420, "height": 820 }], "security": { "csp": "default-src 'self'; connect-src 'self' http://localhost:3001 https:; style-src 'self' 'unsafe-inline'; media-src 'self' blob:" } },
+  "bundle": { "active": true, "targets": "all" }
+}

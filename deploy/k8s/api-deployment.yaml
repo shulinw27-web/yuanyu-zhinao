@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-platform-api
+  labels: { app.kubernetes.io/name: agent-platform-api }
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app.kubernetes.io/name: agent-platform-api }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: agent-platform-api }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: api
+          # 发布流水线必须把占位 digest 替换为已扫描、已签名的真实 sha256。
+          image: registry.example.internal/agent-platform-api@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: http, containerPort: 3001 }]
+          envFrom:
+            - configMapRef: { name: agent-platform-api-config }
+            - secretRef: { name: agent-platform-api-secrets }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "2", memory: 2Gi }
+          livenessProbe:
+            httpGet: { path: /api/health/live, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: { path: /api/health/ready, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-platform-api
+spec:
+  selector: { app.kubernetes.io/name: agent-platform-api }
+  ports: [{ name: http, port: 3001, targetPort: http }]

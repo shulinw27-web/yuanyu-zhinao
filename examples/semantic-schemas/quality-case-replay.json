@@ -1,0 +1,38 @@
+[
+  {
+    "id": "synthetic-high-risk",
+    "objectType": "QualityEvent",
+    "at": "2026-09-09T08:05:00Z",
+    "expected": "investigation_recommended",
+    "record": {
+      "id": "synthetic-evidence-1",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept",
+      "classification": "质量受限",
+      "objectType": "QualityEvent",
+      "system": "QMS",
+      "version": "synthetic-v1",
+      "occurredAt": "2026-09-09T08:00:00Z",
+      "sourceMode": "mock",
+      "payload": { "risk_id": "SYNTHETIC-RISK-001", "severity": "P1", "status": "待确认" }
+    }
+  },
+  {
+    "id": "synthetic-stale-evidence",
+    "objectType": "QualityEvent",
+    "at": "2026-09-09T10:05:00Z",
+    "expected": "needs_review",
+    "record": {
+      "id": "synthetic-evidence-2",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept",
+      "classification": "质量受限",
+      "objectType": "QualityEvent",
+      "system": "QMS",
+      "version": "synthetic-v1",
+      "occurredAt": "2026-09-09T08:00:00Z",
+      "sourceMode": "mock",
+      "payload": { "risk_id": "SYNTHETIC-RISK-002", "severity": "P0", "status": "待确认" }
+    }
+  }
+]

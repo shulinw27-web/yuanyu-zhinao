@@ -1,0 +1,9 @@
+{
+  "name": "@healthcare-ai/dingtalk-app",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "vite --host 127.0.0.1 --port 15194", "build": "vite build", "test": "node --test test/*.test.js" },
+  "dependencies": { "@healthcare-ai/agent-sdk": "*", "@healthcare-ai/agent-workbench": "*", "dingtalk-jsapi": "3.2.9", "vue": "^3.5.13" },
+  "devDependencies": { "@vitejs/plugin-vue": "^5.2.1", "vite": "^6.0.5" }
+}

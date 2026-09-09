@@ -1,0 +1,10 @@
+{
+  "corpId": "REPLACE_WITH_CORP_ID",
+  "clientId": "REPLACE_WITH_APP_KEY",
+  "clientSecret": "REPLACE_WITH_APP_SECRET",
+  "tenantId": "REPLACE_WITH_PLATFORM_TENANT_ID",
+  "allowedOrigins": ["https://zhinao.example.com"],
+  "userBindings": [
+    { "userId": "REPLACE_WITH_DINGTALK_USER_ID", "account": "REPLACE_WITH_EXISTING_PLATFORM_ACCOUNT" }
+  ]
+}

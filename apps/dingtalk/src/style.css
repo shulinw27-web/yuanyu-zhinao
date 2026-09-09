@@ -1,0 +1,17 @@
+.dingtalk-host { position: relative; height: var(--dingtalk-viewport-height, 100dvh); min-height: 0; }
+.dingtalk-host .auth-card small { color: #a4a4a4; line-height: 1.65; }
+.dingtalk-host .form-error { color: #ffb4ba; overflow-wrap: anywhere; }
+.dingtalk-host button:focus-visible { outline: 2px solid #c9deb2; outline-offset: 3px; }
+.dingtalk-host .header-tools { flex-shrink: 0; white-space: nowrap; }
+@media (max-width: 900px) {
+  .dingtalk-host .composer-shell { padding-bottom: max(9px, env(safe-area-inset-bottom)); }
+  .dingtalk-host input, .dingtalk-host textarea { font-size: 16px; }
+  .dingtalk-host textarea { min-height: 64px; }
+  .dingtalk-host .auth-card { margin-block: auto; }
+  .dingtalk-host .mobile-navigation { position: absolute; }
+  .dingtalk-host.compact-viewport .conversation-heading,
+  .dingtalk-host.compact-viewport .mobile-runtime-line,
+  .dingtalk-host.compact-viewport .mobile-quick-actions { display: none; }
+  .dingtalk-host.compact-viewport .workspace-header { min-height: 48px; padding-top: 8px; padding-bottom: 8px; }
+  .dingtalk-host.compact-viewport .workspace-header .section-label { display: none; }
+}
