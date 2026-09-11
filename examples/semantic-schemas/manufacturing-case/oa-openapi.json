@@ -1,0 +1,125 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "SYNTHETIC OA API",
+    "version": "1.0.0",
+    "description": "依公开业务流程重建，不是厂商API复制，不含企业真实数据。"
+  },
+  "servers": [
+    {
+      "url": "https://synthetic-factory.example.invalid"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/oa/v1/Approval": {
+      "get": {
+        "operationId": "listApproval",
+        "summary": "分页读取质量处置审批",
+        "description": "租户/组织/字段鉴权。403不得升级身份。分页返回nextCursor；增量可能重复，事件按(system,id,version)去重。",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "updatedSince",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前授权页，不代表全部",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Approval"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限"
+          },
+          "429": {
+            "description": "限流，按Retry-After重试"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "Approval": {
+        "type": "object",
+        "title": "质量处置审批",
+        "description": "合成案例 OA.Approval；粒度=transaction；主键需结合来源及组织隔离。",
+        "x-source-system": "OA",
+        "x-primary-key": "approval_id",
+        "x-granularity": "transaction",
+        "required": [
+          "approval_id",
+          "case_id",
+          "state",
+          "action_id"
+        ],
+        "properties": {
+          "approval_id": {
+            "type": "string",
+            "description": "approval_id"
+          },
+          "case_id": {
+            "type": "string",
+            "description": "标量外键，引用 QualityCase 主键；不是嵌套对象。",
+            "x-foreign-key": {
+              "schema": "QualityCase",
+              "field": "case_id"
+            }
+          },
+          "state": {
+            "type": "string",
+            "description": "state"
+          },
+          "action_id": {
+            "type": "string",
+            "description": "action_id"
+          },
+          "execution_receipt_id": {
+            "type": "string",
+            "description": "外部执行回执；null说明尚未执行。",
+            "nullable": true
+          }
+        }
+      }
+    }
+  }
+}

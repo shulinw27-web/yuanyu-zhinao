@@ -1,0 +1,386 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "SYNTHETIC ERP API",
+    "version": "1.0.0",
+    "description": "依公开业务流程重建，不是厂商API复制，不含企业真实数据。"
+  },
+  "servers": [
+    {
+      "url": "https://synthetic-factory.example.invalid"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/erp/v1/Material": {
+      "get": {
+        "operationId": "listMaterial",
+        "summary": "分页读取物料主数据",
+        "description": "租户/组织/字段鉴权。403不得升级身份。分页返回nextCursor；增量可能重复，事件按(system,id,version)去重。",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "updatedSince",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前授权页，不代表全部",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Material"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限"
+          },
+          "429": {
+            "description": "限流，按Retry-After重试"
+          }
+        }
+      }
+    },
+    "/erp/v1/Supplier": {
+      "get": {
+        "operationId": "listSupplier",
+        "summary": "分页读取供应商",
+        "description": "租户/组织/字段鉴权。403不得升级身份。分页返回nextCursor；增量可能重复，事件按(system,id,version)去重。",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "updatedSince",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前授权页，不代表全部",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Supplier"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限"
+          },
+          "429": {
+            "description": "限流，按Retry-After重试"
+          }
+        }
+      }
+    },
+    "/erp/v1/PurchaseOrder": {
+      "get": {
+        "operationId": "listPurchaseOrder",
+        "summary": "分页读取采购订单头",
+        "description": "租户/组织/字段鉴权。403不得升级身份。分页返回nextCursor；增量可能重复，事件按(system,id,version)去重。",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "updatedSince",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前授权页，不代表全部",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PurchaseOrder"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限"
+          },
+          "429": {
+            "description": "限流，按Retry-After重试"
+          }
+        }
+      }
+    },
+    "/erp/v1/PurchaseLine": {
+      "get": {
+        "operationId": "listPurchaseLine",
+        "summary": "分页读取采购订单行",
+        "description": "租户/组织/字段鉴权。403不得升级身份。分页返回nextCursor；增量可能重复，事件按(system,id,version)去重。",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "updatedSince",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前授权页，不代表全部",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PurchaseLine"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限"
+          },
+          "429": {
+            "description": "限流，按Retry-After重试"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "Material": {
+        "type": "object",
+        "title": "物料主数据",
+        "description": "合成案例 ERP.Material；粒度=master；主键需结合来源及组织隔离。",
+        "x-source-system": "ERP",
+        "x-primary-key": "material_id",
+        "x-granularity": "master",
+        "required": [
+          "material_id",
+          "name",
+          "base_unit"
+        ],
+        "properties": {
+          "material_id": {
+            "type": "string",
+            "description": "material_id"
+          },
+          "name": {
+            "type": "string",
+            "description": "name"
+          },
+          "base_unit": {
+            "type": "string",
+            "description": "base_unit"
+          }
+        }
+      },
+      "Supplier": {
+        "type": "object",
+        "title": "供应商",
+        "description": "合成案例 ERP.Supplier；粒度=master；主键需结合来源及组织隔离。",
+        "x-source-system": "ERP",
+        "x-primary-key": "supplier_id",
+        "x-granularity": "master",
+        "required": [
+          "supplier_id",
+          "name",
+          "qualification"
+        ],
+        "properties": {
+          "supplier_id": {
+            "type": "string",
+            "description": "supplier_id"
+          },
+          "name": {
+            "type": "string",
+            "description": "name"
+          },
+          "qualification": {
+            "type": "string",
+            "description": "qualification"
+          }
+        }
+      },
+      "PurchaseOrder": {
+        "type": "object",
+        "title": "采购订单头",
+        "description": "合成案例 ERP.PurchaseOrder；粒度=transaction；主键需结合来源及组织隔离。",
+        "x-source-system": "ERP",
+        "x-primary-key": "po_id",
+        "x-granularity": "transaction",
+        "required": [
+          "po_id",
+          "supplier_id",
+          "currency",
+          "amount"
+        ],
+        "properties": {
+          "po_id": {
+            "type": "string",
+            "description": "po_id"
+          },
+          "supplier_id": {
+            "type": "string",
+            "description": "标量外键，引用 Supplier 主键；不是嵌套对象。",
+            "x-foreign-key": {
+              "schema": "Supplier",
+              "field": "supplier_id"
+            }
+          },
+          "currency": {
+            "type": "string",
+            "description": "currency"
+          },
+          "amount": {
+            "type": "number",
+            "description": "订单头金额CNY，连接明细后不得重复求和。"
+          }
+        }
+      },
+      "PurchaseLine": {
+        "type": "object",
+        "title": "采购订单行",
+        "description": "合成案例 ERP.PurchaseLine；粒度=transaction；主键需结合来源及组织隔离。",
+        "x-source-system": "ERP",
+        "x-primary-key": "po_line_id",
+        "x-granularity": "transaction",
+        "required": [
+          "po_line_id",
+          "po_id",
+          "material_id",
+          "ordered_qty",
+          "unit",
+          "line_amount"
+        ],
+        "properties": {
+          "po_line_id": {
+            "type": "string",
+            "description": "po_line_id"
+          },
+          "po_id": {
+            "type": "string",
+            "description": "标量外键，引用 PurchaseOrder 主键；不是嵌套对象。",
+            "x-foreign-key": {
+              "schema": "PurchaseOrder",
+              "field": "po_id"
+            }
+          },
+          "material_id": {
+            "type": "string",
+            "description": "标量外键，引用 Material 主键；不是嵌套对象。",
+            "x-foreign-key": {
+              "schema": "Material",
+              "field": "material_id"
+            }
+          },
+          "ordered_qty": {
+            "type": "number",
+            "description": "ordered_qty"
+          },
+          "unit": {
+            "type": "string",
+            "description": "数量单位，g与kg需按明确规则转换"
+          },
+          "line_amount": {
+            "type": "number",
+            "description": "line_amount"
+          }
+        }
+      }
+    }
+  }
+}

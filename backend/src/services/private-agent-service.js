@@ -6,7 +6,8 @@ import { describeQueryCoverage, extractQueryBusinessIds, MAX_QUERY_BUSINESS_IDS,
 import { getAgentSkills, resolveAgentSkill } from './agent-skill-registry.js';
 import { generateLocalSummary, getLocalModelRuntime, inspectModelPromptSafety, recordPromptSafetyBlock } from './local-model-gateway.js';
 import { isExplanationFollowUp, isBroadReportRequest, dialogueFallback } from './agent-dialogue-intent-service.js';
-import { conversationMaterial, understandAgentTurn } from './agent-turn-understanding-service.js';
+import { conversationMaterial, understandAgentTurn, prohibitsAction } from './agent-turn-understanding-service.js';
+import { conversationDocuments } from './conversation-material-index.js';
 import { cancelAgentRun, claimAgentExecution, createAgentRun, forgetAgentLongTermMemory, getAgentLongTermMemory, getAgentMemory, getAgentRun, getAgentRuns, recordAgentEndpointDispatch, recordAgentEndpointReceipt, recordAgentExecution, recordAgentExecutionFailure } from './agent-run-store.js';
 import { getWorkflowDefinitions } from './agent-workflow-service.js';
 import { authorizeZhiNaoTask, getZhiNaoAuthorizationProfile } from './zhinao-authorization-service.js';
@@ -16,6 +17,7 @@ import { getDemoCoreBindingsForAction } from './core-meta-object-service.js';
 import { retrieveEnterpriseKnowledge } from './enterprise-knowledge-service.js';
 import { getSemanticEvidenceForAgent, recordSemanticDecision } from './semantic-context-service.js';
 import { buildAgentQueryPlan, detectQueryEvidenceConflicts } from './agent-query-plan-service.js';
+import { getPublishedAgentOntology, runPublishedOntologyRead, shouldRefreshPublishedRead } from './published-ontology-agent-service.js';
 import { resolveQualityDraftTarget } from './agent-target-binding-service.js';
 import { retrieveAgentSystemEvidenceAsync } from './system-integration-service.js';
 import { createMemoryDecision, partitionUntrustedContent } from './prompt-security-service.js';
@@ -172,10 +174,12 @@ export async function runPrivateAgent(request, role, identityScope, options = {}
   });
   const traceId = initialTrace.id;
   let scannedConversationMaterial = '';
+  let scannedDocuments = [];
   const traceResponse = async (response, allowedRoleIds = [role.id]) => ({
     ...response,
     ...(multimodal.publicAttachments?.length ? { multimodal: { attachments: multimodal.publicAttachments, audit: multimodal.audit } } : {}),
     [conversationMaterial]: scannedConversationMaterial,
+    [conversationDocuments]: scannedDocuments,
     answerGovernance: assessAgentAnswer(response),
     traceId,
     evidenceTrace: await getAgentEvidenceTrace(traceId, allowedRoleIds, traceIdentity)
@@ -199,6 +203,7 @@ export async function runPrivateAgent(request, role, identityScope, options = {}
   const input = String(payload.text || '').trim() || (multimodal.attachments.length ? '请分析我上传的受限业务材料，并给出下一步建议。' : '');
   const multimodalContent = await extractMultimodalEvidence(multimodal.attachments);
   scannedConversationMaterial = multimodalContent.modelContext || '';
+  scannedDocuments = multimodalContent.documents || [{ text: scannedConversationMaterial }];
   const contentReportByAttachment = new Map(multimodalContent.reports.map((item) => [item.attachmentId, item]));
   multimodal.attachments.forEach((attachment) => {
     const report = contentReportByAttachment.get(attachment.id);
@@ -255,8 +260,32 @@ export async function runPrivateAgent(request, role, identityScope, options = {}
 
   const conversationHistory = String(options.conversationContext?.prompt || options.conversationContext?.recentDialogue || '');
   appendAgentEvidenceEvent(traceId, { type: 'turn_understanding_started', stage: 'understanding', status: 'started', actor: { type: 'service', id: 'agent-turn-understanding' }, summary: '正在结合本会话理解当前诉求；尚未读取业务系统或执行动作。' });
-  const turn = await understandAgentTurn({ input, history: inspectModelPromptSafety(conversationHistory).safe ? conversationHistory : '', material: `${multimodalContent.summary || ''}\n${multimodalContent.modelContext || ''}`, attachments: multimodal.attachments, safetyIdentifier: `role-${role.id}` });
-  appendAgentEvidenceEvent(traceId, { type: 'turn_understanding_completed', stage: 'understanding', status: turn?.source === 'understanding_failed' ? 'failed' : 'completed', actor: { type: 'service', id: 'agent-turn-understanding' }, summary: '本轮理解结果已返回；工具仍需服务器独立校验。', details: { intent: turn?.intent || 'legacy_mock_route', source: turn?.source || 'mock' } });
+  const publishedOntology = await getPublishedAgentOntology(role.id, identityScope);
+  const retrievedMaterial = !multimodal.attachments.length ? options.conversationContext?.materialRetrieval?.text || '' : '';
+  const turn = await understandAgentTurn({ input, history: inspectModelPromptSafety(conversationHistory).safe ? conversationHistory : '', material: `${retrievedMaterial}\n${multimodalContent.summary || ''}\n${multimodalContent.modelContext || ''}`, attachments: multimodal.attachments, safetyIdentifier: `role-${role.id}`, publishedModel: publishedOntology?.prompt || '' });
+  appendAgentEvidenceEvent(traceId, { type: 'turn_understanding_completed', stage: 'understanding', status: turn?.source === 'understanding_failed' ? 'failed' : 'completed', actor: { type: 'service', id: 'agent-turn-understanding' }, summary: '本轮理解结果已返回；工具仍需服务器独立校验。', details: { intent: turn?.intent || 'legacy_mock_route', source: turn?.source || 'mock', failureCode: turn?.failureCode || null, diagnostics: turn?.diagnostics || null, timing: turn?.timing || null, modelVersion: publishedOntology?.metadata.modelVersion || null } });
+  const explicitComparison = /对比|比较/.test(input) && extractQueryBusinessIds(input).length > 1 && !prohibitsAction(input, 'read_business');
+  const refreshRead = shouldRefreshPublishedRead({ input, turn, hasTaskRoot: extractQueryBusinessIds(options.conversationContext?.taskGoal || '').length > 0, materialOnly: Boolean(retrievedMaterial || multimodal.attachments.length) });
+  if (publishedOntology?.metadata.readPlans.length && (turn?.intent === 'read_business' || explicitComparison && turn?.source !== 'understanding_failed' || refreshRead) && !multimodal.attachments.length) {
+    const explicitIds = extractQueryBusinessIds(input);
+    const goalIds = extractQueryBusinessIds(options.conversationContext?.taskGoal || '');
+    const targets = explicitIds.length ? explicitIds : goalIds;
+    if (targets.length >= 1) {
+      const temporal = buildAgentQueryPlan(input);
+      const result = temporal.status !== 'ready' || temporal.timeRange || temporal.version || temporal.asOf
+        ? { status: 'needs_input', code: 'ONTOLOGY_TEMPORAL_QUERY_UNSUPPORTED', text: '该关联计算当前支持来源快照；历史/版本筛选需单独核验完整覆盖，本次未查询或计算。' }
+        : await runPublishedOntologyRead({ ontology: publishedOntology, roleId: role.id, scope: identityScope, target: targets, input });
+      const evidence = (result.records || []).map(r => ({ id: r.id, source: r.system, title: r.objectType, classification: r.classification, statement: JSON.stringify(r.payload), provenance: { sourceSystem: r.system, objectVersion: r.version, occurredAt: r.occurredAt, modelVersion: publishedOntology.metadata.modelVersion, modelFingerprint: publishedOntology.metadata.modelFingerprint } }));
+      appendAgentEvidenceEvent(traceId, { type: 'published_ontology_read', stage: 'read', status: result.status, actor: { type: 'service', id: 'ontology-read-runtime' }, summary: '按发布模型执行有界授权关联查询与只读计算。', details: { code: result.code, model: publishedOntology.metadata, queries: result.queries || [], results: result.results || [] }, evidence });
+      setAgentEvidenceTraceStatus(traceId, result.status, { completed: true });
+      return traceResponse({ text: result.text, agent: { ...agent, inferenceSource: 'controlled_semantic_read' }, evidence, command: null,
+        semanticContext: { ...publishedOntology.metadata, facts: evidence, relations: [], calculations: result.results || [], querySteps: result.queries || [], coverage: result.coverage, analysis: result.analysis, comparisons: result.comparisons, timing: result.timing },
+        plan: [{ tool: 'published_ontology_read', status: result.status, owner: '语义只读运行时' }],
+        task: { goal: explicitIds.length ? input : options.conversationContext?.taskGoal || input, phase: result.status, status: result.status, writeRequested: false },
+        lifecycle: lifecycle(result.status, result.status === 'completed' ? '模型关联核验完成（只读）' : '模型关联核验未完成', { dataAccess: result.queries?.length ? 'source_read' : 'not_confirmed' }),
+        authorization: { decision: result.status === 'completed' ? 'ALLOW_SCOPED_READ' : 'READ_NOT_COMPLETED', auditReason: '部署授权、模型对象策略及逐条组织范围取交集；无写入权限。' } });
+    }
+  }
   const explanationFollowUp = isExplanationFollowUp(input);
   const conversationUserContext = getConversationUserContext(input, options.conversationContext);
   const longTermFollowUp = conversationReferencePattern.test(input) || conversationFollowUpPattern.test(input);

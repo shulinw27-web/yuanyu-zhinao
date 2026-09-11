@@ -4,6 +4,7 @@ import { createMemoryDecision, normalizeUntrustedText } from './prompt-security-
 import { rememberAgentLongTermGoal } from './agent-run-store.js';
 import { structuredMemoryPrompt, updateStructuredConversationMemory } from './agent-structured-memory-service.js';
 import { boundedMaterial, conversationMaterial } from './agent-turn-understanding-service.js';
+import { conversationDocuments, indexScannedMaterials, selectConversationMaterial } from './conversation-material-index.js';
 
 const NAMESPACE = 'agent_conversations';
 const SUBJECT_INDEX_NAMESPACE = 'agent_conversation_subjects';
@@ -20,6 +21,7 @@ const hash = (value) => createHash('sha256').update(String(value || '')).digest(
 const authorizationFingerprint = (accessContext) => {
   if (!accessContext) return null;
   const normalized = {
+    ontologyRuntimePolicy: hash(process.env.ONTOLOGY_RUNTIME_GRANTS_JSON || '{}'),
     roleIds: [...(accessContext.roleIds || [])].sort(),
     organizationIds: [...(accessContext.organizationIds || [])].sort(),
     pagePermissionIds: [...(accessContext.pagePermissionIds || [])].sort(),
@@ -268,7 +270,7 @@ export async function pinAgentConversationGoal(conversationId, identityScope, ac
   return postgresRepository ? postgresRepository.mutateState(NAMESPACE, conversationId, null, mutation) : mutateState(NAMESPACE, conversationId, null, mutation);
 }
 
-export async function getAgentConversationContext(conversationId, identityScope, accessContext = null) {
+export async function getAgentConversationContext(conversationId, identityScope, accessContext = null, query = '') {
   const identity = normalizeIdentity(identityScope);
   const conversation = identity ? (postgresRepository ? await postgresRepository.readState(NAMESPACE, conversationId) : readState(NAMESPACE, conversationId)) : null;
   if (!owns(conversation, identity) || conversation.status !== 'active') return null;
@@ -290,6 +292,7 @@ export async function getAgentConversationContext(conversationId, identityScope,
   ].filter(Boolean).join('\n');
   return {
     conversationId: conversation.id,
+    materialRetrieval: accessUnchanged ? selectConversationMaterial(conversation.materialIndex || [], query) : { text: '', selected: 0, total: 0 },
     prompt: trustedPrompt.slice(0, 32_000),
     taskGoal: conversation.task?.goal || null,
     // 历史模型答复不是业务事实，后续轮次只允许把用户原始目标作为可选承接上下文。
@@ -309,6 +312,7 @@ export async function recordAgentConversationExchange({ conversationId, identity
     const currentAccessFingerprint = authorizationFingerprint(accessContext);
     if (currentAccessFingerprint && conversation.context.accessFingerprint && currentAccessFingerprint !== conversation.context.accessFingerprint) {
       conversation.materialContext = '';
+      conversation.materialIndex = [];
       conversation.context.summary = '';
       conversation.context.structuredMemory = null;
       conversation.context.summaryVersion += 1;
@@ -320,6 +324,11 @@ export async function recordAgentConversationExchange({ conversationId, identity
     const agent = safeStoredText(response?.text || '', 'conversation_agent');
     const material = safeStoredText(boundedMaterial(response?.[conversationMaterial] || '', 7800), 'conversation_material');
     if (material.text && !material.quarantined) conversation.materialContext = boundedMaterial([material.text, conversation.materialContext].filter(Boolean).join('\n'), 8000);
+    const indexed = indexScannedMaterials(response?.[conversationDocuments] || []);
+    if (indexed.length) {
+      const merged = [...new Map([...indexed, ...(conversation.materialIndex || [])].filter(c => c.expiresAt > Date.now()).map(c => [`${c.documentId}:${c.chunkId}`, c])).values()];
+      let stored = 0; conversation.materialIndex = merged.filter(c => (stored += c.text.length) <= 200000).slice(0, 1000);
+    }
     conversation.messages.push({
       id: `message-${randomUUID()}`,
       type: 'user',
@@ -383,6 +392,7 @@ export async function recordAgentConversationTaskOutcome({ conversationId, ident
     const agent = safeStoredText(response?.text || '任务状态已更新。', 'conversation_agent_outcome');
     if (currentAccessFingerprint && conversation.context.accessFingerprint && currentAccessFingerprint !== conversation.context.accessFingerprint) {
       conversation.materialContext = '';
+      conversation.materialIndex = [];
       conversation.context.summary = '';
       conversation.context.structuredMemory = null;
       conversation.context.summaryHash = hash('');

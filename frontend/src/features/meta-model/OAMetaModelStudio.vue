@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import OntologyScenarioPanel from './OntologyScenarioPanel.vue';
 import OntologyCaseReplay from './OntologyCaseReplay.vue';
+import OntologyReadPlanPanel from './OntologyReadPlanPanel.vue';
 
 const props = defineProps({ metaModel: Object, draft: Object, authoringProfile: Object, simulation: Object, semanticContext: Object, role: String, message: String, replayCases: Function, buttonPermissionIds: { type: Array, default: () => [] } });
 const emit = defineEmits(['save-draft', 'validate-draft', 'simulate-build', 'publish']);
@@ -139,7 +140,8 @@ const saveDraft = () => emit('save-draft', { modelingProfile: localDraft.value.m
 <template>
   <section v-if="metaModel && localDraft" class="panel meta-model-studio">
     <OntologyScenarioPanel :draft="localDraft" :can-edit="canModel" :profile="authoringProfile" :selected-object="selectedObject" :simulation="simulation" @replace-draft="localDraft = $event; selectedId = $event.objectTypes[0]?.id || ''" @change-profile="localDraft.modelingProfile = $event" @change-granularity="selectedObject.granularity = $event" />
-    <OntologyCaseReplay :fingerprint="draft?.fingerprint" :role="role" :disabled="!canValidate || hasUnsavedChanges" :execute="replayCases" />
+    <OntologyReadPlanPanel :draft="localDraft" :can-edit="canModel" @apply-plan="localDraft.scenario.readPlans = $event; localDraft.scenario.requireCaseReplay = true" />
+    <OntologyCaseReplay :fingerprint="draft?.fingerprint" :role="role" :read-plan-mode="Boolean(localDraft.scenario?.readPlans?.length)" :disabled="!canValidate || hasUnsavedChanges" :execute="replayCases" />
     <p v-if="hasUnsavedChanges" role="status">有未保存修改。请先保存，再校验、模拟构建或登记；旧版本的通过结果不适用于当前编辑。</p>
     <div class="section-header"><div><span class="eyebrow">SEMANTIC META MODEL WORKBENCH · SEMANTICA</span><h2>可视化语义建模</h2><p>候选对象和关系来自 Semantica 图谱；将它们加入画布、补齐业务规则后，再登记为智脑可用的语义模型。</p></div><div class="meta-status"><b>{{ canModel ? '可编辑' : '只读查看' }}</b><small>{{ metaModel.code }} · 草稿 {{ localDraft.id }}</small></div></div>
     <div class="authoring-steps review-journey"><span class="done"><i>1</i><b>观察事实</b><small>Semantica 候选</small></span><em>›</em><button :class="{ active: reviewMode === 'objects' }" @click="reviewMode = 'objects'"><i>2</i><b>校对对象</b><small>{{ completeObjectCount }}/{{ localDraft.objectTypes.length }} 完整</small></button><em>›</em><button :class="{ active: reviewMode === 'relations' }" @click="reviewMode = 'relations'"><i>3</i><b>校对关系</b><small>{{ localDraft.relationshipTypes.length - invalidRelations.length }}/{{ localDraft.relationshipTypes.length }} 有效</small></button><em>›</em><button :class="{ active: reviewMode === 'issues' }" @click="reviewMode = 'issues'"><i>4</i><b>处理问题</b><small>{{ reviewIssues.length }} 项待处理</small></button><em>›</em><span :class="{ done: localDraft.validation?.status === 'passed' }"><i>5</i><b>校验登记</b><small>{{ localDraft.validation?.status === 'passed' ? '可以模拟构建' : '等待校验' }}</small></span></div>

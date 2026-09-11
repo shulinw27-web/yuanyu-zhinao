@@ -1,5 +1,6 @@
 import { getBusinessDecisionCatalog, replayBusinessDecision } from './business-decision-service.js';
 import { validateDecisionBinding } from './decision-binding-service.js';
+import { validateOntologyReadPlans } from './ontology-read-plan-service.js';
 
 export const modelingProfiles = ['oa-approval', 'general'];
 export const objectGranularities = ['unspecified', 'master', 'batch', 'inventory_item', 'transaction', 'event', 'organization'];
@@ -11,6 +12,8 @@ export function validateOntologyContract(draft) {
   const scenario = draft.scenario || {};
   const checks = [];
   const check = (name, passed, detail) => checks.push({ name, status: passed ? 'passed' : 'failed', detail });
+  const readPlans = validateOntologyReadPlans(draft);
+  check('受控关联查询与计算', readPlans.status === 'passed', readPlans.code || '仅支持显式 FK、有限只读运算及绑定版本的案例回放；不执行任意脚本。');
   check('建模场景', modelingProfiles.includes(draft.modelingProfile), '选择通用业务场景或 OA 审批模板；模板选择不改变平台权限。');
   if (draft.modelingProfile === 'general') check('业务目标与验收问题', typeof scenario.objective === 'string' && Boolean(scenario.objective.trim())
     && Array.isArray(scenario.questions) && scenario.questions.length > 0 && scenario.questions.every((item) => typeof item === 'string' && item.trim()), '通用场景必须说明解决什么问题，并至少提供一个可验收的业务问题。');

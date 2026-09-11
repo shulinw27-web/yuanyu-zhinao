@@ -188,7 +188,7 @@ export async function handleAgentRoutes({ req, res, url, role, agentIdentity, ef
     if (!normalized.ok) { send(res, 400, normalized.error); return true; }
     const input = normalized.input;
     const conversationId = String(input.conversationId || '').trim();
-    const context = conversationId ? await getAgentConversationContext(conversationId, agentIdentity, effectiveAccess) : null;
+    const context = conversationId ? await getAgentConversationContext(conversationId, agentIdentity, effectiveAccess, input.text || '') : null;
     if (conversationId && !context) { send(res, 404, { message: '智脑任务不存在、已归档或不属于当前用户。', code: 'AGENT_CONVERSATION_NOT_FOUND' }); return true; }
     const result = await runPrivateAgent(input, actionRole, agentIdentity, {
       resolveCommandRole: () => resolveCommandRole(role, agentIdentity),

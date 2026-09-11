@@ -20,6 +20,9 @@ export function validQueryInstant(value) {
 // occurredAt means event occurrence; it never means validity at that instant.
 export function buildAgentQueryPlan(input, nowAt = Date.now()) {
   let prose = String(input).replace(/\b[A-Z][A-Z0-9_]*(?:-[A-Z0-9_]+)+\b/giu, '');
+  // Model provenance is not a filter on source record versions. Preserve all
+  // unqualified/data-version terms so ambiguous temporal reads still fail shut.
+  prose = prose.replace(/(?:已发布(?:的)?|最新(?:的)?|当前(?:的)?|采用(?:的)?)?\s*(?:语义模型|世界模型|模型)\s*版本(?:号)?(?:\s*[:：]?\s*(?:mm-[A-Za-z0-9._-]+|v\d+(?:\.\d+)*))?/giu, '模型溯源');
   const plan = { schemaVersion: 'agent-query-plan.v1', businessIds: extractQueryBusinessIds(input), timeZone: 'Asia/Shanghai', timeRange: null, version: null, asOf: null, status: 'ready', semantics: 'event_occurrence_not_historical_snapshot' };
   const reject = (reason) => ({ ...plan, status: 'needs_input', reason });
   const snapshot = prose.match(/(?:截至|历史快照|\bas\s+of)\s*(20\d{2}-\d{2}-\d{2}T[^\s，。；？?\u4e00-\u9fff]+)/iu);

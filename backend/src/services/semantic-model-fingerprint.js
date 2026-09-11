@@ -5,6 +5,7 @@ const relationSignature = (item) => `${item.from}:${item.predicate}:${item.to}:$
 export const semanticShape = (draft = {}) => ({
   modelingProfile: draft.modelingProfile || 'oa-approval',
   scenario: draft.scenario || null,
+  ...(draft.worldModel ? { worldModel: draft.worldModel } : {}),
   stateMachines: draft.stateMachines || [],
   events: draft.events || [],
   objectTypes: (draft.objectTypes || [])

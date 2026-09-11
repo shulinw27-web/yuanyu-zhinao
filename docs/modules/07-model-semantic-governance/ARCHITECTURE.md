@@ -1,5 +1,11 @@
 # 模型与语义治理技术架构
 
+2026-09-10 全链路修复：执行器在当前对象数据集上执行逐跳授权的前向闭包，再读取下游事实；三根以内独立计算，不按供应商外部批号合并。发布消费桥接层在确定性结果后调用受控证据解释，并在回答前重新核验权限和模型指纹。图范围完整、企业全局覆盖和解释成功是不同状态。会话材料通过独立有界索引检索，不能把旧模型回答当成实时企业事实。详细边界见 [发布消费指南](../../guides/PUBLISHED_MODEL_WORKBENCH.md)。
+
+2026-09-10 闭环增量：人工审阅的 `scenario.readPlans` 经有界表达式校验、同执行器正反例回放、Semantica 回执校验后发布；智脑只消费租户匹配的发布定义。新服务 `ontology-read-plan-service` 负责受控计算，`published-ontology-agent-service` 负责业务入口桥接。对象部署授权、模型策略、IAM 范围独立核验，样本和模型不能自授权限。见 [闭环指南](../../guides/PUBLISHED_MODEL_WORKBENCH.md) 和 [回归报告](../../development/SEMANTIC_WORKBENCH_LOOP_REPAIR.md)。
+
+2026-09-10：新增材料工作区、输入证据保真校验、授权上传样本演练及需求候选编译服务；保持原治理存储、身份、确认与发布链路。结构化解析不再依赖模型截断摘要，见 [架构增量](../../architecture/SEMANTIC_MODEL_AUTHORING.md) 与 [修复回归](../../development/SEMANTIC_MANUFACTURING_REPAIR.md)。
+
 ## 当前代码
 
 `core-meta-object-service.js`、`meta-model-service.js`、`world-model-template-service.js`、`semantic-context-service.js`、`enterprise-knowledge-service.js`、`semantic-operations-agent-service.js`、`semantic-operations-task-service.js`，以及独立 `services/semantic-context/app.py`。

@@ -177,7 +177,7 @@ export function inspectMultimodalInput(payload = {}, role) {
       dataClassification: '受限业务材料',
       contentScan: attachments.length ? 'unscanned' : 'not_applicable',
       modelContentEgress: 'blocked_until_content_scan',
-      retention: `附件原文不持久化，仅保留在本次受控任务上下文；最长 ${ATTACHMENT_RETENTION_MINUTES} 分钟后失效`
+      retention: `附件原文件不持久化；已扫描文本可作为有界会话节选保存，仅同一身份与授权可检索，最长 ${ATTACHMENT_RETENTION_MINUTES} 分钟后失效；失效不代表存储备份已物理删除`
     }
   };
 }
@@ -314,6 +314,9 @@ const assessExtracted = (text, source) => {
 
 export async function extractMultimodalEvidence(attachments = []) {
   const evidence = [];
+  // Server-only complete, scanned and DLP-redacted text. Presentation/model
+  // budgets must not truncate the input of deterministic schema parsers.
+  const documents = [];
   const reports = [];
   const quarantined = [];
   for (const attachment of attachments) {
@@ -337,6 +340,7 @@ export async function extractMultimodalEvidence(attachments = []) {
         continue;
       }
       evidence.push(documentEvidence({ attachment, page: 1, text: normalizeExtractedText(text), assessment }));
+      documents.push({ attachmentId: attachment.id, name: attachment.name, mimeType: attachment.mimeType, text });
       reports.push({ attachmentId: attachment.id, status: 'content_scanned', modelContentEligible: true, pageCount: 1, structuredSchemaCandidate: true, securityScan: securityScan.status, dlpSignals: dlp.signals });
       continue;
     }
@@ -406,7 +410,8 @@ export async function extractMultimodalEvidence(attachments = []) {
     const items = evidence.filter(item => item.locator.attachmentId === attachment.id);
     const original = items.map(item => `[${item.title}]\n${item.statement}`).join('\n');
     const included = original.slice(0, budget);
-    Object.assign(report, { name: attachment.name, extractedCharacters: original.length, includedCharacters: included.length, truncated: Boolean(report.truncated || original.length > included.length), rawImageEligible: false });
+    if (!documents.some(item => item.attachmentId === attachment.id) && report.modelContentEligible && !report.partial && !report.truncated) documents.push({ attachmentId: attachment.id, name: attachment.name, mimeType: attachment.mimeType, text: original });
+    Object.assign(report, { name: attachment.name, extractedCharacters: original.length, includedCharacters: included.length, extractionComplete: Boolean(report.modelContentEligible && !report.partial && !report.truncated), contextTruncated: original.length > included.length, truncated: Boolean(report.truncated || original.length > included.length), rawImageEligible: false });
     if (report.missingPages?.length) report.partial = true;
     const limited = report.truncated || report.partial || !report.modelContentEligible;
     const notice = `${limited ? '【未完整读取】' : '【可引用摘录】'} ${report.reason || ''}${report.truncated ? '内容达到处理上限，后续未展示内容不能推断；请拆分或指定范围。' : ''}${report.missingPages?.length ? `未识别页面视觉内容：${report.missingPages.join(', ')}。` : ''}${(report.warnings || []).join(' ')}`;
@@ -417,7 +422,7 @@ export async function extractMultimodalEvidence(attachments = []) {
     return `[附件 ${attachment.name} | ${attachment.id}]\n${notice}\n${included}`;
   });
   const modelContext = blocks.join('\n');
-  return {
+  const result = {
     evidence,
     reports,
     quarantined,
@@ -426,4 +431,6 @@ export async function extractMultimodalEvidence(attachments = []) {
       ? `内容级解析：${reports.filter((item) => item.status === 'content_scanned').length} 份材料可引用；${reports.filter((item) => item.status === 'quarantined').length} 份已隔离；${reports.filter((item) => !['content_scanned', 'quarantined'].includes(item.status)).length} 份未提供模型内容。`
       : '未上传多模态材料。'
   };
+  Object.defineProperty(result, 'documents', { value: documents, enumerable: false });
+  return result;
 }

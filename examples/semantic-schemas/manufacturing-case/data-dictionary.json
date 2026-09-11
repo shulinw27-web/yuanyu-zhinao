@@ -1,0 +1,615 @@
+{
+  "synthetic": true,
+  "description": "每张表的system是权威来源，不按文件名猜测。",
+  "tables": [
+    {
+      "name": "Material",
+      "system": "ERP",
+      "label": "物料主数据",
+      "granularity": "master",
+      "primaryKey": "material_id",
+      "description": "合成案例 ERP.Material；粒度=master；主键需结合来源及组织隔离。",
+      "fields": [
+        {
+          "name": "material_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": true,
+          "description": "material_id"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "name"
+        },
+        {
+          "name": "base_unit",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "base_unit"
+        }
+      ]
+    },
+    {
+      "name": "Supplier",
+      "system": "ERP",
+      "label": "供应商",
+      "granularity": "master",
+      "primaryKey": "supplier_id",
+      "description": "合成案例 ERP.Supplier；粒度=master；主键需结合来源及组织隔离。",
+      "fields": [
+        {
+          "name": "supplier_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": true,
+          "description": "supplier_id"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "name"
+        },
+        {
+          "name": "qualification",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "qualification"
+        }
+      ]
+    },
+    {
+      "name": "PurchaseOrder",
+      "system": "ERP",
+      "label": "采购订单头",
+      "granularity": "transaction",
+      "primaryKey": "po_id",
+      "description": "合成案例 ERP.PurchaseOrder；粒度=transaction；主键需结合来源及组织隔离。",
+      "fields": [
+        {
+          "name": "po_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": true,
+          "description": "po_id"
+        },
+        {
+          "name": "supplier_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "reference": "Supplier",
+          "description": "标量外键，引用 Supplier 主键；不是嵌套对象。"
+        },
+        {
+          "name": "currency",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "currency"
+        },
+        {
+          "name": "amount",
+          "type": "number",
+          "required": true,
+          "primaryKey": false,
+          "description": "订单头金额CNY，连接明细后不得重复求和。"
+        }
+      ]
+    },
+    {
+      "name": "PurchaseLine",
+      "system": "ERP",
+      "label": "采购订单行",
+      "granularity": "transaction",
+      "primaryKey": "po_line_id",
+      "description": "合成案例 ERP.PurchaseLine；粒度=transaction；主键需结合来源及组织隔离。",
+      "fields": [
+        {
+          "name": "po_line_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": true,
+          "description": "po_line_id"
+        },
+        {
+          "name": "po_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "reference": "PurchaseOrder",
+          "description": "标量外键，引用 PurchaseOrder 主键；不是嵌套对象。"
+        },
+        {
+          "name": "material_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "reference": "Material",
+          "description": "标量外键，引用 Material 主键；不是嵌套对象。"
+        },
+        {
+          "name": "ordered_qty",
+          "type": "number",
+          "required": true,
+          "primaryKey": false,
+          "description": "ordered_qty"
+        },
+        {
+          "name": "unit",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "数量单位，g与kg需按明确规则转换"
+        },
+        {
+          "name": "line_amount",
+          "type": "number",
+          "required": true,
+          "primaryKey": false,
+          "description": "line_amount"
+        }
+      ]
+    },
+    {
+      "name": "Receipt",
+      "system": "WMS",
+      "label": "收货单头",
+      "granularity": "transaction",
+      "primaryKey": "receipt_id",
+      "description": "合成案例 WMS.Receipt；粒度=transaction；主键需结合来源及组织隔离。",
+      "fields": [
+        {
+          "name": "receipt_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": true,
+          "description": "receipt_id"
+        },
+        {
+          "name": "po_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "reference": "PurchaseOrder",
+          "description": "标量外键，引用 PurchaseOrder 主键；不是嵌套对象。"
+        },
+        {
+          "name": "received_at",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "received_at"
+        }
+      ]
+    },
+    {
+      "name": "ReceiptLine",
+      "system": "WMS",
+      "label": "收货明细",
+      "granularity": "transaction",
+      "primaryKey": "receipt_line_id",
+      "description": "合成案例 WMS.ReceiptLine；粒度=transaction；主键需结合来源及组织隔离。",
+      "fields": [
+        {
+          "name": "receipt_line_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": true,
+          "description": "receipt_line_id"
+        },
+        {
+          "name": "receipt_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "reference": "Receipt",
+          "description": "标量外键，引用 Receipt 主键；不是嵌套对象。"
+        },
+        {
+          "name": "po_line_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "reference": "PurchaseLine",
+          "description": "标量外键，引用 PurchaseLine 主键；不是嵌套对象。"
+        },
+        {
+          "name": "lot_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "reference": "MaterialLot",
+          "description": "标量外键，引用 MaterialLot 主键；不是嵌套对象。"
+        },
+        {
+          "name": "received_qty",
+          "type": "number",
+          "required": true,
+          "primaryKey": false,
+          "description": "received_qty"
+        },
+        {
+          "name": "unit",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "数量单位，g与kg需按明确规则转换"
+        }
+      ]
+    },
+    {
+      "name": "MaterialLot",
+      "system": "WMS",
+      "label": "来料批次",
+      "granularity": "batch",
+      "primaryKey": "lot_id",
+      "description": "合成案例 WMS.MaterialLot；粒度=batch；主键需结合来源及组织隔离。",
+      "fields": [
+        {
+          "name": "lot_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": true,
+          "description": "lot_id"
+        },
+        {
+          "name": "material_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "reference": "Material",
+          "description": "标量外键，引用 Material 主键；不是嵌套对象。"
+        },
+        {
+          "name": "supplier_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "reference": "Supplier",
+          "description": "标量外键，引用 Supplier 主键；不是嵌套对象。"
+        },
+        {
+          "name": "supplier_lot_no",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "supplier_lot_no"
+        }
+      ]
+    },
+    {
+      "name": "StockItem",
+      "system": "WMS",
+      "label": "库位库存快照",
+      "granularity": "inventory_item",
+      "primaryKey": "stock_id",
+      "description": "合成案例 WMS.StockItem；粒度=inventory_item；主键需结合来源及组织隔离。",
+      "fields": [
+        {
+          "name": "stock_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": true,
+          "description": "stock_id"
+        },
+        {
+          "name": "lot_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "reference": "MaterialLot",
+          "description": "标量外键，引用 MaterialLot 主键；不是嵌套对象。"
+        },
+        {
+          "name": "warehouse_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "warehouse_id"
+        },
+        {
+          "name": "bin_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "bin_id"
+        },
+        {
+          "name": "on_hand",
+          "type": "number",
+          "required": true,
+          "primaryKey": false,
+          "description": "on_hand"
+        },
+        {
+          "name": "reserved",
+          "type": "number",
+          "required": true,
+          "primaryKey": false,
+          "description": "reserved"
+        },
+        {
+          "name": "available",
+          "type": "number",
+          "required": true,
+          "primaryKey": false,
+          "description": "库位快照可用量，受控状态为0，不是总量。"
+        },
+        {
+          "name": "unit",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "数量单位，g与kg需按明确规则转换"
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "status"
+        },
+        {
+          "name": "as_of",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "含时区ISO8601快照时间"
+        }
+      ]
+    },
+    {
+      "name": "Inspection",
+      "system": "LIMS",
+      "label": "检验记录",
+      "granularity": "event",
+      "primaryKey": "inspection_id",
+      "description": "合成案例 LIMS.Inspection；粒度=event；主键需结合来源及组织隔离。",
+      "fields": [
+        {
+          "name": "inspection_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": true,
+          "description": "inspection_id"
+        },
+        {
+          "name": "lot_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "reference": "MaterialLot",
+          "description": "标量外键，引用 MaterialLot 主键；不是嵌套对象。"
+        },
+        {
+          "name": "result",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "result"
+        },
+        {
+          "name": "measured_value",
+          "type": "number",
+          "required": true,
+          "primaryKey": false,
+          "description": "measured_value"
+        },
+        {
+          "name": "limit_value",
+          "type": "number",
+          "required": true,
+          "primaryKey": false,
+          "description": "limit_value"
+        },
+        {
+          "name": "measured_at",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "measured_at"
+        }
+      ]
+    },
+    {
+      "name": "QualityCase",
+      "system": "QMS",
+      "label": "质量异常",
+      "granularity": "event",
+      "primaryKey": "case_id",
+      "description": "合成案例 QMS.QualityCase；粒度=event；主键需结合来源及组织隔离。",
+      "fields": [
+        {
+          "name": "case_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": true,
+          "description": "case_id"
+        },
+        {
+          "name": "lot_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "reference": "MaterialLot",
+          "description": "标量外键，引用 MaterialLot 主键；不是嵌套对象。"
+        },
+        {
+          "name": "inspection_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "reference": "Inspection",
+          "description": "标量外键，引用 Inspection 主键；不是嵌套对象。"
+        },
+        {
+          "name": "state",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "state"
+        },
+        {
+          "name": "action_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "action_id"
+        }
+      ]
+    },
+    {
+      "name": "ProductionOrder",
+      "system": "MES",
+      "label": "生产工单",
+      "granularity": "transaction",
+      "primaryKey": "production_id",
+      "description": "合成案例 MES.ProductionOrder；粒度=transaction；主键需结合来源及组织隔离。",
+      "fields": [
+        {
+          "name": "production_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": true,
+          "description": "production_id"
+        },
+        {
+          "name": "material_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "reference": "Material",
+          "description": "标量外键，引用 Material 主键；不是嵌套对象。"
+        },
+        {
+          "name": "required_qty",
+          "type": "number",
+          "required": true,
+          "primaryKey": false,
+          "description": "required_qty"
+        },
+        {
+          "name": "unit",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "数量单位，g与kg需按明确规则转换"
+        },
+        {
+          "name": "state",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "state"
+        }
+      ]
+    },
+    {
+      "name": "MaterialIssue",
+      "system": "MES",
+      "label": "实际领料",
+      "granularity": "event",
+      "primaryKey": "issue_id",
+      "description": "合成案例 MES.MaterialIssue；粒度=event；主键需结合来源及组织隔离。",
+      "fields": [
+        {
+          "name": "issue_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": true,
+          "description": "issue_id"
+        },
+        {
+          "name": "production_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "reference": "ProductionOrder",
+          "description": "标量外键，引用 ProductionOrder 主键；不是嵌套对象。"
+        },
+        {
+          "name": "lot_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "reference": "MaterialLot",
+          "description": "标量外键，引用 MaterialLot 主键；不是嵌套对象。"
+        },
+        {
+          "name": "issued_qty",
+          "type": "number",
+          "required": true,
+          "primaryKey": false,
+          "description": "issued_qty"
+        },
+        {
+          "name": "unit",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "数量单位，g与kg需按明确规则转换"
+        },
+        {
+          "name": "issued_at",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "issued_at"
+        }
+      ]
+    },
+    {
+      "name": "Approval",
+      "system": "OA",
+      "label": "质量处置审批",
+      "granularity": "transaction",
+      "primaryKey": "approval_id",
+      "description": "合成案例 OA.Approval；粒度=transaction；主键需结合来源及组织隔离。",
+      "fields": [
+        {
+          "name": "approval_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": true,
+          "description": "approval_id"
+        },
+        {
+          "name": "case_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "reference": "QualityCase",
+          "description": "标量外键，引用 QualityCase 主键；不是嵌套对象。"
+        },
+        {
+          "name": "state",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "state"
+        },
+        {
+          "name": "action_id",
+          "type": "string",
+          "required": true,
+          "primaryKey": false,
+          "description": "action_id"
+        },
+        {
+          "name": "execution_receipt_id",
+          "type": "string",
+          "required": false,
+          "primaryKey": false,
+          "description": "外部执行回执；null说明尚未执行。"
+        }
+      ]
+    }
+  ]
+}

@@ -219,12 +219,12 @@ def validate_model_definition(definition: object) -> tuple[dict | None, dict]:
     if not isinstance(definition.get("id"), str) or not definition.get("id", "").strip() or not isinstance(objects, list) or not isinstance(relationships, list):
         return None, {"status": "failed", "checks": [{"name": "模型结构", "status": "failed", "detail": "模型标识、对象和关系为必填项。"}]}
     asset_names = ["metrics", "glossaryTerms", "dataContracts", "qualityRules", "accessPolicies", "lineageEdges", "stateMachines", "events"]
-    if not 1 <= len(objects) <= 20 or len(relationships) > 40 or any(not isinstance(item, dict) for item in objects + relationships) or any(
+    if not 1 <= len(objects) <= 40 or len(relationships) > 40 or any(not isinstance(item, dict) for item in objects + relationships) or any(
         not isinstance(definition.get(name, []), list) or any(not isinstance(item, dict) for item in definition.get(name, [])) for name in asset_names
     ) or any(not isinstance(item.get("fields"), list) or not isinstance(item.get("sourceSystems"), list) for item in objects):
         return None, {"status": "failed", "checks": [{"name": "模型结构", "status": "failed", "detail": "对象、关系和治理资产格式无效或超过限制；不会静默丢弃。"}]}
     normalized_objects = []
-    for item in objects[:20]:
+    for item in objects:
         if not isinstance(item, dict):
             continue
         normalized_objects.append({
@@ -249,9 +249,11 @@ def validate_model_definition(definition: object) -> tuple[dict | None, dict]:
         {"name": "指标与数据契约", "status": "passed" if all(str(item.get("grain", "")) in object_ids and item.get("expression") for item in metrics if isinstance(item, dict)) and all(str(item.get("objectType", "")) in object_ids and item.get("schemaVersion") for item in data_contracts if isinstance(item, dict)) else "failed", "detail": "指标粒度和数据契约对象必须引用已登记对象。"},
         {"name": "质量、权限与血缘", "status": "passed" if all(str(item.get("objectType", "")) in object_ids and item.get("rule") for item in quality_rules if isinstance(item, dict)) and all(str(item.get("objectType", "")) in object_ids and item.get("effect") for item in access_policies if isinstance(item, dict)) and all(str(item.get("to", "")) in object_ids and item.get("from") for item in lineage_edges if isinstance(item, dict)) else "failed", "detail": "质量规则、访问策略与来源血缘必须引用已登记对象。"},
     ]
-    validation = {"status": "passed" if all(item["status"] == "passed" for item in checks) else "failed", "checks": checks, "checkedAt": timestamp()}
+    validation = {"status": "passed" if all(item["status"] == "passed" for item in checks) else "failed", "scope": "structural_definition_only", "businessSemanticsVerified": False, "checks": checks, "checkedAt": timestamp()}
     normalized = {"id": definition["id"], "code": str(definition.get("code", definition["id"])), "version": str(definition.get("version", "draft")), "sourceFingerprint": str(definition.get("sourceFingerprint", "")), "objectTypes": normalized_objects, "relationshipTypes": normalized_relationships, "metrics": metrics[:50], "glossaryTerms": glossary_terms[:100], "dataContracts": data_contracts[:50], "qualityRules": quality_rules[:100], "accessPolicies": access_policies[:100], "lineageEdges": lineage_edges[:100]}
     normalized.update({"modelingProfile": definition.get("modelingProfile", "oa-approval"), "scenario": definition.get("scenario"), "stateMachines": definition.get("stateMachines", []), "events": definition.get("events", [])})
+    if definition.get("worldModel"):
+        normalized["worldModel"] = definition["worldModel"]
     return normalized, validation
 
 

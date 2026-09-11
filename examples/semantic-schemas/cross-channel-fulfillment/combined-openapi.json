@@ -1,0 +1,643 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "合成集团跨仓履约接口契约",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://synthetic-group.example.invalid"
+    }
+  ],
+  "paths": {
+    "/agent/evidence": {
+      "post": {
+        "summary": "本地模拟连接器按权限和编号返回证据；非真实企业接口",
+        "responses": {
+          "200": {
+            "description": "records"
+          },
+          "403": {
+            "description": "无权访问"
+          },
+          "429": {
+            "description": "限流，遵守Retry-After"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ItemSKU": {
+        "type": "object",
+        "title": "商品规格",
+        "x-source-system": "ERP",
+        "x-primary-key": "sku_id",
+        "x-granularity": "master",
+        "required": [
+          "sku_id",
+          "name",
+          "pieces_per_case"
+        ],
+        "properties": {
+          "sku_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "pieces_per_case": {
+            "type": "number"
+          }
+        }
+      },
+      "Customer": {
+        "type": "object",
+        "title": "客户",
+        "x-source-system": "OMS",
+        "x-primary-key": "customer_id",
+        "x-granularity": "master",
+        "required": [
+          "customer_id",
+          "name"
+        ],
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "SalesOrder": {
+        "type": "object",
+        "title": "销售订单",
+        "x-source-system": "OMS",
+        "x-primary-key": "order_id",
+        "x-granularity": "transaction",
+        "required": [
+          "order_id",
+          "customer_id",
+          "amount",
+          "currency",
+          "status"
+        ],
+        "properties": {
+          "order_id": {
+            "type": "string"
+          },
+          "customer_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "Customer",
+              "field": "customer_id"
+            }
+          },
+          "amount": {
+            "type": "number"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "SalesOrderLine": {
+        "type": "object",
+        "title": "订单行",
+        "x-source-system": "OMS",
+        "x-primary-key": "line_id",
+        "x-granularity": "transaction",
+        "required": [
+          "line_id",
+          "order_id",
+          "sku_id",
+          "qty",
+          "unit",
+          "status",
+          "target_warehouse_id"
+        ],
+        "properties": {
+          "line_id": {
+            "type": "string"
+          },
+          "order_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "SalesOrder",
+              "field": "order_id"
+            }
+          },
+          "sku_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "ItemSKU",
+              "field": "sku_id"
+            }
+          },
+          "qty": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "target_warehouse_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "Warehouse",
+              "field": "warehouse_id"
+            }
+          }
+        }
+      },
+      "Warehouse": {
+        "type": "object",
+        "title": "仓库",
+        "x-source-system": "WMS",
+        "x-primary-key": "warehouse_id",
+        "x-granularity": "master",
+        "required": [
+          "warehouse_id",
+          "name"
+        ],
+        "properties": {
+          "warehouse_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "ProductLot": {
+        "type": "object",
+        "title": "货品批次",
+        "x-source-system": "WMS",
+        "x-primary-key": "lot_id",
+        "x-granularity": "batch",
+        "required": [
+          "lot_id",
+          "sku_id",
+          "quality_status"
+        ],
+        "properties": {
+          "lot_id": {
+            "type": "string"
+          },
+          "sku_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "ItemSKU",
+              "field": "sku_id"
+            }
+          },
+          "quality_status": {
+            "type": "string"
+          }
+        }
+      },
+      "StockPosition": {
+        "type": "object",
+        "title": "分仓货权库存",
+        "x-source-system": "WMS",
+        "x-primary-key": "stock_id",
+        "x-granularity": "inventory_item",
+        "required": [
+          "stock_id",
+          "lot_id",
+          "warehouse_id",
+          "ownership",
+          "qty",
+          "unit",
+          "status",
+          "as_of"
+        ],
+        "properties": {
+          "stock_id": {
+            "type": "string"
+          },
+          "lot_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "ProductLot",
+              "field": "lot_id"
+            }
+          },
+          "warehouse_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "Warehouse",
+              "field": "warehouse_id"
+            }
+          },
+          "ownership": {
+            "type": "string"
+          },
+          "qty": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "as_of": {
+            "type": "string"
+          }
+        }
+      },
+      "Reservation": {
+        "type": "object",
+        "title": "库存预留",
+        "x-source-system": "WMS",
+        "x-primary-key": "reservation_id",
+        "x-granularity": "transaction",
+        "required": [
+          "reservation_id",
+          "stock_id",
+          "order_id",
+          "qty",
+          "unit",
+          "status"
+        ],
+        "properties": {
+          "reservation_id": {
+            "type": "string"
+          },
+          "stock_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "StockPosition",
+              "field": "stock_id"
+            }
+          },
+          "order_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "SalesOrder",
+              "field": "order_id"
+            }
+          },
+          "qty": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "TransferOrder": {
+        "type": "object",
+        "title": "调拨单",
+        "x-source-system": "WMS",
+        "x-primary-key": "transfer_id",
+        "x-granularity": "transaction",
+        "required": [
+          "transfer_id",
+          "from_warehouse_id",
+          "to_warehouse_id",
+          "status"
+        ],
+        "properties": {
+          "transfer_id": {
+            "type": "string"
+          },
+          "from_warehouse_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "Warehouse",
+              "field": "warehouse_id"
+            }
+          },
+          "to_warehouse_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "Warehouse",
+              "field": "warehouse_id"
+            }
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "TransferItem": {
+        "type": "object",
+        "title": "调拨明细",
+        "x-source-system": "WMS",
+        "x-primary-key": "transfer_line_id",
+        "x-granularity": "event",
+        "required": [
+          "transfer_line_id",
+          "transfer_id",
+          "lot_id",
+          "qty",
+          "unit",
+          "received_qty"
+        ],
+        "properties": {
+          "transfer_line_id": {
+            "type": "string"
+          },
+          "transfer_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "TransferOrder",
+              "field": "transfer_id"
+            }
+          },
+          "lot_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "ProductLot",
+              "field": "lot_id"
+            }
+          },
+          "qty": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "received_qty": {
+            "type": "number"
+          }
+        }
+      },
+      "ReturnTicket": {
+        "type": "object",
+        "title": "退货单",
+        "x-source-system": "QMS",
+        "x-primary-key": "return_id",
+        "x-granularity": "transaction",
+        "required": [
+          "return_id",
+          "order_id",
+          "lot_id",
+          "qty",
+          "status"
+        ],
+        "properties": {
+          "return_id": {
+            "type": "string"
+          },
+          "order_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "SalesOrder",
+              "field": "order_id"
+            }
+          },
+          "lot_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "ProductLot",
+              "field": "lot_id"
+            }
+          },
+          "qty": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "ReturnInspection": {
+        "type": "object",
+        "title": "退货复检",
+        "x-source-system": "QMS",
+        "x-primary-key": "inspection_id",
+        "x-granularity": "event",
+        "required": [
+          "inspection_id",
+          "return_id",
+          "result"
+        ],
+        "properties": {
+          "inspection_id": {
+            "type": "string"
+          },
+          "return_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "ReturnTicket",
+              "field": "return_id"
+            }
+          },
+          "result": {
+            "type": "string"
+          }
+        }
+      },
+      "ConsignmentContract": {
+        "type": "object",
+        "title": "寄售合同",
+        "x-source-system": "ERP",
+        "x-primary-key": "contract_id",
+        "x-granularity": "transaction",
+        "required": [
+          "contract_id",
+          "lot_id",
+          "owner_name",
+          "status"
+        ],
+        "properties": {
+          "contract_id": {
+            "type": "string"
+          },
+          "lot_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "ProductLot",
+              "field": "lot_id"
+            }
+          },
+          "owner_name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "CreditAccount": {
+        "type": "object",
+        "title": "信用账户",
+        "x-source-system": "ERP",
+        "x-primary-key": "account_id",
+        "x-granularity": "master",
+        "required": [
+          "account_id",
+          "customer_id",
+          "credit_limit",
+          "receivable",
+          "other_commitments",
+          "as_of"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "customer_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "Customer",
+              "field": "customer_id"
+            }
+          },
+          "credit_limit": {
+            "type": "number"
+          },
+          "receivable": {
+            "type": "number"
+          },
+          "other_commitments": {
+            "type": "number"
+          },
+          "as_of": {
+            "type": "string"
+          }
+        }
+      },
+      "CashReceipt": {
+        "type": "object",
+        "title": "到账记录",
+        "x-source-system": "ERP",
+        "x-primary-key": "receipt_id",
+        "x-granularity": "event",
+        "required": [
+          "receipt_id",
+          "account_id",
+          "amount",
+          "bank_status"
+        ],
+        "properties": {
+          "receipt_id": {
+            "type": "string"
+          },
+          "account_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "CreditAccount",
+              "field": "account_id"
+            }
+          },
+          "amount": {
+            "type": "number"
+          },
+          "bank_status": {
+            "type": "string"
+          }
+        }
+      },
+      "CashAllocation": {
+        "type": "object",
+        "title": "回款核销",
+        "x-source-system": "ERP",
+        "x-primary-key": "allocation_id",
+        "x-granularity": "event",
+        "required": [
+          "allocation_id",
+          "receipt_id",
+          "matched_amount",
+          "status"
+        ],
+        "properties": {
+          "allocation_id": {
+            "type": "string"
+          },
+          "receipt_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "CashReceipt",
+              "field": "receipt_id"
+            }
+          },
+          "matched_amount": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "ControlApproval": {
+        "type": "object",
+        "title": "业务审批",
+        "x-source-system": "OA",
+        "x-primary-key": "approval_id",
+        "x-granularity": "transaction",
+        "required": [
+          "approval_id",
+          "contract_id",
+          "status"
+        ],
+        "properties": {
+          "approval_id": {
+            "type": "string"
+          },
+          "contract_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "ConsignmentContract",
+              "field": "contract_id"
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "execution_receipt_id": {
+            "type": "string"
+          }
+        }
+      },
+      "ProductionDemand": {
+        "type": "object",
+        "title": "生产需求",
+        "x-source-system": "MES",
+        "x-primary-key": "demand_id",
+        "x-granularity": "transaction",
+        "required": [
+          "demand_id",
+          "sku_id",
+          "qty",
+          "unit",
+          "status"
+        ],
+        "properties": {
+          "demand_id": {
+            "type": "string"
+          },
+          "sku_id": {
+            "type": "string",
+            "x-foreign-key": {
+              "schema": "ItemSKU",
+              "field": "sku_id"
+            }
+          },
+          "qty": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

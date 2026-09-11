@@ -1,0 +1,272 @@
+{
+  "synthetic": true,
+  "notForModelInput": true,
+  "objects": [
+    {
+      "id": "ItemSKU",
+      "key": "sku_id",
+      "system": "ERP",
+      "granularity": "master"
+    },
+    {
+      "id": "Customer",
+      "key": "customer_id",
+      "system": "OMS",
+      "granularity": "master"
+    },
+    {
+      "id": "SalesOrder",
+      "key": "order_id",
+      "system": "OMS",
+      "granularity": "transaction"
+    },
+    {
+      "id": "SalesOrderLine",
+      "key": "line_id",
+      "system": "OMS",
+      "granularity": "transaction"
+    },
+    {
+      "id": "Warehouse",
+      "key": "warehouse_id",
+      "system": "WMS",
+      "granularity": "master"
+    },
+    {
+      "id": "ProductLot",
+      "key": "lot_id",
+      "system": "WMS",
+      "granularity": "batch"
+    },
+    {
+      "id": "StockPosition",
+      "key": "stock_id",
+      "system": "WMS",
+      "granularity": "inventory_item"
+    },
+    {
+      "id": "Reservation",
+      "key": "reservation_id",
+      "system": "WMS",
+      "granularity": "transaction"
+    },
+    {
+      "id": "TransferOrder",
+      "key": "transfer_id",
+      "system": "WMS",
+      "granularity": "transaction"
+    },
+    {
+      "id": "TransferItem",
+      "key": "transfer_line_id",
+      "system": "WMS",
+      "granularity": "event"
+    },
+    {
+      "id": "ReturnTicket",
+      "key": "return_id",
+      "system": "QMS",
+      "granularity": "transaction"
+    },
+    {
+      "id": "ReturnInspection",
+      "key": "inspection_id",
+      "system": "QMS",
+      "granularity": "event"
+    },
+    {
+      "id": "ConsignmentContract",
+      "key": "contract_id",
+      "system": "ERP",
+      "granularity": "transaction"
+    },
+    {
+      "id": "CreditAccount",
+      "key": "account_id",
+      "system": "ERP",
+      "granularity": "master"
+    },
+    {
+      "id": "CashReceipt",
+      "key": "receipt_id",
+      "system": "ERP",
+      "granularity": "event"
+    },
+    {
+      "id": "CashAllocation",
+      "key": "allocation_id",
+      "system": "ERP",
+      "granularity": "event"
+    },
+    {
+      "id": "ControlApproval",
+      "key": "approval_id",
+      "system": "OA",
+      "granularity": "transaction"
+    },
+    {
+      "id": "ProductionDemand",
+      "key": "demand_id",
+      "system": "MES",
+      "granularity": "transaction"
+    }
+  ],
+  "relations": [
+    {
+      "from": "SalesOrder",
+      "to": "Customer",
+      "sourceField": "customer_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "SalesOrderLine",
+      "to": "SalesOrder",
+      "sourceField": "order_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "SalesOrderLine",
+      "to": "ItemSKU",
+      "sourceField": "sku_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "SalesOrderLine",
+      "to": "Warehouse",
+      "sourceField": "target_warehouse_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "ProductLot",
+      "to": "ItemSKU",
+      "sourceField": "sku_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "StockPosition",
+      "to": "ProductLot",
+      "sourceField": "lot_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "StockPosition",
+      "to": "Warehouse",
+      "sourceField": "warehouse_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "Reservation",
+      "to": "StockPosition",
+      "sourceField": "stock_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "Reservation",
+      "to": "SalesOrder",
+      "sourceField": "order_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "TransferOrder",
+      "to": "Warehouse",
+      "sourceField": "from_warehouse_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "TransferOrder",
+      "to": "Warehouse",
+      "sourceField": "to_warehouse_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "TransferItem",
+      "to": "TransferOrder",
+      "sourceField": "transfer_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "TransferItem",
+      "to": "ProductLot",
+      "sourceField": "lot_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "ReturnTicket",
+      "to": "SalesOrder",
+      "sourceField": "order_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "ReturnTicket",
+      "to": "ProductLot",
+      "sourceField": "lot_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "ReturnInspection",
+      "to": "ReturnTicket",
+      "sourceField": "return_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "ConsignmentContract",
+      "to": "ProductLot",
+      "sourceField": "lot_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "CreditAccount",
+      "to": "Customer",
+      "sourceField": "customer_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "CashReceipt",
+      "to": "CreditAccount",
+      "sourceField": "account_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "CashAllocation",
+      "to": "CashReceipt",
+      "sourceField": "receipt_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "ControlApproval",
+      "to": "ConsignmentContract",
+      "sourceField": "contract_id",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "ProductionDemand",
+      "to": "ItemSKU",
+      "sourceField": "sku_id",
+      "cardinality": "n:1"
+    }
+  ],
+  "uniqueRecords": 34,
+  "answer": {
+    "orderAmountCny": 9000,
+    "demandPieces": 180,
+    "southOwnedAvailablePieces": 40,
+    "shortagePieces": 140,
+    "bankConfirmedUnallocated": 7000,
+    "creditV1": 4000,
+    "creditGapV1": 5000,
+    "creditV2": 7500,
+    "creditGapV2": 1500,
+    "consignmentTransferExecuted": false,
+    "returnReleased": false
+  },
+  "invariants": [
+    "cancelled_line_excluded",
+    "unit_conversion_per_sku",
+    "consignment_not_owned",
+    "transit_not_received",
+    "return_pending_not_available",
+    "matched_cash_not_double_counted",
+    "approval_not_execution",
+    "zero_available_not_proof_of_quarantine"
+  ]
+}

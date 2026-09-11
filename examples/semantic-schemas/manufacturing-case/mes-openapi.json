@@ -1,0 +1,229 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "SYNTHETIC MES API",
+    "version": "1.0.0",
+    "description": "依公开业务流程重建，不是厂商API复制，不含企业真实数据。"
+  },
+  "servers": [
+    {
+      "url": "https://synthetic-factory.example.invalid"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/mes/v1/ProductionOrder": {
+      "get": {
+        "operationId": "listProductionOrder",
+        "summary": "分页读取生产工单",
+        "description": "租户/组织/字段鉴权。403不得升级身份。分页返回nextCursor；增量可能重复，事件按(system,id,version)去重。",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "updatedSince",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前授权页，不代表全部",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ProductionOrder"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限"
+          },
+          "429": {
+            "description": "限流，按Retry-After重试"
+          }
+        }
+      }
+    },
+    "/mes/v1/MaterialIssue": {
+      "get": {
+        "operationId": "listMaterialIssue",
+        "summary": "分页读取实际领料",
+        "description": "租户/组织/字段鉴权。403不得升级身份。分页返回nextCursor；增量可能重复，事件按(system,id,version)去重。",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "updatedSince",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前授权页，不代表全部",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MaterialIssue"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限"
+          },
+          "429": {
+            "description": "限流，按Retry-After重试"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "ProductionOrder": {
+        "type": "object",
+        "title": "生产工单",
+        "description": "合成案例 MES.ProductionOrder；粒度=transaction；主键需结合来源及组织隔离。",
+        "x-source-system": "MES",
+        "x-primary-key": "production_id",
+        "x-granularity": "transaction",
+        "required": [
+          "production_id",
+          "material_id",
+          "required_qty",
+          "unit",
+          "state"
+        ],
+        "properties": {
+          "production_id": {
+            "type": "string",
+            "description": "production_id"
+          },
+          "material_id": {
+            "type": "string",
+            "description": "标量外键，引用 Material 主键；不是嵌套对象。",
+            "x-foreign-key": {
+              "schema": "Material",
+              "field": "material_id"
+            }
+          },
+          "required_qty": {
+            "type": "number",
+            "description": "required_qty"
+          },
+          "unit": {
+            "type": "string",
+            "description": "数量单位，g与kg需按明确规则转换"
+          },
+          "state": {
+            "type": "string",
+            "description": "state"
+          }
+        }
+      },
+      "MaterialIssue": {
+        "type": "object",
+        "title": "实际领料",
+        "description": "合成案例 MES.MaterialIssue；粒度=event；主键需结合来源及组织隔离。",
+        "x-source-system": "MES",
+        "x-primary-key": "issue_id",
+        "x-granularity": "event",
+        "required": [
+          "issue_id",
+          "production_id",
+          "lot_id",
+          "issued_qty",
+          "unit",
+          "issued_at"
+        ],
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "description": "issue_id"
+          },
+          "production_id": {
+            "type": "string",
+            "description": "标量外键，引用 ProductionOrder 主键；不是嵌套对象。",
+            "x-foreign-key": {
+              "schema": "ProductionOrder",
+              "field": "production_id"
+            }
+          },
+          "lot_id": {
+            "type": "string",
+            "description": "标量外键，引用 MaterialLot 主键；不是嵌套对象。",
+            "x-foreign-key": {
+              "schema": "MaterialLot",
+              "field": "lot_id"
+            }
+          },
+          "issued_qty": {
+            "type": "number",
+            "description": "issued_qty"
+          },
+          "unit": {
+            "type": "string",
+            "description": "数量单位，g与kg需按明确规则转换"
+          },
+          "issued_at": {
+            "type": "string",
+            "description": "issued_at"
+          }
+        }
+      }
+    }
+  }
+}

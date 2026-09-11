@@ -1,5 +1,5 @@
 export { getRole } from '../../services/authorization-service.js';
-export { runOntologyCaseReplay, getOntologyCaseReplay, publishGovernedOntology } from '../../services/ontology-runtime-service.js';
+export { runOntologyCaseReplay, runOntologyReadReplay, getOntologyCaseReplay, publishGovernedOntology } from '../../services/ontology-runtime-service.js';
 export { getWorldModel } from '../../services/risk-service.js';
 export { getEnterpriseKnowledgeCatalog, retrieveEnterpriseKnowledge } from '../../services/enterprise-knowledge-service.js';
 export { getSemanticContextOverview } from '../../services/semantic-context-service.js';

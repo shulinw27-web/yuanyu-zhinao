@@ -199,7 +199,7 @@ function validateSemanticMappingContractWithRecords(draft, options = {}, records
     schemaVersion: 'semantic-mapping-validation.v1',
     contract,
     status: errorCount ? 'failed' : warningCount ? 'partially_verified' : 'passed',
-    blocked: errorCount > 0 || Boolean(options.governedSamples && objects.some((object) => object.status !== 'passed')),
+    blocked: errorCount > 0 || Boolean(options.requireEvidence && objects.some(object => object.status !== 'passed')) || Boolean(options.governedSamples && objects.some((object) => object.status !== 'passed')),
     checkedAt: new Date().toISOString(),
     summary: {
       objectCount: objects.length,

@@ -1,0 +1,129 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "SYNTHETIC QMS API",
+    "version": "1.0.0",
+    "description": "依公开业务流程重建，不是厂商API复制，不含企业真实数据。"
+  },
+  "servers": [
+    {
+      "url": "https://synthetic-factory.example.invalid"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/qms/v1/QualityCase": {
+      "get": {
+        "operationId": "listQualityCase",
+        "summary": "分页读取质量异常",
+        "description": "租户/组织/字段鉴权。403不得升级身份。分页返回nextCursor；增量可能重复，事件按(system,id,version)去重。",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "updatedSince",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前授权页，不代表全部",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/QualityCase"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限"
+          },
+          "429": {
+            "description": "限流，按Retry-After重试"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "QualityCase": {
+        "type": "object",
+        "title": "质量异常",
+        "description": "合成案例 QMS.QualityCase；粒度=event；主键需结合来源及组织隔离。",
+        "x-source-system": "QMS",
+        "x-primary-key": "case_id",
+        "x-granularity": "event",
+        "required": [
+          "case_id",
+          "lot_id",
+          "inspection_id",
+          "state",
+          "action_id"
+        ],
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "description": "case_id"
+          },
+          "lot_id": {
+            "type": "string",
+            "description": "标量外键，引用 MaterialLot 主键；不是嵌套对象。",
+            "x-foreign-key": {
+              "schema": "MaterialLot",
+              "field": "lot_id"
+            }
+          },
+          "inspection_id": {
+            "type": "string",
+            "description": "标量外键，引用 Inspection 主键；不是嵌套对象。",
+            "x-foreign-key": {
+              "schema": "Inspection",
+              "field": "inspection_id"
+            }
+          },
+          "state": {
+            "type": "string",
+            "description": "state"
+          },
+          "action_id": {
+            "type": "string",
+            "description": "action_id"
+          }
+        }
+      }
+    }
+  }
+}

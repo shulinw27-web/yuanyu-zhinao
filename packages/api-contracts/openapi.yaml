@@ -21,6 +21,42 @@ tags:
   - { name: SemanticOperations, description: 独立语义运营任务、证据、巡检、通知与受控报告 }
   - { name: Platform, description: 平台运行状态与配置 }
 paths:
+  /meta-models/oa-governance/read-plan-replay:
+    post:
+      tags: [Governance]
+      operationId: runOntologyReadReplay
+      x-page-permission: page.world.view
+      x-button-permission: meta_model.publish
+      description: 对当前草稿的有界只读关联计算运行正反例；要求发布角色和认证身份，所有方案均需正反例通过，报告绑定草稿指纹。不提交样本给模型、不写业务系统。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [candidateFingerprint, cases]
+              properties:
+                candidateFingerprint: { type: string, minLength: 24, maxLength: 24 }
+                cases:
+                  type: array
+                  minItems: 2
+                  maxItems: 24
+                  items:
+                    type: object
+                    required: [planId, target, records]
+                    oneOf:
+                      - required: [expected]
+                      - required: [expectedError]
+                    properties:
+                      planId: { type: string }
+                      target: { type: string }
+                      records: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/GenericObject' } }
+                      expected: { type: object, description: 必须包含方案全部输出指标及精确值 }
+                      expectedError: { type: string, enum: [READ_ROOT_NOT_FOUND, READ_RECORD_SCOPE, READ_RECORD_CONFLICT, READ_REQUIRED_FIELD, READ_LOOKUP_NOT_UNIQUE, READ_EXPECTED_SINGLE_RECORD, READ_PRECONDITION_FAILED, READ_GRAPH_CYCLE, READ_DANGLING_EDGE, READ_EDGE_STATE_UNKNOWN, READ_EXPANSION_DEPTH_LIMIT] }
+      responses:
+        '200': { description: passed 或 failed 回放报告，不保存原始样本, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
+        '403': { description: 无发布权限或认证身份 }
+        '409': { description: 草稿指纹不匹配、案例格式无效、执行角色被拒绝或未配置方案 }
   /meta-models/oa-governance/case-replay:
     get:
       tags: [Governance]
@@ -42,45 +78,53 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [candidateFingerprint, cases]
-              properties:
-                candidateFingerprint: { type: string, minLength: 24, maxLength: 24 }
-                cases:
-                  type: array
-                  minItems: 1
-                  maxItems: 100
-                  items:
-                    type: object
-                    required: [id, at, expected]
-                    oneOf:
-                      - required: [objectType, record]
-                        properties:
-                          kind: { type: string, const: decision }
-                          expected: { type: string, enum: [needs_review, closed, in_progress, investigation_recommended, review_recommended] }
-                      - required: [kind, knownAt, query, records, relations]
-                        properties:
-                          kind: { type: string, const: relation_history }
-                          expected: { type: string, enum: [related, not_related, conflict, needs_review] }
-                      - required: [kind, knownAt, query, records, mappings]
-                        properties:
-                          kind: { type: string, const: identity_mapping }
-                          expected: { type: string, enum: [same_entity, different_entity, unresolved, conflict, needs_review] }
-                    properties:
-                      id: { type: string }
-                      kind: { type: string, enum: [decision, relation_history, identity_mapping] }
-                      objectType: { type: string }
-                      at: { type: string, format: date-time }
-                      knownAt: { type: string, format: date-time, description: 历史已知截止时间，不早于 at }
-                      expected: { type: string }
-                      record: { $ref: '#/components/schemas/GenericObject' }
-                      query:
+              anyOf:
+                - allOf:
+                    - $ref: '#/paths/~1meta-models~1oa-governance~1read-plan-replay/post/requestBody/content/application~1json/schema'
+                    - type: object
+                      required: [mode]
+                      properties:
+                        mode: { type: string, const: ontology-read }
+                -
+                  type: object
+                  required: [candidateFingerprint, cases]
+                  properties:
+                    candidateFingerprint: { type: string, minLength: 24, maxLength: 24 }
+                    cases:
+                      type: array
+                      minItems: 1
+                      maxItems: 100
+                      items:
+                        type: object
+                        required: [id, at, expected]
                         oneOf:
-                          - { type: object, required: [from, to, predicate], properties: { from: { $ref: '#/components/schemas/GenericObject' }, to: { $ref: '#/components/schemas/GenericObject' }, predicate: { type: string } } }
-                          - { type: object, required: [left, right], properties: { left: { $ref: '#/components/schemas/GenericObject' }, right: { $ref: '#/components/schemas/GenericObject' } } }
-                      records: { type: array, minItems: 1, maxItems: 200, items: { $ref: '#/components/schemas/GenericObject' } }
-                      relations: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/GenericObject' } }
-                      mappings: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/GenericObject' } }
+                          - required: [objectType, record]
+                            properties:
+                              kind: { type: string, const: decision }
+                              expected: { type: string, enum: [needs_review, closed, in_progress, investigation_recommended, review_recommended] }
+                          - required: [kind, knownAt, query, records, relations]
+                            properties:
+                              kind: { type: string, const: relation_history }
+                              expected: { type: string, enum: [related, not_related, conflict, needs_review] }
+                          - required: [kind, knownAt, query, records, mappings]
+                            properties:
+                              kind: { type: string, const: identity_mapping }
+                              expected: { type: string, enum: [same_entity, different_entity, unresolved, conflict, needs_review] }
+                        properties:
+                          id: { type: string }
+                          kind: { type: string, enum: [decision, relation_history, identity_mapping] }
+                          objectType: { type: string }
+                          at: { type: string, format: date-time }
+                          knownAt: { type: string, format: date-time, description: 历史已知截止时间，不早于 at }
+                          expected: { type: string }
+                          record: { $ref: '#/components/schemas/GenericObject' }
+                          query:
+                            oneOf:
+                              - { type: object, required: [from, to, predicate], properties: { from: { $ref: '#/components/schemas/GenericObject' }, to: { $ref: '#/components/schemas/GenericObject' }, predicate: { type: string } } }
+                              - { type: object, required: [left, right], properties: { left: { $ref: '#/components/schemas/GenericObject' }, right: { $ref: '#/components/schemas/GenericObject' } } }
+                          records: { type: array, minItems: 1, maxItems: 200, items: { $ref: '#/components/schemas/GenericObject' } }
+                          relations: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/GenericObject' } }
+                          mappings: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/GenericObject' } }
       responses:
         '200': { description: passed 或 failed 报告；失败不是业务执行失败，未执行任何业务动作, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
         '403': { description: 无校验权限 }

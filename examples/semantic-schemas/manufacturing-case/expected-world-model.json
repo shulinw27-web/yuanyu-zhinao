@@ -1,0 +1,209 @@
+{
+  "synthetic": true,
+  "notModelInput": true,
+  "objects": [
+    {
+      "id": "Material",
+      "key": "material_id",
+      "sourceSystem": "ERP",
+      "granularity": "master"
+    },
+    {
+      "id": "Supplier",
+      "key": "supplier_id",
+      "sourceSystem": "ERP",
+      "granularity": "master"
+    },
+    {
+      "id": "PurchaseOrder",
+      "key": "po_id",
+      "sourceSystem": "ERP",
+      "granularity": "transaction"
+    },
+    {
+      "id": "PurchaseLine",
+      "key": "po_line_id",
+      "sourceSystem": "ERP",
+      "granularity": "transaction"
+    },
+    {
+      "id": "Receipt",
+      "key": "receipt_id",
+      "sourceSystem": "WMS",
+      "granularity": "transaction"
+    },
+    {
+      "id": "ReceiptLine",
+      "key": "receipt_line_id",
+      "sourceSystem": "WMS",
+      "granularity": "transaction"
+    },
+    {
+      "id": "MaterialLot",
+      "key": "lot_id",
+      "sourceSystem": "WMS",
+      "granularity": "batch"
+    },
+    {
+      "id": "StockItem",
+      "key": "stock_id",
+      "sourceSystem": "WMS",
+      "granularity": "inventory_item"
+    },
+    {
+      "id": "Inspection",
+      "key": "inspection_id",
+      "sourceSystem": "LIMS",
+      "granularity": "event"
+    },
+    {
+      "id": "QualityCase",
+      "key": "case_id",
+      "sourceSystem": "QMS",
+      "granularity": "event"
+    },
+    {
+      "id": "ProductionOrder",
+      "key": "production_id",
+      "sourceSystem": "MES",
+      "granularity": "transaction"
+    },
+    {
+      "id": "MaterialIssue",
+      "key": "issue_id",
+      "sourceSystem": "MES",
+      "granularity": "event"
+    },
+    {
+      "id": "Approval",
+      "key": "approval_id",
+      "sourceSystem": "OA",
+      "granularity": "transaction"
+    }
+  ],
+  "relations": [
+    {
+      "from": "PurchaseOrder",
+      "field": "supplier_id",
+      "to": "Supplier",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "PurchaseLine",
+      "field": "po_id",
+      "to": "PurchaseOrder",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "PurchaseLine",
+      "field": "material_id",
+      "to": "Material",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "Receipt",
+      "field": "po_id",
+      "to": "PurchaseOrder",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "ReceiptLine",
+      "field": "receipt_id",
+      "to": "Receipt",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "ReceiptLine",
+      "field": "po_line_id",
+      "to": "PurchaseLine",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "ReceiptLine",
+      "field": "lot_id",
+      "to": "MaterialLot",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "MaterialLot",
+      "field": "material_id",
+      "to": "Material",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "MaterialLot",
+      "field": "supplier_id",
+      "to": "Supplier",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "StockItem",
+      "field": "lot_id",
+      "to": "MaterialLot",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "Inspection",
+      "field": "lot_id",
+      "to": "MaterialLot",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "QualityCase",
+      "field": "lot_id",
+      "to": "MaterialLot",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "QualityCase",
+      "field": "inspection_id",
+      "to": "Inspection",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "ProductionOrder",
+      "field": "material_id",
+      "to": "Material",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "MaterialIssue",
+      "field": "production_id",
+      "to": "ProductionOrder",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "MaterialIssue",
+      "field": "lot_id",
+      "to": "MaterialLot",
+      "cardinality": "n:1"
+    },
+    {
+      "from": "Approval",
+      "field": "case_id",
+      "to": "QualityCase",
+      "cardinality": "n:1"
+    }
+  ],
+  "answers": {
+    "purchaseAmountCNY": 10000,
+    "totalReceivedKg": 1000,
+    "currentOnHandKg": 880,
+    "currentAvailableKg": 400,
+    "productionRequirementKg": 500,
+    "shortageKg": 100,
+    "quarantinedKg": 400,
+    "approvalMeansExecuted": false,
+    "affectedLot": "LOT-SYN-B",
+    "actualConsumedLot": "LOT-SYN-A",
+    "noProofBadLotConsumed": true
+  },
+  "forbiddenInferences": [
+    "供应商不是人员",
+    "物料、批次、库存项不得合并",
+    "不得重复汇总订单头金额",
+    "不得重复计算重放事件",
+    "审批不等于执行",
+    "计划需求不等于领料事实"
+  ]
+}

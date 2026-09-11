@@ -1,4 +1,5 @@
 import {
+  runOntologyReadReplay,
   archiveSemanticOperationsTask,
   createWorldModelDraft,
   createSemanticOperationsProposalFromRequest,
@@ -48,6 +49,12 @@ import {
 } from '../domains/governance/public-api.js';
 
 export async function handleGovernanceRoutes({ req, res, url, role, agentIdentity, effectiveAccess, selectActionRole, denyButton, readBody, send }) {
+  if (req.method === 'POST' && url.pathname === '/api/meta-models/oa-governance/read-plan-replay') {
+    const actionRole = selectActionRole('meta_model.publish');
+    if (!actionRole) { denyButton('meta_model.publish'); return true; }
+    const result = await runOntologyReadReplay({ body: await readBody(req), role: actionRole, identityScope: agentIdentity });
+    send(res, result.error ? 409 : 200, result); return true;
+  }
   if (url.pathname === '/api/meta-models/oa-governance/case-replay' && ['GET', 'POST'].includes(req.method)) {
     const actionRole = selectActionRole('meta_model.draft.validate');
     if (!actionRole) { denyButton('meta_model.draft.validate'); return true; }

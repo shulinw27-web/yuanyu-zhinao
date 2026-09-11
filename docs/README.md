@@ -4,6 +4,10 @@
 
 ## 从这里开始
 
+最新复杂联调：[采购到门店/财务/人员全链路场景](development/SUPPLY_CHAIN_INCIDENT_SCENARIO.md) · [修复前问题](development/SUPPLY_CHAIN_INCIDENT_EVALUATION.md) · [SC-01–SC-06 修复与回归](development/SUPPLY_CHAIN_INCIDENT_REPAIR.md)。声明图核验完成不等于全企业实时覆盖。
+
+2026-09-12 更新：[引用式解释契约与操作](guides/PUBLISHED_MODEL_WORKBENCH.md) · [当前交付、真实模型失败及回归记录](development/SUPPLY_CHAIN_INCIDENT_REPAIR.md)。历史阶段记录保留，不将已知问题被拦截等同模型总能答对。
+
 | 你要做什么 | 先读 |
 | --- | --- |
 | 了解项目、接手开发 | [项目交接](overview/PROJECT_HANDOFF.md) → [当前状态](overview/PROJECT_STATUS.md) |
@@ -12,6 +16,8 @@
 | 理解整体设计 | [整体架构](architecture/ARCHITECTURE.md) → [模块文档](modules/README.md) |
 | 使用智脑或语义运营端 | [操作指南目录](guides/README.md) |
 | 按业务场景建设本体、配置质量判断 | [场景建模指南](guides/ONTOLOGY_SCENARIO_MODELING.md) · [验收记录](development/ONTOLOGY_MODELING_ACCEPTANCE.md) |
+| 模拟真实业务材料并评估快速建模 | [制造案例需求与材料](development/SEMANTIC_MANUFACTURING_REQUIREMENTS.md) · [初测问题](development/SEMANTIC_MANUFACTURING_EVALUATION.md) · [修复回归](development/SEMANTIC_MANUFACTURING_REPAIR.md) · [操作指南](guides/SEMANTIC_MATERIAL_WORKSPACE.md) |
+| 验证语义建模后智脑是否真正理解新业务 | [跨仓履约复杂场景](development/SEMANTIC_WORKBENCH_COMPLEX_SCENARIO.md) · [修复前联测](development/SEMANTIC_WORKBENCH_LOOP_EVALUATION.md) · [闭环修复报告](development/SEMANTIC_WORKBENCH_LOOP_REPAIR.md) · [配置指南](guides/PUBLISHED_MODEL_WORKBENCH.md) |
 | 确认两个 Agent 的能力与边界 | [智脑能力范围](overview/ZHINAO_CAPABILITY_SCOPE.md) · [语义运营能力范围](overview/SEMANTIC_OPERATIONS_CAPABILITY_SCOPE.md) |
 | 连续对话、字典追问与更正目标 | [对话及上下文使用说明](guides/AGENT_DIALOGUE_AND_CONTEXT.md) |
 | 上传文件、理解图片、核对多模态能力 | [多模态指南](guides/AGENT_MULTIMODAL_GUIDE.md) · [验证与修复报告](development/AGENT_MULTIMODAL_ACCEPTANCE_2026-09-07.md) |

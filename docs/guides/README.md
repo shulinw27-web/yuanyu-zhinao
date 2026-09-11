@@ -1,5 +1,7 @@
 # 使用指南
 
+新增：[已发布语义模型接入智脑](PUBLISHED_MODEL_WORKBENCH.md)——关联计算方案、对象授权、正反例回放、发布消费和版本追问。
+
 [返回文档中心](../README.md)
 
 业务智脑、语义运营是不同入口。桌面本地操作边界以 DESKTOP_WORKBENCH_EXECUTION 为准，语义运营操作请看专用指南。

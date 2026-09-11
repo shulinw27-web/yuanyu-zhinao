@@ -9,11 +9,14 @@ import { planSemanticOperationsRequest } from '../src/services/semantic-operatio
 import { runPrivateAgent } from '../src/services/private-agent-service.js';
 import { getRole } from '../src/services/authorization-service.js';
 import { readState } from '../src/repositories/runtime-state-repository.js';
+import { understandAgentTurn } from '../src/services/agent-turn-understanding-service.js';
 import { createAgentConversation, recordAgentConversationExchange, getAgentConversationContext } from '../src/services/agent-conversation-service.js';
+import { bufferDiagnosticStream } from '../../scripts/ark-stream-diagnostic.mjs';
 
 const envelope = (answer = '你好，我可以协助分析问题和整理工作，尚未执行任何操作。') => ({ schemaVersion: 'agent-summary.v1', answer, proposedAction: null, claimsExecution: false, executionReceipt: null });
 const reply = (value = envelope()) => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(value), reasoning_content: 'never expose this reasoning' } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 const options = { prompt: '你好，请介绍你能协助处理的工作。', fallback: '本次未取得可用模型结果，请稍后重试。', safetyIdentifier: 'ark-test-subject' };
+const claimAnswer = { schemaVersion: 'ontology-claims.v2', contextId: 'synthetic-snapshot', observations: [], metrics: ['m0'], gaps: [], hypotheses: [], recommendations: [] };
 const withArk = async (overrides, handler) => {
   const values = { AGENT_RUNTIME_MODE: 'ark', AGENT_MODEL_CONFIG_SOURCE: 'environment', ARK_BASE_URL: ARK_DEFAULT_BASE_URL, ARK_MODEL: 'ep-synthetic-test', ARK_API_KEY: 'synthetic-test-credential', MODEL_ALLOWLIST_JSON: JSON.stringify({ ark: ['ep-synthetic-test'], mock: ['deterministic-demo'] }), AGENT_EXTERNAL_DATA_MODE: 'redacted', AGENT_EXTERNAL_MULTIMODAL_MODE: 'metadata_only', ...overrides };
   const previous = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
@@ -26,6 +29,143 @@ const withArk = async (overrides, handler) => {
     resetModelGatewayObservability(); resetModelGovernanceForTest();
   }
 };
+
+test('ontology analysis requests a native structured answer and safely serializes it for downstream validation', async () => {
+  await withArk({}, async () => {
+    globalThis.fetch = async (_url, request) => {
+      const body = JSON.parse(request.body);
+      assert.deepEqual(body.response_format, { type: 'json_object' });
+      const schema = JSON.parse(body.messages[0].content.split('不得用 agent-summary.v1 作为外层键，也不要返回 Schema 本身：')[1]);
+      assert.equal(schema.properties.answer.type, 'object');
+      assert.deepEqual(schema.properties.answer.properties.schemaVersion.enum, ['ontology-claims.v2']);
+      assert.match(body.messages[0].content, /原生 JSON 对象/);
+      return reply(envelope(claimAnswer));
+    };
+    const result = await generateModelSummary({ ...options, answerContract: 'ontology_claims' });
+    assert.equal(result.source, 'ark'); assert.deepEqual(JSON.parse(result.text), claimAnswer);
+  });
+});
+
+test('native ontology contract rejects stringified JSON and execution claims without changing ordinary dialogue', async () => {
+  await withArk({}, async () => {
+    for (const value of [envelope(JSON.stringify(claimAnswer)), envelope([]), envelope({ ...claimAnswer, schemaVersion: 'other' }), { ...envelope(claimAnswer), claimsExecution: true }]) {
+      globalThis.fetch = async () => reply(value);
+      assert.equal((await generateModelSummary({ ...options, answerContract: 'ontology_claims' })).source, 'output_safety');
+    }
+    globalThis.fetch = async () => reply(envelope(claimAnswer));
+    assert.equal((await generateModelSummary(options)).source, 'output_safety');
+    globalThis.fetch = async (_url, request) => {
+      const system = JSON.parse(request.body).messages[0].content;
+      assert.equal(JSON.parse(system.split('不得用 agent-summary.v1 作为外层键，也不要返回 Schema 本身：')[1]).properties.answer.type, 'string');
+      return reply(envelope());
+    };
+    assert.equal((await generateModelSummary(options)).source, 'ark');
+  });
+});
+
+test('buffered timings distinguish headers/body/validation, count retries and whitelist usage without secrets', async () => {
+  await withArk({}, async () => {
+    let calls = 0;
+    globalThis.fetch = async () => {
+      if (++calls === 1) throw new Error('secret transport message', { cause: { code: 'ECONNRESET', detail: 'secret' } });
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(envelope()) } }], usage: { prompt_tokens: 123, completion_tokens: 44, total_tokens: 167, secret: 'secret usage value' } }));
+    };
+    const r = await generateModelSummary(options);
+    assert.equal(r.source, 'ark'); assert.equal(r.modelTiming.transport.attempts.length, 2);
+    assert.equal(r.modelTiming.transport.attempts[0].code, 'ECONNRESET');
+    assert.equal(r.modelTiming.firstContentMs, null);
+    assert.ok(r.modelTiming.totalMs >= r.modelTiming.responseHeadersMs);
+    assert.ok(r.modelTiming.bodyReadMs >= 0); assert.ok(r.modelTiming.validationMs >= 0);
+    assert.deepEqual(r.modelTiming.usage, { prompt_tokens: 123, completion_tokens: 44, total_tokens: 167 });
+    assert.doesNotMatch(JSON.stringify(r.modelTiming), /secret|credential|Bearer/);
+  });
+});
+
+test('HTTP errors are not retried and output rejection retains safe timing rather than model text', async () => {
+  await withArk({}, async () => {
+    let calls = 0;
+    globalThis.fetch = async () => { calls++; return new Response('private upstream error', { status: 429 }); };
+    const r = await generateModelSummary(options);
+    assert.equal(calls, 1); assert.equal(r.source, 'fallback'); assert.equal(r.modelTiming.httpStatus, 429);
+    globalThis.fetch = async () => reply({ ...envelope(), claimsExecution: true });
+    const rejected = await generateModelSummary(options);
+    assert.equal(rejected.source, 'output_safety'); assert.ok(rejected.modelTiming.validationMs >= 0);
+    assert.doesNotMatch(JSON.stringify(rejected.modelTiming), /claimsExecution|private/);
+  });
+});
+
+const sseResponse = text => new Response(new ReadableStream({ start(controller) {
+  // Split inside UTF-8 characters as well as JSON/event delimiters.
+  for (const byte of new TextEncoder().encode(text)) controller.enqueue(Uint8Array.of(byte));
+  controller.close();
+} }), { headers: { 'content-type': 'text/event-stream' } });
+const frame = data => `data: ${JSON.stringify(data)}\r\n\r\n`;
+
+test('diagnostic SSE buffers UTF-8, ignores reasoning and requires full completion before gateway validation', async () => {
+  const raw = JSON.stringify(envelope('你好，当前尚未执行任何业务操作。'));
+  const stream = frame({ choices: [{ index: 0, delta: { reasoning_content: 'secret reasoning' } }] })
+    + frame({ choices: [{ index: 0, delta: { content: raw.slice(0, 40) } }] })
+    + frame({ choices: [{ index: 0, delta: { content: raw.slice(40) }, finish_reason: 'stop' }] })
+    + frame({ choices: [], usage: { prompt_tokens: 12, completion_tokens: 8, total_tokens: 20 } }) + 'data: [DONE]\r\n\r\n';
+  const timing = { firstContentMs: null };
+  const result = await bufferDiagnosticStream(sseResponse(stream), timing, performance.now());
+  const parsed = await result.json();
+  assert.equal(parsed.choices[0].message.content, raw); assert.doesNotMatch(JSON.stringify(parsed), /secret reasoning/);
+  assert.ok(timing.firstContentMs >= 0); assert.ok(timing.lastContentMs >= timing.firstContentMs);
+  assert.equal(parsed.usage.total_tokens, 20);
+  await withArk({}, async () => {
+    globalThis.fetch = async () => bufferDiagnosticStream(sseResponse(frame({ choices: [{ index: 0, delta: { content: JSON.stringify({ ...envelope(), claimsExecution: true }) }, finish_reason: 'stop' }] }) + 'data: [DONE]\n\n'), {}, performance.now());
+    assert.equal((await generateModelSummary(options)).source, 'output_safety');
+  });
+});
+
+test('diagnostic SSE rejects truncation, token exhaustion, tool calls, malformed events and oversized buffers', async () => {
+  for (const [text, pattern] of [
+    [frame({ choices: [{ index: 0, delta: { content: 'partial' } }] }), /TRUNCATED/],
+    [frame({ choices: [{ index: 0, delta: { content: 'partial' }, finish_reason: 'length' }] }), /NOT_COMPLETE/],
+    [frame({ choices: [{ index: 0, delta: { tool_calls: [] } }] }), /TOOL_CALL/],
+    ['data: invalid-secret-json\n\n', /STREAM_JSON/],
+    [frame({ error: { message: 'private provider message' } }), /PROVIDER_ERROR/]
+  ]) await assert.rejects(bufferDiagnosticStream(sseResponse(text), {}, performance.now()), pattern);
+  const large = new Response(new ReadableStream({ start(c) { c.enqueue(new Uint8Array(1048577)); c.close(); } }), { headers: { 'content-type': 'text/event-stream' } });
+  await assert.rejects(bufferDiagnosticStream(large, {}, performance.now()), /BUDGET/);
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(bufferDiagnosticStream(sseResponse(''), {}, performance.now(), controller.signal), /abort/i);
+});
+
+test('published read routing instructions are included in the first model request', async () => {
+  await withArk({}, async () => {
+    let calls = 0;
+    globalThis.fetch = async (_url, request) => {
+      calls++;
+      const sent = JSON.parse(request.body).messages[1].content;
+      assert.match(sent, /路由优先规则/);
+      assert.match(sent, /不在意图阶段撰写报告/);
+      assert.match(sent, /用户明确只用附件或禁止查询时除外/);
+      return reply(envelope(JSON.stringify({ schemaVersion: 'agent-turn.v1', intent: 'read_business', answer: '', resolvedRequest: '核验当前事故原因和证据', needsClarification: false })));
+    };
+    const turn = await understandAgentTurn({ input: '为什么会发生？只讨论不执行。', publishedModel: '{}', safetyIdentifier: 'first-request-test' });
+    assert.equal(turn.source, 'ark'); assert.equal(turn.intent, 'read_business'); assert.equal(calls, 1);
+    assert.equal(turn.timing.modelAttempts, 1); assert.ok(turn.timing.understandingMs >= 0);
+  });
+});
+
+test('turn contract repairs format once but never retries rejected execution claims', async () => {
+  await withArk({}, async () => {
+    let calls = 0;
+    const valid = envelope(JSON.stringify({ schemaVersion: 'agent-turn.v1', intent: 'read_business', answer: '', resolvedRequest: '核验当前联系人', needsClarification: false }));
+    globalThis.fetch = async () => { calls++; return calls === 1 ? new Response(JSON.stringify({ choices: [{ message: { content: 'not-json' } }] })) : reply(valid); };
+    const result = await understandAgentTurn({ input: '核验当前联系人', publishedModel: '{}', safetyIdentifier: 'repair-test' });
+    assert.equal(result.intent, 'read_business'); assert.equal(result.source, 'ark'); assert.equal(calls, 2);
+    assert.equal(result.timing.modelAttempts, 2);
+    calls = 0;
+    globalThis.fetch = async () => { calls++; return reply({ ...valid, claimsExecution: true }); };
+    const rejected = await understandAgentTurn({ input: '核验当前联系人', safetyIdentifier: 'repair-test' });
+    assert.equal(rejected.source, 'understanding_failed'); assert.equal(calls, 1);
+    assert.equal(rejected.timing.modelAttempts, 1);
+    assert.deepEqual(rejected.diagnostics.signals, ['structured_output_policy_violation']);
+  });
+});
 
 test('latest ERP report clarifies scope and an explanation uses the last reply without routing business actions', async () => {
   await withArk({}, async () => {

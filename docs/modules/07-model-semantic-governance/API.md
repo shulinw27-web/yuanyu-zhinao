@@ -1,5 +1,30 @@
 # 模型与语义治理 API
 
+## 2026-09-12 引用式解释契约
+
+现有智脑消息接口的 `semanticContext.analysis` 增加以下字段，不新增端点、不改变身份和授权要求：
+
+- `citations[]`：`ref/key/system/objectType/id/version`，只列解释引用到的来源记录标识。计算和查询范围仍以 `comparisons` 为准。
+- `verification`：`schemaVersion="ontology-claims.v2"`、`contextId`、`sourceReferencesVerified`、`metricReferencesVerified`、`gapClaimsVerified`；通过时前三类核验为 true，`narrativeEntailmentVerified=false`，不声称任意自然语言已获证实。
+- `evidenceValidation`：仅含 `passed/signals`，不包含模型原文。
+- `code=ANALYSIS_CLAIM_CONTRACT_INVALID`：JSON、快照、引用或边界校验失败；`ANALYSIS_EVIDENCE_CONFLICT`：命中已有财务矛盾防护。均为解释 incomplete、整体 partial，不返回被拒绝的解释正文。
+
+`semanticContext.timing.analysisProposalCharacters` 统计安全网关返回的提案字符数，`analysisAnswerCharacters` 统计渲染结果（解释拒绝时为 0）；`analysisMs` 包括生成、校验和渲染。未进入阶段时字段可能缺省。模型网关新增服务端内部选项 `answerContract="ontology_claims"`，该调用的 `agent-summary.v1.answer` 为原生 JSON 对象，网关再序列化供业务校验。其他聊天调用仍使用字符串，不能由用户消息切换内部协议。客户端只消费服务端渲染的可读解释。字段和上限见 [解释核验指南](../../guides/PUBLISHED_MODEL_WORKBENCH.md)。
+
+2026-09-11 耗时诊断：`turn_understanding_completed` 证据事件的 `details.timing` 返回 `understandingMs` 与 `modelAttempts`（理解阶段网关调用次数，包含格式修复）；成功走到计算/解释阶段的 `semanticContext.timing` 返回 `sourceReadMs`（来源读取与确定性计算）及 `analysisMs`（证据解释调用）。均为毫秒，不包含原始模型输出或凭据，不代表执行授权。没有进入相应阶段时字段可缺省，不应显示成“已完成且耗时为零”。模型未启用解释或预算拒绝前未调用解释时 `analysisMs=0`，须结合 `analysis.status` 判断。
+
+2026-09-10 只读联调增量：`scenario.readPlans` 支持 `datasets[].filter`、`datasets[].expand`、计划 `coverage` 与 `analysis.enabled`，契约与示例见 [发布消费指南](../../guides/PUBLISHED_MODEL_WORKBENCH.md)。智脑响应 `semanticContext` 增加 `coverage/analysis/comparisons`；单根保留 `calculations`，多根结果分别位于 `comparisons[].results`。`partial` 表示范围或解释未完成，`incomplete` 表示源数据/权限/图闭包核验失败，均不授权写入。回放 `expectedError` 新增环、断链、未知边状态和深度耗尽；仍需正反例及草稿指纹匹配。
+
+## 2026-09-10 关联计算与发布消费
+
+新增 `POST /api/meta-models/oa-governance/read-plan-replay`，需要 `meta_model.publish` 及执行角色检查。正文 `{candidateFingerprint,cases}`；每例 `planId/target/records` 加完整 `expected` 或 `expectedError`，2–24 例。原 `case-replay` 兼容 `mode=ontology-read`，不能借原校验入口绕过发布角色检查。存储回放摘要及指纹，不存原始记录。
+
+草稿 `scenario.readPlans` 最多一个方案，强制 `requireCaseReplay=true`，不混用旧 `decisionBindings`。创建运营提案可传 `adoptionMode=merge|replace`，缺省 merge，采纳时使用已存模式，不允许确认参数偷换。智脑 `/api/agent/message` 响应新增 `semanticContext` 计算和版本证据。连接器 `ontology-query.v1`、部署权限与错误边界见 [完整指南](../../guides/PUBLISHED_MODEL_WORKBENCH.md)。
+
+## 2026-09-10 提案与材料兼容扩展
+
+任务创建仍使用原接口及 `parentTaskId`，材料引用由服务器维护，不接受请求体伪造 workspace。提案新增只读 `businessValidation`、`worldModel`、`scenario` 与 `stateMachines` 字段；世界模型需求是带原文证据的待评审候选，不是执行指令。附件报告新增 `extractionComplete` / `contextTruncated`；保留原 `truncated` 兼容展示。上传样本结果标为 `uploaded_scoped_samples`，身份以当前认证为准。对象/字段上限统一为40/80，关系上限仍为40。详见 [操作指南](../../guides/SEMANTIC_MATERIAL_WORKSPACE.md)。
+
 ## 2026-09-09 兼容扩展
 
 仍使用 `/api/meta-models/oa-governance/draft`，未新增公共执行接口。保存体新增 `modelingProfile`（`oa-approval` / `general`）、`scenario`（`objective`、`questions`、`decisionBindings`、`actionBindings`），并允许保存状态机和事件。对象可带 `granularity`；关系可带 `provenanceType`、`evidence`、`validFrom`、`validTo`。旧草稿默认为 OA 校验，不静默迁移。

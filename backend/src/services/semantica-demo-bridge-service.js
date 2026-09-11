@@ -112,6 +112,7 @@ const semanticDefinition = (model, version = 'draft') => ({
   sourceFingerprint: semanticFingerprint(model),
   modelingProfile: model.modelingProfile || 'oa-approval',
   scenario: model.scenario || null,
+  ...(model.worldModel ? { worldModel: model.worldModel } : {}),
   stateMachines: model.stateMachines || [],
   events: model.events || [],
   objectTypes: model.objectTypes,

@@ -12,6 +12,27 @@ import { resolveSemanticOperationsPlanSystems } from '../src/services/semantic-o
 
 const identity = { tenantId: 'semantic-test', subjectId: 'architect-01', deviceId: 'device-01' };
 
+test('adoption mode is explicit: merge preserves objects, replace shows removals and remains recoverable', async () => {
+  for (const adoptionMode of ['merge', 'replace']) {
+    resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);
+    const before = await getOAMetaModelDraft();
+    const proposal = await createSemanticOperationsProposal({ input: '建立供应商和原料批次的语义模型。', identityScope: identity, adoptionMode });
+    assert.equal(proposal.adoptionMode, adoptionMode);
+    const applied = await applySemanticOperationsProposal({ proposalId: proposal.id, role: getRole('executive'), identityScope: identity });
+    assert.ok(!applied.error, applied.error);
+    assert.equal(applied.draft.objectTypes.some(o => o.id === 'Organization'), adoptionMode === 'merge');
+    if (adoptionMode === 'replace') {
+      assert.ok(proposal.diff.summary.removedObjects > 0);
+      assert.ok(applied.draft.accessPolicies.every(p => p.effect === 'deny'));
+      assert.match(applied.message, /替换/);
+    }
+    const restored = await rollbackSemanticOperationsSnapshot({ snapshotId: applied.snapshot.id, role: getRole('executive'), identityScope: identity });
+    assert.deepEqual(restored.draft.objectTypes.map(o => o.id), before.objectTypes.map(o => o.id));
+  }
+  assert.equal((await createSemanticOperationsProposal({ input: '建立供应商模型', identityScope: identity })).adoptionMode, 'merge');
+  assert.equal((await createSemanticOperationsProposal({ input: '建立供应商模型', identityScope: identity, adoptionMode: 'new-workspace' })).code, 'SEMANTIC_ADOPTION_MODE_INVALID');
+});
+
 const governedMappingFixture = () => ({
   draft: { objectTypes: [{ id: 'InventoryLot', sourceSystems: ['WMS'], key: 'inventoryLotId', classification: 'internal', fieldDefinitions: [
     { name: 'inventoryLotId', type: 'string', required: true, primaryKey: true, sourceField: 'inventoryLotId', mappingStatus: 'mapped' },

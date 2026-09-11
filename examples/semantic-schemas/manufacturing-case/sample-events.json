@@ -1,0 +1,356 @@
+{
+  "synthetic": true,
+  "asOf": "2026-09-10T09:00:00+08:00",
+  "records": [
+    {
+      "objectType": "Material",
+      "system": "ERP",
+      "payload": {
+        "material_id": "MAT-AL-01",
+        "name": "合成铝合金坯料",
+        "base_unit": "kg"
+      },
+      "id": "SYN-EV-1",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    },
+    {
+      "objectType": "Supplier",
+      "system": "ERP",
+      "payload": {
+        "supplier_id": "SUP-SYN-01",
+        "name": "合成供应商甲",
+        "qualification": "approved"
+      },
+      "id": "SYN-EV-2",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    },
+    {
+      "objectType": "PurchaseOrder",
+      "system": "ERP",
+      "payload": {
+        "po_id": "PO-SYN-001",
+        "supplier_id": "SUP-SYN-01",
+        "currency": "CNY",
+        "amount": 10000
+      },
+      "id": "SYN-EV-3",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    },
+    {
+      "objectType": "PurchaseLine",
+      "system": "ERP",
+      "payload": {
+        "po_line_id": "POL-SYN-001",
+        "po_id": "PO-SYN-001",
+        "material_id": "MAT-AL-01",
+        "ordered_qty": 1000,
+        "unit": "kg",
+        "line_amount": 10000
+      },
+      "id": "SYN-EV-4",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    },
+    {
+      "objectType": "Receipt",
+      "system": "WMS",
+      "payload": {
+        "receipt_id": "RC-SYN-01",
+        "po_id": "PO-SYN-001",
+        "received_at": "2026-09-10T08:00:00+08:00"
+      },
+      "id": "SYN-EV-5",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    },
+    {
+      "objectType": "Receipt",
+      "system": "WMS",
+      "payload": {
+        "receipt_id": "RC-SYN-02",
+        "po_id": "PO-SYN-001",
+        "received_at": "2026-09-10T08:30:00+08:00"
+      },
+      "id": "SYN-EV-6",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    },
+    {
+      "objectType": "ReceiptLine",
+      "system": "WMS",
+      "payload": {
+        "receipt_line_id": "RCL-SYN-01",
+        "receipt_id": "RC-SYN-01",
+        "po_line_id": "POL-SYN-001",
+        "lot_id": "LOT-SYN-A",
+        "received_qty": 600,
+        "unit": "kg"
+      },
+      "id": "SYN-EV-7",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    },
+    {
+      "objectType": "ReceiptLine",
+      "system": "WMS",
+      "payload": {
+        "receipt_line_id": "RCL-SYN-02",
+        "receipt_id": "RC-SYN-02",
+        "po_line_id": "POL-SYN-001",
+        "lot_id": "LOT-SYN-B",
+        "received_qty": 400000,
+        "unit": "g"
+      },
+      "id": "SYN-EV-8",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    },
+    {
+      "objectType": "MaterialLot",
+      "system": "WMS",
+      "payload": {
+        "lot_id": "LOT-SYN-A",
+        "material_id": "MAT-AL-01",
+        "supplier_id": "SUP-SYN-01",
+        "supplier_lot_no": "SA"
+      },
+      "id": "SYN-EV-9",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    },
+    {
+      "objectType": "MaterialLot",
+      "system": "WMS",
+      "payload": {
+        "lot_id": "LOT-SYN-B",
+        "material_id": "MAT-AL-01",
+        "supplier_id": "SUP-SYN-01",
+        "supplier_lot_no": "SB"
+      },
+      "id": "SYN-EV-10",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    },
+    {
+      "objectType": "StockItem",
+      "system": "WMS",
+      "payload": {
+        "stock_id": "ST-SYN-01",
+        "lot_id": "LOT-SYN-A",
+        "warehouse_id": "WH-01",
+        "bin_id": "BIN-01",
+        "on_hand": 480,
+        "reserved": 80,
+        "available": 400,
+        "unit": "kg",
+        "status": "AVL",
+        "as_of": "2026-09-10T09:00:00+08:00"
+      },
+      "id": "SYN-EV-11",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    },
+    {
+      "objectType": "StockItem",
+      "system": "WMS",
+      "payload": {
+        "stock_id": "ST-SYN-02",
+        "lot_id": "LOT-SYN-B",
+        "warehouse_id": "WH-01",
+        "bin_id": "QC-01",
+        "on_hand": 300,
+        "reserved": 0,
+        "available": 0,
+        "unit": "kg",
+        "status": "HOLD",
+        "as_of": "2026-09-10T09:00:00+08:00"
+      },
+      "id": "SYN-EV-12",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    },
+    {
+      "objectType": "StockItem",
+      "system": "WMS",
+      "payload": {
+        "stock_id": "ST-SYN-03",
+        "lot_id": "LOT-SYN-B",
+        "warehouse_id": "WH-01",
+        "bin_id": "QC-02",
+        "on_hand": 100,
+        "reserved": 0,
+        "available": 0,
+        "unit": "kg",
+        "status": "HOLD",
+        "as_of": "2026-09-10T09:00:00+08:00"
+      },
+      "id": "SYN-EV-13",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    },
+    {
+      "objectType": "Inspection",
+      "system": "LIMS",
+      "payload": {
+        "inspection_id": "INSP-SYN-01",
+        "lot_id": "LOT-SYN-B",
+        "result": "failed",
+        "measured_value": 0.7,
+        "limit_value": 0.5,
+        "measured_at": "2026-09-10T08:40:00+08:00"
+      },
+      "id": "SYN-EV-14",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    },
+    {
+      "objectType": "QualityCase",
+      "system": "QMS",
+      "payload": {
+        "case_id": "QC-SYN-01",
+        "lot_id": "LOT-SYN-B",
+        "inspection_id": "INSP-SYN-01",
+        "state": "processing",
+        "action_id": "ACT-SYN-01"
+      },
+      "id": "SYN-EV-15",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    },
+    {
+      "objectType": "ProductionOrder",
+      "system": "MES",
+      "payload": {
+        "production_id": "MO-SYN-01",
+        "material_id": "MAT-AL-01",
+        "required_qty": 500,
+        "unit": "kg",
+        "state": "planned"
+      },
+      "id": "SYN-EV-16",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    },
+    {
+      "objectType": "ProductionOrder",
+      "system": "MES",
+      "payload": {
+        "production_id": "MO-SYN-OLD",
+        "material_id": "MAT-AL-01",
+        "required_qty": 120,
+        "unit": "kg",
+        "state": "in_progress"
+      },
+      "id": "SYN-EV-17",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    },
+    {
+      "objectType": "MaterialIssue",
+      "system": "MES",
+      "payload": {
+        "issue_id": "ISS-SYN-01",
+        "production_id": "MO-SYN-OLD",
+        "lot_id": "LOT-SYN-A",
+        "issued_qty": 120,
+        "unit": "kg",
+        "issued_at": "2026-09-10T08:20:00+08:00"
+      },
+      "id": "SYN-EV-18",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    },
+    {
+      "objectType": "Approval",
+      "system": "OA",
+      "payload": {
+        "approval_id": "AP-SYN-01",
+        "case_id": "QC-SYN-01",
+        "state": "approved",
+        "action_id": "ACT-SYN-01",
+        "execution_receipt_id": null
+      },
+      "id": "SYN-EV-19",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    },
+    {
+      "objectType": "ReceiptLine",
+      "system": "WMS",
+      "payload": {
+        "receipt_line_id": "RCL-SYN-01",
+        "receipt_id": "RC-SYN-01",
+        "po_line_id": "POL-SYN-001",
+        "lot_id": "LOT-SYN-A",
+        "received_qty": 600,
+        "unit": "kg"
+      },
+      "id": "SYN-EV-7",
+      "version": "1",
+      "occurredAt": "2026-09-10T01:00:00Z",
+      "classification": "质量受限",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept"
+    }
+  ]
+}

@@ -111,6 +111,7 @@ const currentMetaModel = (runtime = getOARuntime()) => runtime.oaDraft ? {
   ...(runtime.oaDraft.modelingProfile === 'general' ? { name: runtime.oaDraft.scenario?.objective || '通用业务模型', code: 'SEMANTIC-GENERAL', target: { id: 'multi-source', code: '受控来源', name: '场景指定的数据来源' } } : {}),
   modelingProfile: runtime.oaDraft.modelingProfile || 'oa-approval',
   scenario: runtime.oaDraft.scenario,
+  worldModel: runtime.oaDraft.worldModel || null,
   objectTypes: normalizeSemanticDraft(runtime.oaDraft).objectTypes,
   relationshipTypes: normalizeSemanticDraft(runtime.oaDraft).relationshipTypes,
   policies: runtime.oaDraft.policies,
@@ -179,12 +180,12 @@ const validateDraft = (draft) => {
   return { status: checks.every((item) => item.status === 'passed') ? 'passed' : 'failed', checks, checkedAt: now() };
 };
 
-const sanitizeObjectTypes = (value) => (Array.isArray(value) ? value : []).slice(0, 20).map((item, index) => {
+const sanitizeObjectTypes = (value) => (Array.isArray(value) ? value : []).slice(0, 40).map((item, index) => {
   const id = String(item.id || `BusinessObject${index + 1}`).replace(/[^A-Za-z0-9_]/g, '').slice(0, 48) || `BusinessObject${index + 1}`;
   const label = String(item.label || id).trim().slice(0, 48);
   const source = String(item.source || `oa.custom_${id.toLowerCase()}`).trim().slice(0, 80);
   const sourceSystems = Array.isArray(item.sourceSystems) ? item.sourceSystems.map((system) => String(system).trim().toUpperCase()).filter(Boolean).slice(0, 8) : [source.split('.')[0].toUpperCase()];
-  const fields = Array.isArray(item.fields) ? item.fields.map((field) => String(field).trim()).filter(Boolean).slice(0, 40) : [String(item.key || `${id.toLowerCase()}_id`), 'name', 'status'];
+  const fields = Array.isArray(item.fields) ? item.fields.map((field) => String(field).trim()).filter(Boolean).slice(0, 80) : [String(item.key || `${id.toLowerCase()}_id`), 'name', 'status'];
   const key = fields.includes(String(item.key || '')) ? String(item.key).trim().slice(0, 48) : fields[0];
   const suppliedDefinitions = Array.isArray(item.fieldDefinitions) ? item.fieldDefinitions : [];
   const fieldDefinitions = fields.map((name) => {
@@ -197,6 +198,9 @@ const sanitizeObjectTypes = (value) => (Array.isArray(value) ? value : []).slice
       sourceField: String(definition.sourceField || name).trim().slice(0, 120),
       mappingStatus: ['mapped', 'manual', 'derived', 'ignored', 'pending'].includes(definition.mappingStatus) ? definition.mappingStatus : 'mapped',
       reference: definition.reference ? String(definition.reference).replace(/[^A-Za-z0-9_]/g, '').slice(0, 48) : null,
+      referenceField: definition.referenceField ? String(definition.referenceField).replace(/[^A-Za-z0-9_]/g, '').slice(0, 64) : null,
+      unit: definition.unit ? String(definition.unit).slice(0, 80) : null,
+      enum: Array.isArray(definition.enum) ? definition.enum.map(value => String(value).slice(0, 120)).slice(0, 100) : undefined,
       description: definition.description ? String(definition.description).trim().slice(0, 180) : null
     };
   });
@@ -268,7 +272,7 @@ export const buildOAMetaModelDraftRuntimeChange = (runtime, input, role, { actio
   if (!canConfigure(role)) return { error: '当前角色没有元模型建模权限。请在权限中心授予“业务建模协作人”。' };
   const nextRuntime = clone(runtime || initialOARuntime());
   const base = normalizeSemanticDraft(nextRuntime.oaDraft || makeDraft());
-  if (input?.objectTypes !== undefined && (!Array.isArray(input.objectTypes) || !input.objectTypes.length || input.objectTypes.length > 20 || input.objectTypes.some((item) => !item || !Array.isArray(item.fields) || item.fields.length > 40 || !item.fields.includes(item.key)))) return { error: '对象数量应为 1–20，字段最多 40 个且必须包含指定主键；不会静默替换主键或恢复旧对象。' };
+  if (input?.objectTypes !== undefined && (!Array.isArray(input.objectTypes) || !input.objectTypes.length || input.objectTypes.length > 40 || input.objectTypes.some((item) => !item || !Array.isArray(item.fields) || item.fields.length > 80 || !item.fields.includes(item.key)))) return { error: '对象数量应为 1–40，字段最多 80 个且必须包含指定主键；不会静默替换主键或恢复旧对象。' };
   const objectTypes = sanitizeObjectTypes(input?.objectTypes ?? base.objectTypes);
   if (objectTypes.some((item) => !objectGranularities.includes(item.granularity))) return { error: '对象粒度不受支持。' };
   const modelingProfile = input?.modelingProfile ?? base.modelingProfile;
@@ -299,7 +303,9 @@ export const buildOAMetaModelDraftRuntimeChange = (runtime, input, role, { actio
     lineageEdges: Array.isArray(input?.lineageEdges) ? clone(input.lineageEdges).slice(0, 100) : base.lineageEdges
   };
   if (Object.values(semanticAssets).some((items) => items.some((item) => !item || typeof item !== 'object' || Array.isArray(item)))) return { error: '治理资产必须为有效对象。' };
-  nextRuntime.oaDraft = { ...base, modelingProfile, scenario: clone(scenario), stateMachines: clone(stateMachines), events: clone(events), objectTypes, relationshipTypes, policies, ...semanticAssets, updatedAt: now(), updatedBy: role.name, validation: null };
+  const worldModel = input?.worldModel ?? base.worldModel ?? null;
+  if (worldModel && (worldModel.schemaVersion !== 'semantic-world-model.v1' || !Array.isArray(worldModel.rules) || worldModel.rules.length > 100 || worldModel.rules.some(rule => !rule.id || typeof rule.evidence !== 'string' || rule.executable !== false))) return { error: '世界模型需求资产必须保留原文证据，不能包含可执行指令。' };
+  nextRuntime.oaDraft = { ...base, worldModel: clone(worldModel), modelingProfile, scenario: clone(scenario), stateMachines: clone(stateMachines), events: clone(events), objectTypes, relationshipTypes, policies, ...semanticAssets, updatedAt: now(), updatedBy: role.name, validation: null };
   nextRuntime.oaDraft.dependencyImpact = buildOntologyImpact(base, nextRuntime.oaDraft);
   nextRuntime.oaDraft.audit ||= [];
   nextRuntime.oaDraft.audit.unshift({ time: now(), actor: role.name, action, detail: detail || `已保存 ${objectTypes.length} 个业务对象和 ${relationshipTypes.length} 条业务关系。` });
@@ -353,7 +359,7 @@ export const simulateBuildOAMetaModel = (role) => {
   });
 };
 
-export const publishOAMetaModel = (role, { version, expectedFingerprint } = {}) => {
+export const publishOAMetaModel = (role, { version, expectedFingerprint, tenantId } = {}) => {
   if (!canPublish(role)) return { error: '仅管理层可发布 OA 元模型版本。' };
   return mutateSemanticGovernanceWithEvent({ namespace: OA_NAMESPACE, key: OA_KEY, initialValue: initialOARuntime, mutation: (runtime) => {
     if (expectedFingerprint && semanticFingerprint(currentMetaModel(runtime)) !== expectedFingerprint) return { commit: false, result: { error: '草稿在发布期间发生变化，未将新草稿误登记为旧版本；需要核对独立服务部署。', code: 'ONTOLOGY_PUBLICATION_STALE' } };
@@ -362,7 +368,7 @@ export const publishOAMetaModel = (role, { version, expectedFingerprint } = {}) 
     runtime.oaSimulation.status = 'published';
     runtime.oaSimulation.version = version || `mm-oa-${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 17)}`;
     runtime.oaSimulation.publishedAt = now();
-    runtime.publishedModel = { version: runtime.oaSimulation.version, publishedAt: runtime.oaSimulation.publishedAt,
+    runtime.publishedModel = { tenantId: tenantId || null, version: runtime.oaSimulation.version, publishedAt: runtime.oaSimulation.publishedAt,
       fingerprint: semanticFingerprint(runtime.oaDraft), draft: clone(runtime.oaDraft) };
     runtime.oaSimulation.audit.unshift({ time: now(), actor: role.name, action: '发布 OA 元模型', detail: `${runtime.oaSimulation.version} 已进入受控生效状态；Demo 未写入真实 OA。` });
     const result = { metaModel: summary(runtime), simulation: clone(runtime.oaSimulation) };

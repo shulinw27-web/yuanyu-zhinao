@@ -4,6 +4,28 @@ import { createHash } from 'node:crypto';
 import { businessIdDomains, extractQueryBusinessIds, matchingQueryBusinessIds, MAX_QUERY_BUSINESS_IDS, validateAgentReadInput } from './agent-query-service.js';
 import { buildAgentQueryPlan, matchesQueryPlan, validQueryInstant } from './agent-query-plan-service.js';
 import { admitSemanticRecord } from './semantic-record-contract-service.js';
+import { ontologyQueryFingerprint } from './ontology-read-plan-service.js';
+
+// Typed ontology reads use a stricter connector contract than legacy snippets.
+// Fail closed on truncation, unverified coverage, redirects, or excess records.
+export async function retrieveOntologyConnectorRecords(type, query, roleId, scope) {
+  const systemId = type.sourceSystems[0].toLowerCase();
+  const connector = configuredConnectors()[systemId];
+  const endpoint = allowedEnterpriseEndpoint(connector?.endpoint);
+  if (!endpoint || connector?.tokenEnv && !connectorToken(connector)) throw new Error('ONTOLOGY_CONNECTOR_NOT_CONFIGURED');
+  const target = new URL(connector.path || '/agent/evidence', endpoint);
+  if (target.origin !== endpoint.origin || target.username || target.password) throw new Error('ONTOLOGY_CONNECTOR_TARGET_REJECTED');
+  const response = await fetch(target, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(CONNECTOR_TIMEOUT_MS),
+    headers: { 'Content-Type': 'application/json', ...(connectorToken(connector) ? { Authorization: `Bearer ${connectorToken(connector)}` } : {}) },
+    body: JSON.stringify({ systemId, query, access: { roleId, tenantId: scope.tenantId, subjectId: scope.subjectId } }) });
+  if (!response.ok || !response.body) throw new Error('ONTOLOGY_CONNECTOR_UNAVAILABLE');
+  const chunks = []; let size = 0;
+  for await (const chunk of response.body) { size += chunk.length; if (size > 1024 * 1024) throw new Error('ONTOLOGY_CONNECTOR_SIZE_LIMIT'); chunks.push(chunk); }
+  const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  if (payload.queryCoverage?.schemaVersion !== 'ontology-query.v1' || payload.queryCoverage?.complete !== true
+    || payload.queryCoverage?.queryFingerprint !== ontologyQueryFingerprint(query)) throw new Error('ONTOLOGY_QUERY_COVERAGE_UNVERIFIED');
+  return payload.records;
+}
 
 const CONNECTOR_TIMEOUT_MS = 8_000;
 const MAX_CONNECTOR_RECORDS = 20;

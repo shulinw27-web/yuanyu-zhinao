@@ -1,0 +1,629 @@
+{
+  "synthetic": true,
+  "asOf": "2026-09-10T10:00:00+08:00",
+  "records": [
+    {
+      "id": "SKU-SEAL-18",
+      "system": "ERP",
+      "objectType": "ItemSKU",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "sku_id": "SKU-SEAL-18",
+        "name": "耐高温密封件18型",
+        "pieces_per_case": 10
+      },
+      "statement": "合成 ItemSKU：{\"sku_id\":\"SKU-SEAL-18\",\"name\":\"耐高温密封件18型\",\"pieces_per_case\":10}"
+    },
+    {
+      "id": "SKU-SEAL-20",
+      "system": "ERP",
+      "objectType": "ItemSKU",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "sku_id": "SKU-SEAL-20",
+        "name": "耐高温密封件20型",
+        "pieces_per_case": 20
+      },
+      "statement": "合成 ItemSKU：{\"sku_id\":\"SKU-SEAL-20\",\"name\":\"耐高温密封件20型\",\"pieces_per_case\":20}"
+    },
+    {
+      "id": "CUS-X100",
+      "system": "OMS",
+      "objectType": "Customer",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "customer_id": "CUS-X100",
+        "name": "华辰工业"
+      },
+      "statement": "合成 Customer：{\"customer_id\":\"CUS-X100\",\"name\":\"华辰工业\"}"
+    },
+    {
+      "id": "ORD-X900",
+      "system": "OMS",
+      "objectType": "SalesOrder",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "order_id": "ORD-X900",
+        "customer_id": "CUS-X100",
+        "amount": 9000,
+        "currency": "CNY",
+        "status": "open"
+      },
+      "statement": "合成 SalesOrder：{\"order_id\":\"ORD-X900\",\"customer_id\":\"CUS-X100\",\"amount\":9000,\"currency\":\"CNY\",\"status\":\"open\"}"
+    },
+    {
+      "id": "ORD-X901",
+      "system": "OMS",
+      "objectType": "SalesOrder",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "order_id": "ORD-X901",
+        "customer_id": "CUS-X100",
+        "amount": 1000,
+        "currency": "CNY",
+        "status": "open"
+      },
+      "statement": "合成 SalesOrder：{\"order_id\":\"ORD-X901\",\"customer_id\":\"CUS-X100\",\"amount\":1000,\"currency\":\"CNY\",\"status\":\"open\"}"
+    },
+    {
+      "id": "LINE-X1",
+      "system": "OMS",
+      "objectType": "SalesOrderLine",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "line_id": "LINE-X1",
+        "order_id": "ORD-X900",
+        "sku_id": "SKU-SEAL-18",
+        "qty": 18,
+        "unit": "case",
+        "status": "open",
+        "target_warehouse_id": "WH-SOUTH-01"
+      },
+      "statement": "合成 SalesOrderLine：{\"line_id\":\"LINE-X1\",\"order_id\":\"ORD-X900\",\"sku_id\":\"SKU-SEAL-18\",\"qty\":18,\"unit\":\"case\",\"status\":\"open\",\"target_warehouse_id\":\"WH-SOUTH-01\"}"
+    },
+    {
+      "id": "LINE-X2",
+      "system": "OMS",
+      "objectType": "SalesOrderLine",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "line_id": "LINE-X2",
+        "order_id": "ORD-X900",
+        "sku_id": "SKU-SEAL-20",
+        "qty": 2,
+        "unit": "case",
+        "status": "cancelled",
+        "target_warehouse_id": "WH-SOUTH-01"
+      },
+      "statement": "合成 SalesOrderLine：{\"line_id\":\"LINE-X2\",\"order_id\":\"ORD-X900\",\"sku_id\":\"SKU-SEAL-20\",\"qty\":2,\"unit\":\"case\",\"status\":\"cancelled\",\"target_warehouse_id\":\"WH-SOUTH-01\"}"
+    },
+    {
+      "id": "WH-SOUTH-01",
+      "system": "WMS",
+      "objectType": "Warehouse",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "warehouse_id": "WH-SOUTH-01",
+        "name": "南仓"
+      },
+      "statement": "合成 Warehouse：{\"warehouse_id\":\"WH-SOUTH-01\",\"name\":\"南仓\"}"
+    },
+    {
+      "id": "WH-NORTH-01",
+      "system": "WMS",
+      "objectType": "Warehouse",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "warehouse_id": "WH-NORTH-01",
+        "name": "北仓"
+      },
+      "statement": "合成 Warehouse：{\"warehouse_id\":\"WH-NORTH-01\",\"name\":\"北仓\"}"
+    },
+    {
+      "id": "LOT-X1",
+      "system": "WMS",
+      "objectType": "ProductLot",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "lot_id": "LOT-X1",
+        "sku_id": "SKU-SEAL-18",
+        "quality_status": "released"
+      },
+      "statement": "合成 ProductLot：{\"lot_id\":\"LOT-X1\",\"sku_id\":\"SKU-SEAL-18\",\"quality_status\":\"released\"}"
+    },
+    {
+      "id": "LOT-X2",
+      "system": "WMS",
+      "objectType": "ProductLot",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "lot_id": "LOT-X2",
+        "sku_id": "SKU-SEAL-18",
+        "quality_status": "released"
+      },
+      "statement": "合成 ProductLot：{\"lot_id\":\"LOT-X2\",\"sku_id\":\"SKU-SEAL-18\",\"quality_status\":\"released\"}"
+    },
+    {
+      "id": "LOT-X3",
+      "system": "WMS",
+      "objectType": "ProductLot",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "lot_id": "LOT-X3",
+        "sku_id": "SKU-SEAL-18",
+        "quality_status": "quarantined"
+      },
+      "statement": "合成 ProductLot：{\"lot_id\":\"LOT-X3\",\"sku_id\":\"SKU-SEAL-18\",\"quality_status\":\"quarantined\"}"
+    },
+    {
+      "id": "LOT-X4",
+      "system": "WMS",
+      "objectType": "ProductLot",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "lot_id": "LOT-X4",
+        "sku_id": "SKU-SEAL-18",
+        "quality_status": "released"
+      },
+      "statement": "合成 ProductLot：{\"lot_id\":\"LOT-X4\",\"sku_id\":\"SKU-SEAL-18\",\"quality_status\":\"released\"}"
+    },
+    {
+      "id": "LOT-X5",
+      "system": "WMS",
+      "objectType": "ProductLot",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "lot_id": "LOT-X5",
+        "sku_id": "SKU-SEAL-18",
+        "quality_status": "pending"
+      },
+      "statement": "合成 ProductLot：{\"lot_id\":\"LOT-X5\",\"sku_id\":\"SKU-SEAL-18\",\"quality_status\":\"pending\"}"
+    },
+    {
+      "id": "LOT-X6",
+      "system": "WMS",
+      "objectType": "ProductLot",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "lot_id": "LOT-X6",
+        "sku_id": "SKU-SEAL-20",
+        "quality_status": "released"
+      },
+      "statement": "合成 ProductLot：{\"lot_id\":\"LOT-X6\",\"sku_id\":\"SKU-SEAL-20\",\"quality_status\":\"released\"}"
+    },
+    {
+      "id": "LOT-X7",
+      "system": "WMS",
+      "objectType": "ProductLot",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "lot_id": "LOT-X7",
+        "sku_id": "SKU-SEAL-18",
+        "quality_status": "released"
+      },
+      "statement": "合成 ProductLot：{\"lot_id\":\"LOT-X7\",\"sku_id\":\"SKU-SEAL-18\",\"quality_status\":\"released\"}"
+    },
+    {
+      "id": "ST-X1",
+      "system": "WMS",
+      "objectType": "StockPosition",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "stock_id": "ST-X1",
+        "lot_id": "LOT-X1",
+        "warehouse_id": "WH-SOUTH-01",
+        "ownership": "owned",
+        "qty": 6,
+        "unit": "case",
+        "status": "released",
+        "as_of": "2026-09-10T10:00:00+08:00"
+      },
+      "statement": "合成 StockPosition：{\"stock_id\":\"ST-X1\",\"lot_id\":\"LOT-X1\",\"warehouse_id\":\"WH-SOUTH-01\",\"ownership\":\"owned\",\"qty\":6,\"unit\":\"case\",\"status\":\"released\",\"as_of\":\"2026-09-10T10:00:00+08:00\"}"
+    },
+    {
+      "id": "ST-X2",
+      "system": "WMS",
+      "objectType": "StockPosition",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "stock_id": "ST-X2",
+        "lot_id": "LOT-X2",
+        "warehouse_id": "WH-SOUTH-01",
+        "ownership": "consigned",
+        "qty": 100,
+        "unit": "piece",
+        "status": "released",
+        "as_of": "2026-09-10T10:00:00+08:00"
+      },
+      "statement": "合成 StockPosition：{\"stock_id\":\"ST-X2\",\"lot_id\":\"LOT-X2\",\"warehouse_id\":\"WH-SOUTH-01\",\"ownership\":\"consigned\",\"qty\":100,\"unit\":\"piece\",\"status\":\"released\",\"as_of\":\"2026-09-10T10:00:00+08:00\"}"
+    },
+    {
+      "id": "ST-X3",
+      "system": "WMS",
+      "objectType": "StockPosition",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "stock_id": "ST-X3",
+        "lot_id": "LOT-X3",
+        "warehouse_id": "WH-SOUTH-01",
+        "ownership": "owned",
+        "qty": 50,
+        "unit": "piece",
+        "status": "quarantined",
+        "as_of": "2026-09-10T10:00:00+08:00"
+      },
+      "statement": "合成 StockPosition：{\"stock_id\":\"ST-X3\",\"lot_id\":\"LOT-X3\",\"warehouse_id\":\"WH-SOUTH-01\",\"ownership\":\"owned\",\"qty\":50,\"unit\":\"piece\",\"status\":\"quarantined\",\"as_of\":\"2026-09-10T10:00:00+08:00\"}"
+    },
+    {
+      "id": "ST-X4",
+      "system": "WMS",
+      "objectType": "StockPosition",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "stock_id": "ST-X4",
+        "lot_id": "LOT-X4",
+        "warehouse_id": "WH-NORTH-01",
+        "ownership": "owned",
+        "qty": 30,
+        "unit": "piece",
+        "status": "released",
+        "as_of": "2026-09-10T10:00:00+08:00"
+      },
+      "statement": "合成 StockPosition：{\"stock_id\":\"ST-X4\",\"lot_id\":\"LOT-X4\",\"warehouse_id\":\"WH-NORTH-01\",\"ownership\":\"owned\",\"qty\":30,\"unit\":\"piece\",\"status\":\"released\",\"as_of\":\"2026-09-10T10:00:00+08:00\"}"
+    },
+    {
+      "id": "ST-X5",
+      "system": "WMS",
+      "objectType": "StockPosition",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "stock_id": "ST-X5",
+        "lot_id": "LOT-X5",
+        "warehouse_id": "WH-SOUTH-01",
+        "ownership": "owned",
+        "qty": 40,
+        "unit": "piece",
+        "status": "pending",
+        "as_of": "2026-09-10T10:00:00+08:00"
+      },
+      "statement": "合成 StockPosition：{\"stock_id\":\"ST-X5\",\"lot_id\":\"LOT-X5\",\"warehouse_id\":\"WH-SOUTH-01\",\"ownership\":\"owned\",\"qty\":40,\"unit\":\"piece\",\"status\":\"pending\",\"as_of\":\"2026-09-10T10:00:00+08:00\"}"
+    },
+    {
+      "id": "ST-X6",
+      "system": "WMS",
+      "objectType": "StockPosition",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "stock_id": "ST-X6",
+        "lot_id": "LOT-X6",
+        "warehouse_id": "WH-SOUTH-01",
+        "ownership": "owned",
+        "qty": 5,
+        "unit": "case",
+        "status": "released",
+        "as_of": "2026-09-10T10:00:00+08:00"
+      },
+      "statement": "合成 StockPosition：{\"stock_id\":\"ST-X6\",\"lot_id\":\"LOT-X6\",\"warehouse_id\":\"WH-SOUTH-01\",\"ownership\":\"owned\",\"qty\":5,\"unit\":\"case\",\"status\":\"released\",\"as_of\":\"2026-09-10T10:00:00+08:00\"}"
+    },
+    {
+      "id": "ST-X7",
+      "system": "WMS",
+      "objectType": "StockPosition",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "stock_id": "ST-X7",
+        "lot_id": "LOT-X7",
+        "warehouse_id": "WH-SOUTH-01",
+        "ownership": "owned",
+        "qty": 0,
+        "unit": "piece",
+        "status": "released",
+        "as_of": "2026-09-10T10:00:00+08:00"
+      },
+      "statement": "合成 StockPosition：{\"stock_id\":\"ST-X7\",\"lot_id\":\"LOT-X7\",\"warehouse_id\":\"WH-SOUTH-01\",\"ownership\":\"owned\",\"qty\":0,\"unit\":\"piece\",\"status\":\"released\",\"as_of\":\"2026-09-10T10:00:00+08:00\"}"
+    },
+    {
+      "id": "RS-X1",
+      "system": "WMS",
+      "objectType": "Reservation",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "reservation_id": "RS-X1",
+        "stock_id": "ST-X1",
+        "order_id": "ORD-X901",
+        "qty": 20,
+        "unit": "piece",
+        "status": "active"
+      },
+      "statement": "合成 Reservation：{\"reservation_id\":\"RS-X1\",\"stock_id\":\"ST-X1\",\"order_id\":\"ORD-X901\",\"qty\":20,\"unit\":\"piece\",\"status\":\"active\"}"
+    },
+    {
+      "id": "TO-X1",
+      "system": "WMS",
+      "objectType": "TransferOrder",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "transfer_id": "TO-X1",
+        "from_warehouse_id": "WH-NORTH-01",
+        "to_warehouse_id": "WH-SOUTH-01",
+        "status": "in_transit"
+      },
+      "statement": "合成 TransferOrder：{\"transfer_id\":\"TO-X1\",\"from_warehouse_id\":\"WH-NORTH-01\",\"to_warehouse_id\":\"WH-SOUTH-01\",\"status\":\"in_transit\"}"
+    },
+    {
+      "id": "TI-X1",
+      "system": "WMS",
+      "objectType": "TransferItem",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "transfer_line_id": "TI-X1",
+        "transfer_id": "TO-X1",
+        "lot_id": "LOT-X4",
+        "qty": 60,
+        "unit": "piece",
+        "received_qty": 0
+      },
+      "statement": "合成 TransferItem：{\"transfer_line_id\":\"TI-X1\",\"transfer_id\":\"TO-X1\",\"lot_id\":\"LOT-X4\",\"qty\":60,\"unit\":\"piece\",\"received_qty\":0}"
+    },
+    {
+      "id": "RT-X1",
+      "system": "QMS",
+      "objectType": "ReturnTicket",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "return_id": "RT-X1",
+        "order_id": "ORD-X901",
+        "lot_id": "LOT-X5",
+        "qty": 40,
+        "status": "inspection_pending"
+      },
+      "statement": "合成 ReturnTicket：{\"return_id\":\"RT-X1\",\"order_id\":\"ORD-X901\",\"lot_id\":\"LOT-X5\",\"qty\":40,\"status\":\"inspection_pending\"}"
+    },
+    {
+      "id": "RI-X1",
+      "system": "QMS",
+      "objectType": "ReturnInspection",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-quality-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "inspection_id": "RI-X1",
+        "return_id": "RT-X1",
+        "result": "pending"
+      },
+      "statement": "合成 ReturnInspection：{\"inspection_id\":\"RI-X1\",\"return_id\":\"RT-X1\",\"result\":\"pending\"}"
+    },
+    {
+      "id": "CT-X1",
+      "system": "ERP",
+      "objectType": "ConsignmentContract",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "contract_id": "CT-X1",
+        "lot_id": "LOT-X2",
+        "owner_name": "供应商甲",
+        "status": "active"
+      },
+      "statement": "合成 ConsignmentContract：{\"contract_id\":\"CT-X1\",\"lot_id\":\"LOT-X2\",\"owner_name\":\"供应商甲\",\"status\":\"active\"}"
+    },
+    {
+      "id": "ACC-X1",
+      "system": "ERP",
+      "objectType": "CreditAccount",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "account_id": "ACC-X1",
+        "customer_id": "CUS-X100",
+        "credit_limit": 50000,
+        "receivable": 42000,
+        "other_commitments": 4000,
+        "as_of": "2026-09-10T10:00:00+08:00"
+      },
+      "statement": "合成 CreditAccount：{\"account_id\":\"ACC-X1\",\"customer_id\":\"CUS-X100\",\"credit_limit\":50000,\"receivable\":42000,\"other_commitments\":4000,\"as_of\":\"2026-09-10T10:00:00+08:00\"}"
+    },
+    {
+      "id": "CR-X1",
+      "system": "ERP",
+      "objectType": "CashReceipt",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "receipt_id": "CR-X1",
+        "account_id": "ACC-X1",
+        "amount": 10000,
+        "bank_status": "confirmed"
+      },
+      "statement": "合成 CashReceipt：{\"receipt_id\":\"CR-X1\",\"account_id\":\"ACC-X1\",\"amount\":10000,\"bank_status\":\"confirmed\"}"
+    },
+    {
+      "id": "CA-X1",
+      "system": "ERP",
+      "objectType": "CashAllocation",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "allocation_id": "CA-X1",
+        "receipt_id": "CR-X1",
+        "matched_amount": 3000,
+        "status": "matched"
+      },
+      "statement": "合成 CashAllocation：{\"allocation_id\":\"CA-X1\",\"receipt_id\":\"CR-X1\",\"matched_amount\":3000,\"status\":\"matched\"}"
+    },
+    {
+      "id": "AP-X1",
+      "system": "OA",
+      "objectType": "ControlApproval",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "approval_id": "AP-X1",
+        "contract_id": "CT-X1",
+        "status": "approved",
+        "execution_receipt_id": null
+      },
+      "statement": "合成 ControlApproval：{\"approval_id\":\"AP-X1\",\"contract_id\":\"CT-X1\",\"status\":\"approved\",\"execution_receipt_id\":null}"
+    },
+    {
+      "id": "PD-X1",
+      "system": "MES",
+      "objectType": "ProductionDemand",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-production-factory-sh",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "demand_id": "PD-X1",
+        "sku_id": "SKU-SEAL-18",
+        "qty": 80,
+        "unit": "piece",
+        "status": "planned"
+      },
+      "statement": "合成 ProductionDemand：{\"demand_id\":\"PD-X1\",\"sku_id\":\"SKU-SEAL-18\",\"qty\":80,\"unit\":\"piece\",\"status\":\"planned\"}"
+    },
+    {
+      "id": "CR-X1",
+      "system": "ERP",
+      "objectType": "CashReceipt",
+      "tenantId": "demo-enterprise",
+      "organizationId": "org-market-dept",
+      "classification": "internal",
+      "version": "v1",
+      "occurredAt": "2026-09-10T10:00:00+08:00",
+      "payload": {
+        "receipt_id": "CR-X1",
+        "account_id": "ACC-X1",
+        "amount": 10000,
+        "bank_status": "confirmed"
+      },
+      "statement": "合成 CashReceipt：{\"receipt_id\":\"CR-X1\",\"account_id\":\"ACC-X1\",\"amount\":10000,\"bank_status\":\"confirmed\"}"
+    }
+  ]
+}
