@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "knowledge-evaluation.v1",
+  "description": "Synthetic, hand-labelled seed-document retrieval checks; not a WeKnora or LLM benchmark.",
+  "limit": 3,
+  "cases": [
+    { "id": "quality", "query": "原料检验异常如何处理", "role": "executive", "expected": ["SOP-QA-018"] },
+    { "id": "procurement", "query": "采购预算审批", "role": "executive", "expected": ["POL-PR-003"] },
+    { "id": "equipment", "query": "设备校准异常", "role": "quality_manager", "expected": ["SOP-MES-024"] },
+    { "id": "complaint", "query": "客户投诉召回", "role": "marketing_manager", "expected": ["QMS-COM-011"] },
+    { "id": "qualification", "query": "资质核验", "role": "executive", "expected": ["COA-VC-2026"] },
+    { "id": "threshold", "query": "阈值", "role": "executive", "expected": ["POL-PR-003"] },
+    { "id": "overdue", "query": "逾期限制执行", "role": "production_manager", "expected": ["SOP-MES-024"] },
+    { "id": "trace", "query": "追溯分级", "role": "quality_manager", "expected": ["QMS-COM-011"] },
+    { "id": "unknown-batch", "query": "原料检验 RM-20999999", "role": "executive", "forbidden": ["COA-VC-2026"] },
+    { "id": "multi-batch", "query": "原料 RMB-VC-20260718 RM-20999999", "role": "executive", "forbidden": ["COA-VC-2026"] },
+    { "id": "role-denied", "query": "采购预算审批", "role": "marketing_manager", "forbidden": ["POL-PR-003", "COA-VC-2026", "SOP-QA-018", "SOP-MES-024"] },
+    { "id": "unknown-role", "query": "原料采购质量", "role": "unknown", "empty": true },
+    { "id": "irrelevant", "query": "火星天气", "role": "executive", "empty": true }
+  ]
+}

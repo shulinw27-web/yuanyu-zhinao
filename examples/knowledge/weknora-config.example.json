@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "enabled": false,
+  "baseUrl": "http://127.0.0.1:18081",
+  "apiKey": "REPLACE_IN_PRIVATE_FILE_ONLY",
+  "timeoutMs": 2000,
+  "retrievalMode": "keyword_only",
+  "bindings": []
+}

@@ -1,4 +1,5 @@
 import { extractQueryBusinessIds, matchingQueryBusinessIds } from './agent-query-service.js';
+import { rankKnowledgeChunks, fuseKnowledgeRanks } from './knowledge-retrieval-engine.js';
 
 const documents = [
   { id: 'SOP-QA-018', source: 'QMS 受控文件', title: '原料放行与异常升级 SOP', classification: '质量受限', roles: ['executive', 'quality_manager', 'production_manager', 'procurement_manager'], keywords: ['原料', '放行', '检验', '异常', '采购', '维生素'], excerpt: '原料在 LIMS 放行前不得进入生产投料；供应商资质或 COA 异常时，须创建质量调查并升级质量负责人。' },
@@ -10,7 +11,7 @@ const documents = [
 
 const normalize = (value) => String(value || '').toLowerCase();
 
-export function retrieveEnterpriseKnowledge(query, roleId, limit = 3) {
+export function retrieveEnterpriseKnowledgeBaseline(query, roleId, limit = 3) {
   const text = normalize(query);
   const businessIds = extractQueryBusinessIds(query);
   const results = documents
@@ -31,6 +32,26 @@ export function retrieveEnterpriseKnowledge(query, roleId, limit = 3) {
       excerpt: document.excerpt
     }));
   return { mode: 'controlled_local_retrieval', query, results, noEvidence: !results.length };
+}
+
+export function retrieveEnterpriseKnowledge(query, roleId, limit = 3) {
+  const started = performance.now();
+  const safeLimit = Number.isInteger(limit) && limit >= 1 && limit <= 10 ? limit : 3;
+  if (typeof query !== 'string' || query.length > 4000) return { mode: 'controlled_local_retrieval', query: '', results: [], noEvidence: true };
+  const businessIds = extractQueryBusinessIds(query);
+  const visible = documents.filter(document => document.roles.includes(roleId))
+    .filter(document => !businessIds.length || document.source !== 'LIMS 检验记录'
+      || matchingQueryBusinessIds({ id: document.id, excerpt: document.excerpt }, businessIds).length === businessIds.length);
+  const candidates = new Map(visible.map(document => [document.id, document]));
+  const baseline = retrieveEnterpriseKnowledgeBaseline(query, roleId, 10).results.filter(item => candidates.has(item.id));
+  const lexical = rankKnowledgeChunks(query, visible.map(document => ({ id: document.id, title: document.title, text: document.excerpt })), 10);
+  const results = fuseKnowledgeRanks([baseline, lexical], safeLimit).map(({ id, score }) => {
+    const { title, source, classification, excerpt } = candidates.get(id);
+    return { id, score, title, source, classification, excerpt };
+  });
+  return { mode: 'controlled_local_retrieval', query, results, noEvidence: !results.length,
+    diagnostics: { indexKind: 'demo_keyword_bm25_rrf', embedding: 'not_configured', rerank: 'not_configured',
+      elapsedMs: Math.round((performance.now() - started) * 100) / 100, visibleDocuments: visible.length } };
 }
 
 export function getEnterpriseKnowledgeCatalog(roleId) {

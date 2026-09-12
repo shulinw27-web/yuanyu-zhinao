@@ -1,3 +1,5 @@
+export { createKnowledgeClient } from './knowledge-client.js';
+
 const parseVersion = (value) => {
   const match = String(value || '').trim().match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
   return match ? match.slice(1).map(Number) : null;

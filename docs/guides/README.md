@@ -1,5 +1,7 @@
 # 使用指南
 
+- [知识资料、理解草稿与记忆校对](KNOWLEDGE_WORKSPACE_GUIDE.md)：双端入口、来源复验、私有 WeKnora 配置及未启用边界。
+
 新增：[已发布语义模型接入智脑](PUBLISHED_MODEL_WORKBENCH.md)——关联计算方案、对象授权、正反例回放、发布消费和版本追问。
 
 [返回文档中心](../README.md)

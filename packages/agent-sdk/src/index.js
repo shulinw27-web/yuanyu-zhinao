@@ -1,5 +1,5 @@
 import { API_ERROR_CODES } from '@healthcare-ai/api-contracts';
-import { resilientFetch } from '@healthcare-ai/client-runtime';
+import { resilientFetch, createKnowledgeClient } from '@healthcare-ai/client-runtime';
 
 export { API_ERROR_CODES };
 
@@ -109,6 +109,7 @@ export const createAgentClient = ({ baseUrl, platform = 'web', appVersion = '0.1
   };
 
   return {
+    knowledge: createKnowledgeClient(request, 'agent'),
     get deviceId() { return deviceId; },
     get role() { return currentRole; },
     get identitySessionId() { return identitySessionId; },
@@ -210,6 +211,7 @@ export const createAgentClient = ({ baseUrl, platform = 'web', appVersion = '0.1
     controlAgentOrchestration: (id, action) => request(`/agent/orchestrations/${encodeURIComponent(id)}/${encodeURIComponent(action)}`, { method: 'POST' }),
     controlAgentRuntimeTask: (taskId, action) => request(`/agent/runtime-tasks/${encodeURIComponent(taskId)}/${encodeURIComponent(action)}`, { method: 'POST' }),
     agentMemory: () => request('/agent/memory'),
+    correctAgentMemory: (memoryId, body) => request(`/agent/memory/${encodeURIComponent(memoryId)}`, { method: 'PATCH', body: JSON.stringify(body) }),
     agentDesktopEndpoint: () => request('/agent/desktop-endpoint'),
     agentDesktopEndpointHeartbeat: (heartbeat) => request('/agent/desktop-endpoint/heartbeat', { method: 'POST', body: JSON.stringify(heartbeat) }),
     forgetAgentMemory: (memoryId) => request(`/agent/memory/${encodeURIComponent(memoryId)}`, { method: 'DELETE' }),

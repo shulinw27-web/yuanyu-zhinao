@@ -17,3 +17,4 @@
 - [语义层元模型与元对象建设说明](SEMANTIC_MODEL_AUTHORING.md)
 - [元域智脑多端 Agent 架构技术说明书](ZHINAO_AGENT_ARCHITECTURE_V2.md)
 - [元域智脑学习与数据使用控制面](ZHINAO_LEARNING_GOVERNANCE.md)
+- [参考 WeKnora 升级：采纳点、设计理由与验证路线](WEKNORA_UPGRADE_REFERENCE.md)

@@ -1,4 +1,5 @@
 import { buildPreflightContext, executeReadOnlyTool, executeTool, getRegisteredTools } from './agent-tool-registry.js';
+import { memoryFingerprint } from './agent-memory-review.js';
 import { buildAgentPlan, buildAgentTaskContract, routeAgentTask } from './agent-orchestration-service.js';
 import { runAgentReadLoop } from './agent-read-loop-service.js';
 import { selectAgentGoalMemory } from './agent-memory-selection-service.js';
@@ -148,7 +149,7 @@ export async function getPrivateAgentRuns(roleId, identityScope) {
 
 export async function getPrivateAgentMemory(roleId, identityScope) {
   return (await getAgentLongTermMemory(roleId, identityScope)).map((item) => ({
-    id: item.id, roleId: item.roleId, domain: item.domain, summary: item.summary, source: item.source,
+    id: item.id, roleId: item.roleId, domain: item.domain, summary: item.summary, content: item.content || item.summary, fingerprint: memoryFingerprint(item), source: item.source,
     trust: item.trust, retention: item.retention, createdAt: item.createdAt, lastUsedAt: item.lastUsedAt, expiresAt: item.expiresAt
   }));
 }

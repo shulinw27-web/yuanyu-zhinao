@@ -1,5 +1,7 @@
 # 项目文档中心
 
+最新知识能力：[知识工作区指南](guides/KNOWLEDGE_WORKSPACE_GUIDE.md) · [WeKnora 第三批验收](development/WEKNORA_UPGRADE_ACCEPTANCE.md)。已交付资料界面、来源草稿、记忆校对与私有配置代码；真实项目 Key/映射未启用，独立实例三轮合成问答已通过。
+
 整理日期：2026-09-03。项目说明、设计、操作指南和交付文件统一保存在本目录；源码目录不再各自保存一套说明。
 
 ## 从这里开始
@@ -14,6 +16,7 @@
 | 启动本地环境 | [开发与启动](development/GETTING_STARTED.md) |
 | 准备真实系统联调 | [开发准备事项](development/DEVELOPMENT_READINESS.md) → [开发路线](development/DEVELOPMENT_ROADMAP.md) |
 | 理解整体设计 | [整体架构](architecture/ARCHITECTURE.md) → [模块文档](modules/README.md) |
+| 了解参考 WeKnora 的升级方向 | [采纳点与验证路线](architecture/WEKNORA_UPGRADE_REFERENCE.md) · [分批实施与接口验收](development/WEKNORA_UPGRADE_ACCEPTANCE.md) · [D 盘本地部署](operations/WEKNORA_LOCAL_DEPLOYMENT.md)（聊天与 2048 维 Embedding 原生调用通过；双端只读适配器已开发，真实集成未启用） |
 | 使用智脑或语义运营端 | [操作指南目录](guides/README.md) |
 | 按业务场景建设本体、配置质量判断 | [场景建模指南](guides/ONTOLOGY_SCENARIO_MODELING.md) · [验收记录](development/ONTOLOGY_MODELING_ACCEPTANCE.md) |
 | 模拟真实业务材料并评估快速建模 | [制造案例需求与材料](development/SEMANTIC_MANUFACTURING_REQUIREMENTS.md) · [初测问题](development/SEMANTIC_MANUFACTURING_EVALUATION.md) · [修复回归](development/SEMANTIC_MANUFACTURING_REPAIR.md) · [操作指南](guides/SEMANTIC_MATERIAL_WORKSPACE.md) |

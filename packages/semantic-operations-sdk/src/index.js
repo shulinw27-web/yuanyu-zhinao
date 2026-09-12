@@ -63,6 +63,7 @@ export function createSemanticOperationsClient({ baseUrl, platform = 'semantic-w
   };
 
   return {
+    knowledge: createKnowledgeClient(request, 'semantic-operations'),
     get apiBaseUrl() { return apiBaseUrl; },
     get deviceId() { return deviceId; },
     get identitySessionId() { return identitySessionId; },
@@ -126,4 +127,4 @@ export function createSemanticOperationsClient({ baseUrl, platform = 'semantic-w
     recordReportExport: (taskId, receipt) => post(`/semantic-operations/tasks/${encodeURIComponent(taskId)}/report-export`, { receipt })
   };
 }
-import { resilientFetch } from '@healthcare-ai/client-runtime';
+import { resilientFetch, createKnowledgeClient } from '@healthcare-ai/client-runtime';

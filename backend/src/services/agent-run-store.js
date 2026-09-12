@@ -27,12 +27,26 @@ import {
   secureAgentConfirmationTokenMatches
 } from './agent-runtime-store.js';
 import { appendDomainEventToWorkspace, DOMAIN_EVENT_NAMESPACE, DOMAIN_EVENT_WORKSPACE_KEY, initialDomainEventWorkspace } from '../domains/events/domain-event-outbox.js';
-import { getRuntimeStoreInfo } from '../repositories/runtime-state-repository.js';
+import { getRuntimeStoreInfo, mutateState } from '../repositories/runtime-state-repository.js';
+import { prepareMemoryCorrection } from './agent-memory-review.js';
 
 const RUN_NAMESPACE = 'agent_runs';
 const MEMORY_NAMESPACE = 'agent_memories';
 let postgresRepository = null;
 const now = () => new Date().toISOString();
+
+export async function correctAgentLongTermMemory(roleIds, identityScope, memoryId, body) {
+  const prepared = prepareMemoryCorrection(memoryId, body);
+  if (prepared.error) return prepared;
+  for (const roleId of [...new Set(Array.isArray(roleIds) ? roleIds : [roleIds])]) {
+    const key = agentMemoryKey(roleId, identityScope);
+    const result = postgresRepository
+      ? await postgresRepository.mutateState(MEMORY_NAMESPACE, key, [], prepared.mutation)
+      : mutateState(MEMORY_NAMESPACE, key, [], prepared.mutation);
+    if (result?.code !== 'MEMORY_NOT_FOUND') return result;
+  }
+  return { error: 'MEMORY_NOT_FOUND', code: 'MEMORY_NOT_FOUND', status: 404 };
+}
 
 export function configureAgentRunRepository(repository = null) {
   if (repository && typeof repository.mutateState !== 'function') throw new TypeError('Agent Run repository does not implement the asynchronous runtime-state port.');

@@ -4,6 +4,8 @@
 
 ### 以语义层连接企业数据，以 Agent 承接业务与工作
 
+2026-09-12 知识工程增量：[双端知识工作区](docs/guides/KNOWLEDGE_WORKSPACE_GUIDE.md)支持资料校对、来源复验、理解草稿和长期目标修正；WeKnora 独立合成库三轮真实问答通过。项目外部 Key/资源映射尚未启用，不将独立实例的成功表述为全链路已接通。[验收与剩余范围](docs/development/WEKNORA_UPGRADE_ACCEPTANCE.md)。
+
 最新进展：[全链路双 Agent 修复与回归](docs/development/SUPPLY_CHAIN_INCIDENT_REPAIR.md)覆盖采购、生产拆合批、仓配、门店、订单、财务和人员；新增逐跳授权的后代展开、按证据解释、有界多根比较和附件跨轮检索。完成范围限于声明模型，不将局部核验包装为全企业实时真相；[修复前证据](docs/development/SUPPLY_CHAIN_INCIDENT_EVALUATION.md)原样保留。
 
 2026-09-12：已发布模型解释改为“模型选择引用、服务端校验填值”，区分实际事实、计算指标、证据缺口与待验证建议；拒绝伪造字段、旧快照和不存在的引用。契约和使用边界见 [发布模型接入指南](docs/guides/PUBLISHED_MODEL_WORKBENCH.md)。

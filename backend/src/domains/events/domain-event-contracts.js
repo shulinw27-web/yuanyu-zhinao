@@ -1,4 +1,6 @@
 const definitions = [
+  ['knowledge.study.changed', 'KnowledgeStudy', ['documentId', 'revision']],
+  ['knowledge.document.changed', 'KnowledgeDocument', ['documentId', 'revision', 'status', 'contentHash']],
   ['risk.case.acknowledged', 'RiskCase', ['riskId', 'severity', 'status']],
   ['risk.case.disposition_approved', 'RiskCase', ['riskId', 'severity', 'status', 'disposition']],
   ['procurement.requisition.launched', 'ProcurementRequisition', ['requisitionId', 'status']],

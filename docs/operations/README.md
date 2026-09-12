@@ -15,4 +15,4 @@ PRODUCTION_TODO_CHECKLIST 是生产待办的唯一勾选入口；Kubernetes 模�
 - [Mock 运行时持久化与重置](RUNTIME_PERSISTENCE.md)
 - [Semantic Context Service](SEMANTIC_SERVICE.md)
 - [软件供应链安全基线](SOFTWARE_SUPPLY_CHAIN.md)
-
+- [WeKnora 本地部署（D 盘）](WEKNORA_LOCAL_DEPLOYMENT.md)

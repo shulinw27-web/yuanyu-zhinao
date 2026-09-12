@@ -1,5 +1,6 @@
 import { normalizeAgentMessageBody } from '@healthcare-ai/api-contracts';
 import {
+  correctAgentLongTermMemory,
   archiveAgentConversation,
   cancelPrivateAgentCommand,
   cancelAgentLongTask,
@@ -131,6 +132,12 @@ export async function handleAgentRoutes({ req, res, url, role, agentIdentity, ef
     return true;
   }
   const memoryMatch = url.pathname.match(/^\/api\/agent\/memory\/([^/]+)$/);
+  if (memoryMatch && req.method === 'PATCH') {
+    if (!selectActionRole('agent.prompt.run')) { denyButton('agent.prompt.run'); return true; }
+    const result = await correctAgentLongTermMemory(effectiveAccess.roleIds, agentIdentity, decodeURIComponent(memoryMatch[1]), await readBody(req));
+    send(res, result.error ? result.status || 400 : 200, result);
+    return true;
+  }
   if (memoryMatch && req.method === 'DELETE') {
     const result = await forgetPrivateAgentMemory(effectiveAccess.roleIds, decodeURIComponent(memoryMatch[1]), agentIdentity);
     send(res, result.error ? 404 : 200, result.error ? { message: result.error, code: 'AGENT_MEMORY_NOT_FOUND' } : result);

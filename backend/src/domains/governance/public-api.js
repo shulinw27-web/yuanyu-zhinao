@@ -1,4 +1,9 @@
 export { getRole } from '../../services/authorization-service.js';
+export { loadWeKnoraRuntimeProvider } from '../../services/weknora-runtime-config.js';
+export { listKnowledgeStudies, saveKnowledgeStudy, readKnowledgeStudy } from '../../services/knowledge-study-service.js';
+export { getEffectiveAccess } from '../../services/access-control-service.js';
+export { createLocalKnowledgeProvider, buildKnowledgeBrief } from '../../services/knowledge-evidence-service.js';
+export { previewLibraryDocument, saveLibraryDocument, retractLibraryDocument, listLibraryDocuments, readLibraryDocument, searchLibraryDocuments } from '../../services/knowledge-library-service.js';
 export { runOntologyCaseReplay, runOntologyReadReplay, getOntologyCaseReplay, publishGovernedOntology } from '../../services/ontology-runtime-service.js';
 export { getWorldModel } from '../../services/risk-service.js';
 export { getEnterpriseKnowledgeCatalog, retrieveEnterpriseKnowledge } from '../../services/enterprise-knowledge-service.js';

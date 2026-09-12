@@ -31,3 +31,4 @@ export { approveAuditExportRequest, createAuditExportRequest, generateApprovedAu
 export { evaluateSecurityDetectionRules } from '../../services/security-detection-service.js';
 export { getModelGovernanceObservability, getModelGovernancePolicy } from '../../services/model-governance-service.js';
 export { getZhiNaoAuthorizationProfile } from '../../services/zhinao-authorization-service.js';
+export { correctAgentLongTermMemory } from '../../services/agent-run-store.js';

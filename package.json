@@ -10,6 +10,8 @@
   ],
   "scripts": {
     "docs:check": "node scripts/check-docs.mjs",
+    "test:knowledge": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/knowledge-library.test.js backend/test/knowledge-evidence.test.js backend/test/knowledge-study.test.js backend/test/agent-memory-review.test.js",
+    "evaluate:knowledge": "node --import ./backend/test/runtime-test-bootstrap.js scripts/evaluate-knowledge-retrieval.mjs",
     "evaluate:semantic-workbench": "node scripts/evaluate-semantic-workbench-loop.mjs",
     "evaluate:supply-chain": "node scripts/evaluate-supply-chain-incident.mjs",
     "benchmark:ontology-model": "node scripts/benchmark-ontology-model.mjs",
@@ -66,7 +68,7 @@
     "test:semantic": "npm run test -w @healthcare-ai/semantic-operations-sdk && npm run test -w @healthcare-ai/semantic-operations-console && node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/semantica-demo-bridge.test.js backend/test/semantic-operations-agent.test.js backend/test/semantic-manufacturing-regression.test.js backend/test/semantic-inspection-schedule.test.js apps/semantic-operations-console/test/task-guards.test.js apps/semantic-operations-console/test/workspace-layout.test.js",
     "test:desktop": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/desktop-agent-execution.test.js backend/test/desktop-endpoint-runtime.test.js backend/test/agent-long-task-runtime.test.js backend/test/agent-long-task-worker-process.test.js && node --test apps/desktop/test/desktop-executor.test.cjs apps/desktop/test/endpoint-runtime.test.cjs",
     "test:learning": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/agent-learning-governance.test.js",
-    "test:orchestration": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/agent-orchestration.test.js backend/test/agent-read-loop.test.js backend/test/agent-memory-selection.test.js backend/test/agent-targeted-query.test.js",
+    "test:orchestration": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/agent-orchestration.test.js backend/test/agent-read-loop.test.js backend/test/agent-memory-selection.test.js backend/test/agent-targeted-query.test.js backend/test/knowledge-library.test.js backend/test/knowledge-evidence.test.js backend/test/knowledge-study.test.js backend/test/agent-memory-review.test.js",
     "test:persistence": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/runtime-persistence.test.js backend/test/postgres-runtime-repository.test.js backend/test/observability-siem.test.js backend/test/audit-governance.test.js backend/test/postgres-migration-governance.test.js",
     "test:all": "npm run test:contracts && npm run test:clients && npm run test:nonfunctional && npm run test:architecture && npm run test:events && npm run test:security && npm run test:ark && npm run test:evidence && npm run test:conversations && npm run test:alerting && npm run test:permissions && npm run test:semantic && npm run test:desktop && npm run test:learning && npm run test:orchestration && npm run test:persistence && npm run test:dingtalk && npm run test:identity-providers && npm run test:ontology",
     "start": "npm run start -w backend",

@@ -21,6 +21,8 @@
 
 核销表只直接保存 `bank_id` 不代表缺少发票/订单关联：应沿真实 `bank_id→invoice_id→order_id` 核对。当前有限冲突检查在所有 matched 记录均可连接时，拒绝已复现的“仅直接存 bank_id 所以未提供完整链路”措辞；有断链、缺发票或要求更细行级凭证不据此拒绝。它仍不是任意措辞的通用事实识别器。
 
+检查区分明确纠正与错误断言：“不能说财务侧只有汇总”“财务侧并非只有汇总”不因此拒绝；“不能说……，但财务侧只有汇总”的后一句仍检查。否定必须紧邻被纠正的片段，不是出现“不能”就跳过整段。该规则仅覆盖已测试的明确措辞，不保证所有反问、引用和复杂否定都识别正确。
+
 `analysis.citations` 是所引用的来源记录标识，不是额外明细；`analysis.verification` 区分来源、指标、缺口引用核验与自然语言推理核验。`narrativeEntailmentVerified=false` 必须保留：建议引用存在，不代表建议一定正确或因果已经证实。界面中的“待验证解释”和“建议（尚未执行）”不可改标为已确认事实/已完成任务。
 
 隔离诊断继续使用 `npm run benchmark:ontology-model -- --evidence-regression`（12 次有界逻辑调用）；可加 `--case=finance` 仅跑财务四组合。输出中的 `syntheticProposal` 只记录该脚本内置合成样本的安全提案，方便定位契约问题；生产日志不记录原始提案。`analysisProposalCharacters` 与 `analysisAnswerCharacters` 分别统计提案和最终可读解释，拒绝输出时后者为 0；`analysisMs` 包括校验和渲染。具体实测与保留的失败见 [修复报告](../development/SUPPLY_CHAIN_INCIDENT_REPAIR.md)。

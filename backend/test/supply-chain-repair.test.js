@@ -132,6 +132,27 @@ test('production evidence guard allows actual gaps, aggregate-only metrics and f
   assert.equal(inspectOntologyEvidenceClaims('现有只有汇总值，缺少逐笔银行流水、发票、订单间的明确匹配表。', brokenLink).passed, true);
 });
 
+test('financial evidence guard distinguishes explicit corrections from affirmative denials', () => {
+  for (const text of [
+    '不能说财务侧只有汇总。',
+    '现有来源已提供，因此不应声称“财务侧仅有汇总”。',
+    '“财务侧只有汇总”这一说法不准确。',
+    '财务侧并非只有汇总，逐笔记录已经提供。',
+    '财务侧不是只有汇总。',
+    'BANK-N1 到账2000，已匹配1500，不能说差额500未见对应到账或核销明细。',
+    '核销记录仅直接关联bank_id，但不能说未提供逐笔到订单/发票的完整匹配链路。'
+  ]) assert.equal(inspectOntologyEvidenceClaims(text, samples.records).passed, true, text);
+  for (const text of [
+    '财务侧只有汇总。',
+    '不是，财务侧只有汇总。',
+    '不能说不存在风险，但财务侧只有汇总。',
+    '不能说财务侧只有汇总，但财务侧只有汇总。',
+    '不能说“现有记录齐全”。财务侧只有汇总。',
+    '并不是不能说财务侧只有汇总。',
+    '财务侧并非不是只有汇总。'
+  ]) assert.equal(inspectOntologyEvidenceClaims(text, samples.records).passed, false, text);
+});
+
 test('receipt conflation guard uses actual amounts, not fixture numbers, and keeps ambiguous gaps reviewable', () => {
   const answer = 'BANK-N1 到账2000，仅匹配1500，差额500未见对应到账或核销明细。';
   assert.deepEqual(inspectOntologyEvidenceClaims(answer, samples.records), { passed: false, signals: ['received_amount_described_as_missing'] });
@@ -201,14 +222,17 @@ test('published reader suppresses conflicting prose, keeps factual results, and 
       assert.ok(!JSON.stringify(result).includes(bad));
       assert.equal(result.timing.analysisAnswerCharacters, 0); assert.ok(result.timing.analysisProposalCharacters > 0);
     }
-    answer = '已提供三笔银行到账和核销记录；BANK-N3 对应 ALLOC-N3 为 pending，尚未有效核销。本次不执行。';
-    const good = await runPublishedOntologyRead({ ontology, roleId: 'executive', scope, target: 'RAW-N1', input: '核对财务明细' });
-    assert.equal(good.status, 'completed', JSON.stringify(good.analysis)); assert.equal(good.analysis.evidenceValidation.passed, true);
-    assert.ok(good.timing.analysisAnswerCharacters > 0); assert.equal(good.analysis.verification.narrativeEntailmentVerified, false);
+    for (const valid of ['已提供三笔银行到账和核销记录；BANK-N3 对应 ALLOC-N3 为 pending，尚未有效核销。本次不执行。', '不能说财务侧只有汇总；已有逐笔到账与核销记录，本次不执行。']) {
+      answer = valid;
+      const good = await runPublishedOntologyRead({ ontology, roleId: 'executive', scope, target: 'RAW-N1', input: '核对财务明细' });
+      assert.equal(good.status, 'completed', JSON.stringify(good.analysis)); assert.equal(good.analysis.evidenceValidation.passed, true);
+      assert.ok(good.text.includes(valid.split('；')[0]));
+      assert.ok(good.timing.analysisAnswerCharacters > 0); assert.equal(good.analysis.verification.narrativeEntailmentVerified, false);
+    }
     revoke = true;
     const denied = await runPublishedOntologyRead({ ontology, roleId: 'executive', scope, target: 'RAW-N1', input: '核对财务明细' });
     assert.equal(denied.status, 'incomplete'); assert.equal(denied.records, undefined); assert.ok(!denied.text.includes(answer));
-    assert.equal(modelCalls, 6);
+    assert.equal(modelCalls, 7);
   } finally {
     globalThis.fetch = oldFetch;
     for (const [key, value] of Object.entries(previous)) if (value === undefined) delete process.env[key]; else process.env[key] = value;

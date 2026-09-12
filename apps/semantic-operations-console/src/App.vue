@@ -1,9 +1,10 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import { createSemanticOperationsClient } from '@healthcare-ai/semantic-operations-sdk';
 import SemanticAgentWorkspace from './components/SemanticAgentWorkspace.vue';
 import SemanticOperationsCenter from './components/SemanticOperationsCenter.vue';
 import OAMetaModelStudio from '../../../frontend/src/features/meta-model/OAMetaModelStudio.vue';
+import KnowledgeLibraryPanel from '../../../frontend/src/features/knowledge/KnowledgeLibraryPanel.vue';
 import { semanticSimulationMessage } from '../../../frontend/src/features/meta-model/ontology-scenario.js';
 
 const runtimePlatform = globalThis.semanticOperationsDesktop?.runtime === 'electron' ? 'semantic-electron' : 'semantic-web';
@@ -96,6 +97,13 @@ async function refreshAfterAgent(result) {
   await loadWorkspace({ preserveMessage: true });
 }
 
+async function prepareKnowledgeModelCandidate(input) {
+  activeView.value = 'agent';
+  await nextTick();
+  agentPanel.value?.setInput(input);
+  message.value = '业务理解草稿已填入输入框，请核对后自行发送；尚未建模或发布。';
+}
+
 async function runAction(action, successText) {
   try {
     const result = await action();
@@ -165,13 +173,14 @@ onMounted(async () => {
         <button :class="{ active: activeView === 'agent' }" @click="activeView = 'agent'"><span>01</span><div><b>Agent 工作台</b><small>自然语言与多模态建模</small></div></button>
         <button :class="{ active: activeView === 'model' }" @click="activeView = 'model'"><span>02</span><div><b>模型校对</b><small>人工可视化精调</small></div></button>
         <button :class="{ active: activeView === 'versions' }" @click="activeView = 'versions'"><span>03</span><div><b>版本与回滚</b><small>Diff、快照和恢复</small></div></button>
+        <button :class="{ active: activeView === 'knowledge' }" @click="activeView = 'knowledge'"><span>04</span><div><b>知识资料</b><small>原文校对与证据检索</small></div></button>
       </nav>
       <section class="ops-flow"><span>当前治理流程</span><div v-for="(step, index) in workflow" :key="step.label" :class="step.status"><i>{{ index + 1 }}</i><b>{{ step.label }}</b></div></section>
       <footer><b>执行边界</b><span>Agent只能生成计划和调用受控工具；发布、删除、主键变更仍需显式确认。</span></footer>
     </aside>
 
     <main>
-      <header class="ops-topbar"><div><span>SEMANTIC CONTROL PLANE</span><h1>{{ activeView === 'agent' ? '语义运营 Agent 工作台' : activeView === 'model' ? '语义模型人工校对' : '模型版本与恢复' }}</h1></div><div class="ops-top-actions"><div :class="['ops-live', deploymentDrift]"><i/>Semantica · {{ semanticaStatus }} · {{ deploymentDriftLabel }}</div><button class="ops-logout" :disabled="refreshingStatus" @click="refreshSemanticStatus">{{ refreshingStatus ? '刷新中…' : '刷新服务状态' }}</button><label>已认证运营身份<strong>{{ currentUser?.name || currentUser?.account }}</strong><small>{{ roles.find(item => item.id === role)?.name || role }} · {{ client.deviceId.slice(-8) }}</small></label><button class="ops-logout" @click="logout">退出</button></div></header>
+      <header class="ops-topbar"><div><span>SEMANTIC CONTROL PLANE</span><h1>{{ activeView === 'knowledge' ? '知识资料与来源校对' : activeView === 'agent' ? '语义运营 Agent 工作台' : activeView === 'model' ? '语义模型人工校对' : '模型版本与恢复' }}</h1></div><div class="ops-top-actions"><div :class="['ops-live', deploymentDrift]"><i/>Semantica · {{ semanticaStatus }} · {{ deploymentDriftLabel }}</div><button class="ops-logout" :disabled="refreshingStatus" @click="refreshSemanticStatus">{{ refreshingStatus ? '刷新中…' : '刷新服务状态' }}</button><label>已认证运营身份<strong>{{ currentUser?.name || currentUser?.account }}</strong><small>{{ roles.find(item => item.id === role)?.name || role }} · {{ client.deviceId.slice(-8) }}</small></label><button class="ops-logout" @click="logout">退出</button></div></header>
 
       <div v-if="error" class="ops-error">{{ error }}<button @click="loadWorkspace">重新加载</button></div>
       <div v-if="message" class="ops-message">{{ message }}</div>
@@ -190,6 +199,7 @@ onMounted(async () => {
             <OAMetaModelStudio :meta-model="model" :draft="draft" :authoring-profile="profile" :simulation="simulation" :semantic-context="semanticContext" :role="role" :message="message" :replay-cases="client.replayOntologyCases" :button-permission-ids="buttonPermissionIds" @save-draft="saveDraft" @validate-draft="validateDraft" @simulate-build="simulateBuild" @publish="publishModel"/>
           </template>
 
+          <KnowledgeLibraryPanel v-else-if="activeView === 'knowledge'" :client="client.knowledge" :can-write="buttonPermissionIds.includes('meta_model.draft.save')" :can-model="canModel" @model-candidate="prepareKnowledgeModelCandidate" />
           <template v-else>
             <div class="ops-section-head"><div><span>GOVERNED HISTORY</span><h2>每次Agent采纳都可解释、可比较、可恢复</h2><p>快照绑定创建人和草稿指纹；如果已有后续变更，系统会拒绝覆盖式回滚。</p></div></div>
             <section class="version-list"><article v-for="snapshot in snapshots" :key="snapshot.id"><div class="version-icon">{{ snapshot.status === 'active' ? 'V' : '↶' }}</div><div class="version-info"><span>{{ snapshot.status === 'active' ? '有效草稿快照' : '已完成回滚' }}</span><b>{{ snapshot.id }}</b><small>{{ snapshot.createdAt }} · 来源 {{ snapshot.proposalId }}</small><details><summary>查看结构差异</summary><p>基础指纹：{{ snapshot.diff?.baseFingerprint }}</p><ul><li v-for="item in snapshot.diff?.objectChanges?.filter(item => item.change !== 'unchanged')" :key="item.id">{{ item.change === 'added' ? '新增' : '更新' }}对象：{{ item.label }}（{{ item.id }}）</li><li v-for="item in snapshot.diff?.relationshipChanges?.filter(item => item.change === 'added')" :key="`${item.from}-${item.predicate}-${item.to}`">新增关系：{{ item.from }} —{{ item.predicate }}→ {{ item.to }}</li></ul></details></div><div class="version-diff"><b>+{{ snapshot.summary.addedObjects }}</b><span>对象</span><b>~{{ snapshot.summary.updatedObjects }}</b><span>更新</span><b>+{{ snapshot.summary.addedRelationships }}</b><span>关系</span><button v-if="snapshot.rollbackAllowed" class="version-rollback" @click="rollbackTarget = snapshot; rollbackPhrase = ''">恢复此快照之前</button></div></article><p v-if="!snapshots.length">当前身份还没有Agent采纳快照。完成一次语义建模任务后，版本记录会出现在这里。</p></section>

@@ -21,6 +21,426 @@ tags:
   - { name: SemanticOperations, description: 独立语义运营任务、证据、巡检、通知与受控报告 }
   - { name: Platform, description: 平台运行状态与配置 }
 paths:
+  /agent/knowledge-library/studies:
+    get:
+      tags: [Agent]
+      operationId: listAgentKnowledgeStudies
+      responses:
+        '200': { description: 当前企业主体角色的草稿目录，不包含来源原文 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /agent/knowledge-library/studies/{id}:
+    get:
+      tags: [Agent]
+      operationId: readAgentKnowledgeStudy
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      responses:
+        '200': { description: 重新核验来源后的人工笔记、原文和待审阅建模输入，不自动发送或发布 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 来源或草稿已变化，不返回旧引用 }
+    put:
+      tags: [Agent]
+      operationId: saveAgentKnowledgeStudy
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/KnowledgeStudyInput' } } }
+      responses:
+        '200': { description: 人工确认的未发布理解草稿，不保存来源正文副本 }
+        '400': { description: 输入或来源无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 草稿并发修订或来源失效 }
+        '413': { description: 草稿或来源配额超限 }
+  /semantic-operations/knowledge-library/studies:
+    get:
+      tags: [Agent]
+      operationId: listSemanticOperationsKnowledgeStudies
+      responses:
+        '200': { description: 当前企业主体角色的草稿目录，不包含来源原文 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /semantic-operations/knowledge-library/studies/{id}:
+    get:
+      tags: [Agent]
+      operationId: readSemanticOperationsKnowledgeStudy
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      responses:
+        '200': { description: 重新核验来源后的人工笔记、原文和待审阅建模输入，不自动发送或发布 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 来源或草稿已变化，不返回旧引用 }
+    put:
+      tags: [Agent]
+      operationId: saveSemanticOperationsKnowledgeStudy
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/KnowledgeStudyInput' } } }
+      responses:
+        '200': { description: 人工确认的未发布理解草稿，不保存来源正文副本 }
+        '400': { description: 输入或来源无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 草稿并发修订或来源失效 }
+        '413': { description: 草稿或来源配额超限 }
+  /agent/knowledge-library/providers:
+    get:
+      tags: [Agent]
+      operationId: readAgentKnowledgeProviders
+      x-page-permission: page.agent.view
+      description: 只报告接入配置，不探测或调用云服务；WeKnora 适配器尚未启用。
+      responses:
+        '200':
+          description: 当前授权范围内的知识资料结果；不产生业务执行或模型发布
+          content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { description: 文档或证据预算超限，不截断返回 }
+        '503': { description: 知识提供方不可用，不填充假资料 }
+  /agent/knowledge-library/brief:
+    post:
+      tags: [Agent]
+      operationId: readAgentKnowledgeBrief
+      x-page-permission: page.agent.view
+      description: 返回最多五份资料的原文摘录，总计最多16000字符；返回前复验修订与权限，不调用大模型、不自动加入聊天、不发布模型。
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/KnowledgeBriefInput' } } }
+      responses:
+        '200':
+          description: 当前授权范围内的知识资料结果；不产生业务执行或模型发布
+          content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { description: 文档或证据预算超限，不截断返回 }
+        '503': { description: 知识提供方不可用，不填充假资料 }
+  /agent/knowledge-library/citation:
+    post:
+      tags: [Agent]
+      operationId: readAgentKnowledgeCitation
+      x-page-permission: page.agent.view
+      description: 按当前身份重新读取精确修订及片段；不接受外部 URL 或客户端 ACL。
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/KnowledgeCitation' } } }
+      responses:
+        '200':
+          description: 当前授权范围内的知识资料结果；不产生业务执行或模型发布
+          content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { description: 文档或证据预算超限，不截断返回 }
+        '503': { description: 知识提供方不可用，不填充假资料 }
+  /semantic-operations/knowledge-library/providers:
+    get:
+      tags: [SemanticOperations]
+      operationId: readSemanticKnowledgeProviders
+      x-page-permission: page.world.view
+      description: 只报告接入配置，不探测或调用云服务；WeKnora 适配器尚未启用。
+      responses:
+        '200':
+          description: 当前授权范围内的知识资料结果；不产生业务执行或模型发布
+          content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { description: 文档或证据预算超限，不截断返回 }
+        '503': { description: 知识提供方不可用，不填充假资料 }
+  /semantic-operations/knowledge-library/brief:
+    post:
+      tags: [SemanticOperations]
+      operationId: readSemanticKnowledgeBrief
+      x-page-permission: page.world.view
+      description: 返回最多五份资料的原文摘录，总计最多16000字符；返回前复验修订与权限，不调用大模型、不自动加入聊天、不发布模型。
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/KnowledgeBriefInput' } } }
+      responses:
+        '200':
+          description: 当前授权范围内的知识资料结果；不产生业务执行或模型发布
+          content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { description: 文档或证据预算超限，不截断返回 }
+        '503': { description: 知识提供方不可用，不填充假资料 }
+  /semantic-operations/knowledge-library/citation:
+    post:
+      tags: [SemanticOperations]
+      operationId: readSemanticKnowledgeCitation
+      x-page-permission: page.world.view
+      description: 按当前身份重新读取精确修订及片段；不接受外部 URL 或客户端 ACL。
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/KnowledgeCitation' } } }
+      responses:
+        '200':
+          description: 当前授权范围内的知识资料结果；不产生业务执行或模型发布
+          content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { description: 文档或证据预算超限，不截断返回 }
+        '503': { description: 知识提供方不可用，不填充假资料 }
+  /semantic-operations/knowledge-library:
+    get:
+      tags: [SemanticOperations]
+      operationId: listSemanticPrivateDocuments
+      x-page-permission: page.world.view
+      description: 复用个人知识库；仅同企业、主体、原始角色可见，不是企业共享，不发布语义模型。
+      responses:
+        '200':
+          description: 当前授权范围内的知识资料结果；不产生业务执行或模型发布
+          content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { description: 文档或证据预算超限，不截断返回 }
+        '503': { description: 知识提供方不可用，不填充假资料 }
+  /semantic-operations/knowledge-library/search:
+    get:
+      tags: [SemanticOperations]
+      operationId: searchSemanticPrivateDocuments
+      x-page-permission: page.world.view
+      description: 复用个人知识库；仅同企业、主体、原始角色可见，不是企业共享，不发布语义模型。
+      parameters:
+        - { in: query, name: query, required: true, schema: { type: string, minLength: 1, maxLength: 4000 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 10, default: 5 } }
+      responses:
+        '200':
+          description: 当前授权范围内的知识资料结果；不产生业务执行或模型发布
+          content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { description: 文档或证据预算超限，不截断返回 }
+        '503': { description: 知识提供方不可用，不填充假资料 }
+  /semantic-operations/knowledge-library/preview:
+    post:
+      tags: [SemanticOperations]
+      operationId: previewSemanticPrivateDocument
+      x-page-permission: page.world.view
+      x-button-permission: meta_model.draft.save
+      description: 复用个人知识库；仅同企业、主体、原始角色可见，不是企业共享，不发布语义模型。
+      requestBody: { $ref: '#/paths/~1agent~1knowledge-library~1preview/post/requestBody' }
+      responses:
+        '200':
+          description: 当前授权范围内的知识资料结果；不产生业务执行或模型发布
+          content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { description: 文档或证据预算超限，不截断返回 }
+        '503': { description: 知识提供方不可用，不填充假资料 }
+  /semantic-operations/knowledge-library/documents/{documentId}:
+    get:
+      tags: [SemanticOperations]
+      operationId: readSemanticPrivateDocument
+      x-page-permission: page.world.view
+      description: 复用个人知识库；仅同企业、主体、原始角色可见，不是企业共享，不发布语义模型。
+      parameters:
+        - { in: path, name: documentId, required: true, schema: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$' } }
+        - { in: query, name: revision, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: 当前授权范围内的知识资料结果；不产生业务执行或模型发布
+          content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { description: 文档或证据预算超限，不截断返回 }
+        '503': { description: 知识提供方不可用，不填充假资料 }
+    put:
+      tags: [SemanticOperations]
+      operationId: saveSemanticPrivateDocument
+      x-page-permission: page.world.view
+      x-button-permission: meta_model.draft.save
+      description: 复用个人知识库；仅同企业、主体、原始角色可见，不是企业共享，不发布语义模型。
+      parameters:
+        - { in: path, name: documentId, required: true, schema: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$' } }
+      requestBody: { $ref: '#/paths/~1agent~1knowledge-library~1documents~1{documentId}/put/requestBody' }
+      responses:
+        '200':
+          description: 当前授权范围内的知识资料结果；不产生业务执行或模型发布
+          content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { description: 文档或证据预算超限，不截断返回 }
+        '503': { description: 知识提供方不可用，不填充假资料 }
+  /semantic-operations/knowledge-library/documents/{documentId}/retract:
+    post:
+      tags: [SemanticOperations]
+      operationId: retractSemanticPrivateDocument
+      x-page-permission: page.world.view
+      x-button-permission: meta_model.draft.save
+      description: 复用个人知识库；仅同企业、主体、原始角色可见，不是企业共享，不发布语义模型。
+      parameters:
+        - { in: path, name: documentId, required: true, schema: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$' } }
+      requestBody: { $ref: '#/paths/~1agent~1knowledge-library~1documents~1{documentId}~1retract/post/requestBody' }
+      responses:
+        '200':
+          description: 当前授权范围内的知识资料结果；不产生业务执行或模型发布
+          content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { description: 文档或证据预算超限，不截断返回 }
+        '503': { description: 知识提供方不可用，不填充假资料 }
+  /agent/knowledge-library:
+    get:
+      tags: [Agent]
+      operationId: listPrivateKnowledgeDocuments
+      x-page-permission: page.agent.view
+      description: 当前企业、主体、原始角色三元组的个人知识资料目录；不是共享企业知识库。不返回历史正文。
+      responses:
+        '200':
+          description: 文档元数据、当前修订、可用状态与索引类型
+          content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /agent/knowledge-library/search:
+    get:
+      tags: [Agent]
+      operationId: searchPrivateKnowledgeDocuments
+      x-page-permission: page.agent.view
+      description: 只检索当前有效且未撤回的最新修订，返回文本偏移引用和诊断信息；当前为本地 BM25，不调用向量或生成模型。
+      parameters:
+        - { in: query, name: query, required: true, schema: { type: string, minLength: 1, maxLength: 4000 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 10, default: 5 } }
+      responses:
+        '200':
+          description: 去重文档结果、引用与检索计时；无结果不填充默认资料
+          content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /agent/knowledge-library/preview:
+    post:
+      tags: [Agent]
+      operationId: previewPrivateKnowledgeChunks
+      x-button-permission: agent.prompt.run
+      description: 对明确提供的文本安全检查并分块预览；不持久化，不推断 PDF 坐标，不接受二进制附件。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [text]
+              properties:
+                text: { type: string, minLength: 1, maxLength: 120000 }
+                chunkSize: { type: integer, minimum: 200, maximum: 2000, default: 1000 }
+      responses:
+        '200':
+          description: 连续 UTF-16 文本偏移与分块原文，不跨代理对截断
+          content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /agent/knowledge-library/documents/{documentId}:
+    parameters:
+      - { in: path, name: documentId, required: true, schema: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$' } }
+    get:
+      tags: [Agent]
+      operationId: readPrivateKnowledgeDocument
+      x-page-permission: page.agent.view
+      description: 再校验身份与当前有效修订；旧版本、撤回、尚未生效、已过期或不可见均返回 404。
+      parameters:
+        - { in: query, name: revision, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: 当前正文、分块与来源元数据
+          content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Agent]
+      operationId: savePrivateKnowledgeDocument
+      x-button-permission: agent.prompt.run
+      description: 用户明确保存个人资料；不是发布企业制度或模型。企业/主体/角色由服务器确定，拒绝客户端 ACL 字段。创建 expectedRevision=0，更新必须提供当前修订。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedRevision, title, source, sourceVersion, kind, text]
+              properties:
+                expectedRevision: { type: integer, minimum: 0 }
+                title: { type: string, minLength: 1, maxLength: 200 }
+                source: { type: string, minLength: 1, maxLength: 200 }
+                sourceVersion: { type: string, minLength: 1, maxLength: 100 }
+                kind: { enum: [policy, reference] }
+                text: { type: string, minLength: 1, maxLength: 120000 }
+                effectiveFrom: { type: [string, 'null'], pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$' }
+                effectiveUntil: { type: [string, 'null'], pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$' }
+      responses:
+        '200':
+          description: 保存或同内容无变更；返回修订与元数据，状态及审计事件原子提交
+          content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413':
+          description: 64 文档、10 修订或 2MiB 序列化工作区预算超限；不截断内容，不覆盖旧修订
+  /agent/knowledge-library/documents/{documentId}/retract:
+    post:
+      tags: [Agent]
+      operationId: retractPrivateKnowledgeDocument
+      x-button-permission: agent.prompt.run
+      description: 新增无正文墓碑修订，立即停止检索及直接读取；保留历史审计数据，不是物理删除。满额时仍允许撤回。
+      parameters:
+        - { in: path, name: documentId, required: true, schema: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedRevision]
+              properties:
+                expectedRevision: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: 新修订元数据；对同一已撤回修订重复撤回无变更
+          content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /meta-models/oa-governance/read-plan-replay:
     post:
       tags: [Governance]
@@ -401,6 +821,19 @@ paths:
       responses:
         '200': { description: 当前主体可查看和删除的长期用户目标，不包含模型推测或系统凭据, content: { application/json: { schema: { $ref: '#/components/schemas/GenericArray' } } } }
   /agent/memory/{id}:
+    patch:
+      tags: [Agent]
+      operationId: correctAgentLongTermMemory
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MemoryCorrectionInput' } } }
+      responses:
+        '200': { description: 明确确认后的目标修正，不延长保留期，不授予业务执行权限 }
+        '400': { description: 输入或安全校验拒绝 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 记忆指纹变化，拒绝覆盖 }
     delete:
       tags: [Agent]
       operationId: forgetAgentLongTermMemory
@@ -758,6 +1191,60 @@ components:
       required: true
       schema: { type: string, minLength: 1 }
   schemas:
+    MemoryCorrectionInput:
+      type: object
+      additionalProperties: false
+      required: [content, expectedFingerprint, confirmed]
+      properties:
+        content: { type: string, minLength: 4, maxLength: 8000 }
+        expectedFingerprint: { type: string, pattern: '^[a-f0-9]{64}$' }
+        confirmed: { const: true }
+    KnowledgeStudyInput:
+      type: object
+      additionalProperties: false
+      required: [title, notes, expectedRevision, citations, confirmed]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        notes: { type: string, minLength: 1, maxLength: 8000 }
+        expectedRevision: { type: integer, minimum: 0 }
+        confirmed: { const: true }
+        citations: { type: array, minItems: 1, maxItems: 5, items: { $ref: '#/components/schemas/KnowledgeCitation' } }
+    KnowledgeBriefInput:
+      type: object
+      additionalProperties: false
+      required: [query]
+      properties:
+        query: { type: string, minLength: 1, maxLength: 4000 }
+        limit: { type: integer, minimum: 1, maximum: 5, default: 5 }
+        provider: { type: string, enum: [local_private_library, weknora_local], default: local_private_library }
+    KnowledgeCitation:
+      oneOf:
+        - { $ref: '#/components/schemas/LocalKnowledgeCitation' }
+        - { $ref: '#/components/schemas/WeKnoraKnowledgeCitation' }
+    WeKnoraKnowledgeCitation:
+      type: object
+      additionalProperties: false
+      required: [provider, knowledgeBaseId, documentId, chunkId, revision, location]
+      properties:
+        provider: { const: weknora_local }
+        knowledgeBaseId: { type: string, minLength: 1, maxLength: 100 }
+        documentId: { type: string, minLength: 1, maxLength: 100 }
+        chunkId: { type: string, minLength: 1, maxLength: 100 }
+        revision: { type: string, pattern: '^[a-f0-9]{64}$' }
+        location: { const: provider_chunk_not_pdf_coordinates }
+    LocalKnowledgeCitation:
+      type: object
+      additionalProperties: false
+      required: [provider, documentId, revision, contentHash, chunkId, start, end, location]
+      properties:
+        provider: { const: local_private_library }
+        documentId: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$' }
+        revision: { type: integer, minimum: 1 }
+        contentHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+        chunkId: { type: string, minLength: 1, maxLength: 150 }
+        start: { type: integer, minimum: 0 }
+        end: { type: integer, minimum: 1 }
+        location: { const: text_offsets }
     GenericObject:
       type: object
       additionalProperties: true
