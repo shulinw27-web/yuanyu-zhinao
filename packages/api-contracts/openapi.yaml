@@ -21,6 +21,111 @@ tags:
   - { name: SemanticOperations, description: 独立语义运营任务、证据、巡检、通知与受控报告 }
   - { name: Platform, description: 平台运行状态与配置 }
 paths:
+  /agent/knowledge-library/answer:
+    post:
+      tags: [Agent]
+      operationId: answerAgentKnowledgeQuestion
+      description: 服务端模型许可与逐次用户确认；最近六个用户问题、最多五条当前来源；调用后复验，不执行或持久化答案。
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/KnowledgeAnswerInput' } } }
+      responses:
+        '200': { description: 逐字引用校验的回答或未发布 Wiki，不保证语义正确性 }
+        '400': { description: 输入超限或不安全 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 来源、权限、模型或确认已失效 }
+        '502': { description: 模型输出或引用不符合契约，不返回答案 }
+        '503': { description: 模型不可用 }
+  /semantic-operations/knowledge-library/answer:
+    post:
+      tags: [SemanticOperations]
+      operationId: answerSemanticKnowledgeQuestion
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/KnowledgeAnswerInput' } } }
+      responses:
+        '200': { description: 独立运营身份的来源约束问答或 Wiki 草稿，不发布模型 }
+        '400': { description: 输入无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 来源、模型或确认失效 }
+        '502': { description: 模型引用校验失败 }
+        '503': { description: 模型不可用 }
+  /agent/knowledge-library/materials/preview:
+    post:
+      tags: [Agent]
+      operationId: previewAgentKnowledgeMaterial
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/KnowledgeMaterialInput' } } }
+      responses:
+        '200': { description: 未持久化解析片段、真实定位和覆盖范围，供人工校对 }
+        '400': { description: 格式或确认无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: 材料隔离或解析失败 }
+  /semantic-operations/knowledge-library/materials/preview:
+    post:
+      tags: [SemanticOperations]
+      operationId: previewSemanticKnowledgeMaterial
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/KnowledgeMaterialInput' } } }
+      responses:
+        '200': { description: 运营身份下的未保存解析及校对材料 }
+        '400': { description: 格式或确认无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: 隔离或解析失败 }
+  /agent/knowledge-library/studies/prepare:
+    post:
+      tags: [Agent]
+      operationId: prepareAgentKnowledgeStudy
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/KnowledgeStudyPrepareInput' } } }
+      responses:
+        '200': { description: 不调用模型的来源提纲和有限冲突提示，不保存 }
+        '400': { description: 输入无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 来源失效 }
+  /semantic-operations/knowledge-library/studies/prepare:
+    post:
+      tags: [SemanticOperations]
+      operationId: prepareSemanticKnowledgeStudy
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/KnowledgeStudyPrepareInput' } } }
+      responses:
+        '200': { description: 本地来源提纲和有限冲突提示，不保存 }
+        '400': { description: 输入无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 来源失效 }
+  /agent/knowledge-library/studies/{id}/restore:
+    post:
+      tags: [Agent]
+      operationId: restoreAgentKnowledgeStudy
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/KnowledgeStudyRestoreInput' } } }
+      responses:
+        '200': { description: 来源复验后恢复为新修订，不覆盖旧修订；最多保留十个旧版 }
+        '400': { description: 输入或确认无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 来源变化或并发冲突 }
+  /semantic-operations/knowledge-library/studies/{id}/restore:
+    post:
+      tags: [SemanticOperations]
+      operationId: restoreSemanticKnowledgeStudy
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/KnowledgeStudyRestoreInput' } } }
+      responses:
+        '200': { description: 恢复人工理解草稿为新修订，不发布语义模型 }
+        '400': { description: 输入或确认无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 来源变化或并发冲突 }
   /agent/knowledge-library/studies:
     get:
       tags: [Agent]
@@ -32,7 +137,7 @@ paths:
     get:
       tags: [Agent]
       operationId: readAgentKnowledgeStudy
-      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }, { name: revision, in: query, schema: { type: integer, minimum: 1 }, description: 省略读取当前版；旧版仍须来源复验 }]
       responses:
         '200': { description: 重新核验来源后的人工笔记、原文和待审阅建模输入，不自动发送或发布 }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -62,7 +167,7 @@ paths:
     get:
       tags: [Agent]
       operationId: readSemanticOperationsKnowledgeStudy
-      parameters: [{ $ref: '#/components/parameters/ResourceId' }]
+      parameters: [{ $ref: '#/components/parameters/ResourceId' }, { name: revision, in: query, schema: { type: integer, minimum: 1 }, description: 省略读取当前版；旧版仍须来源复验 }]
       responses:
         '200': { description: 重新核验来源后的人工笔记、原文和待审阅建模输入，不自动发送或发布 }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -1198,6 +1303,55 @@ components:
       properties:
         content: { type: string, minLength: 4, maxLength: 8000 }
         expectedFingerprint: { type: string, pattern: '^[a-f0-9]{64}$' }
+        confirmed: { const: true }
+    KnowledgeAnswerInput:
+      type: object
+      additionalProperties: false
+      required: [question, history, citations, consent]
+      properties:
+        question: { type: string, minLength: 1, maxLength: 4000 }
+        history: { type: array, maxItems: 6, description: 仅用户问题，总长度最多6000字符，不接收旧模型回答, items: { type: string, minLength: 1, maxLength: 4000 } }
+        purpose: { enum: [answer, wiki], default: answer }
+        citations: { type: array, minItems: 1, maxItems: 5, items: { $ref: '#/components/schemas/KnowledgeCitation' } }
+        consent:
+          type: object
+          additionalProperties: false
+          required: [provider, model, confirmed]
+          properties:
+            provider: { type: string }
+            model: { type: string }
+            confirmed: { const: true }
+    KnowledgeMaterialInput:
+      type: object
+      additionalProperties: false
+      required: [attachments, confirmed]
+      properties:
+        confirmed: { const: true }
+        attachments:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            type: object
+            required: [name, mimeType, dataUrl]
+            properties:
+              name: { type: string, maxLength: 120 }
+              mimeType: { type: string }
+              dataUrl: { type: string, description: 受控 MIME 的规范 Base64，实际文件签名校验，最大4MiB }
+    KnowledgeStudyPrepareInput:
+      type: object
+      additionalProperties: false
+      required: [title, citations]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        citations: { type: array, minItems: 1, maxItems: 5, items: { $ref: '#/components/schemas/KnowledgeCitation' } }
+    KnowledgeStudyRestoreInput:
+      type: object
+      additionalProperties: false
+      required: [revision, expectedRevision, confirmed]
+      properties:
+        revision: { type: integer, minimum: 1 }
+        expectedRevision: { type: integer, minimum: 1 }
         confirmed: { const: true }
     KnowledgeStudyInput:
       type: object

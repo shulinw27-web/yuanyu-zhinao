@@ -111,6 +111,11 @@ test('WK evidence: both route surfaces require their own page and write grants; 
     const denied = await call(base, '/documents/routed', { method: 'PUT', pages: [page], payload: body });
     assert.equal(denied.status, 403); assert.equal(denied.permission, write);
     assert.equal((await call(base, '/brief', { method: 'POST', pages: [page], payload: { query: '资质', tenantId: 'other' } })).status, 400);
+    for (const suffix of ['/answer', '/materials/preview', '/studies/prepare', '/studies/draft-1/restore']) {
+      const deniedNew = await call(base, suffix, { method: 'POST', pages: [page], payload: {} });
+      assert.equal(deniedNew.status, 403); assert.equal(deniedNew.permission, write);
+      assert.equal((await call(base, suffix, { method: 'POST', pages: [page], grant: true, payload: {} })).status, 400);
+    }
   }
   assert.equal((await call(semantic, '/providers', { pages: ['page.agent.view'] })).status, 403);
   assert.equal((await call(semantic, '/documents/routed', { method: 'PUT', pages: ['page.world.view'], grant: true, payload: body })).status, 200);

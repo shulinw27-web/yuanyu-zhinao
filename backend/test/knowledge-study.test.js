@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { resetRuntimeState } from '../src/repositories/runtime-state-repository.js';
 import { saveLibraryDocument, retractLibraryDocument } from '../src/services/knowledge-library-service.js';
 import { createLocalKnowledgeProvider, buildKnowledgeBrief } from '../src/services/knowledge-evidence-service.js';
-import { listKnowledgeStudies, saveKnowledgeStudy, readKnowledgeStudy } from '../src/services/knowledge-study-service.js';
+import { listKnowledgeStudies, saveKnowledgeStudy, readKnowledgeStudy, restoreKnowledgeStudy, prepareKnowledgeStudy, inspectStudySources } from '../src/services/knowledge-study-service.js';
 const context = { identityScope: { tenantId: 'study-test', subjectId: 'alice' }, roleId: 'executive' };
 const options = { context, resolveProvider: () => createLocalKnowledgeProvider(context), canRead: () => true };
 test.beforeEach(() => resetRuntimeState(['knowledge_library_v1', 'knowledge_studies_v1', 'domain_event_outbox']));
@@ -38,4 +38,47 @@ test('study: source revoked during final read suppresses every excerpt and note'
   let checks = 0;
   const result = await readKnowledgeStudy({ ...options, id: 'draft-1', canRead: () => ++checks < 4 });
   assert.equal(result.status, 403); assert.equal(result.notes, undefined);
+});
+
+test('study: historical notes require current source access and restoration appends a CAS revision', async () => {
+  const body = await input();
+  await saveKnowledgeStudy({ ...options, id: 'history', body });
+  await saveKnowledgeStudy({ ...options, id: 'history', body: { ...body, expectedRevision: 1, notes: '修订后的人工理解。' } });
+  const old = await readKnowledgeStudy({ ...options, id: 'history', revision: 1 });
+  assert.equal(old.notes, body.notes); assert.equal(old.headRevision, 2);
+  assert.deepEqual(old.history.map(item => item.revision), [1, 2]);
+  assert.ok(old.history.every(item => !('notes' in item) && !('citations' in item)));
+  const restored = await restoreKnowledgeStudy({ ...options, id: 'history', body: { revision: 1, expectedRevision: 2, confirmed: true } });
+  assert.equal(restored.revision, 3); assert.equal(restored.published, false);
+  assert.equal((await readKnowledgeStudy({ ...options, id: 'history' })).notes, body.notes);
+  assert.equal((await restoreKnowledgeStudy({ ...options, id: 'history', body: { revision: 1, expectedRevision: 2, confirmed: true } })).status, 409);
+  await retractLibraryDocument({ ...context, id: 'supplier', expectedRevision: 1 });
+  for (const result of [await readKnowledgeStudy({ ...options, id: 'history', revision: 1 }), await restoreKnowledgeStudy({ ...options, id: 'history', body: { revision: 1, expectedRevision: 3, confirmed: true } })]) {
+    assert.equal(result.status, 409); assert.equal(result.notes, undefined);
+  }
+});
+
+test('study: bounded history, invalid version and unconfirmed restore fail closed', async () => {
+  const body = await input();
+  for (let revision = 0; revision < 13; revision++) await saveKnowledgeStudy({ ...options, id: 'history', body: { ...body, expectedRevision: revision } });
+  const latest = await readKnowledgeStudy({ ...options, id: 'history' });
+  assert.equal(latest.history.length, 11); assert.equal(latest.history[0].revision, 3);
+  assert.equal((await readKnowledgeStudy({ ...options, id: 'history', revision: 1 })).status, 404);
+  for (const revision of [0, -1, 1.5, NaN]) assert.equal((await readKnowledgeStudy({ ...options, id: 'history', revision })).status, 400);
+  for (const extra of [{ confirmed: false }, { role: 'admin' }, { revision: '3' }]) {
+    assert.equal((await restoreKnowledgeStudy({ ...options, id: 'history', body: { revision: 3, expectedRevision: 13, confirmed: true, ...extra } })).status, 400);
+  }
+});
+
+test('study: source outline has no model calls or writes and conflict detection admits its limited coverage', async () => {
+  const body = await input();
+  const result = await prepareKnowledgeStudy({ ...options, body: { title: body.title, citations: body.citations } });
+  assert.equal(result.modelCalled, false); assert.equal(result.persisted, false);
+  assert.equal((await listKnowledgeStudies(context)).drafts.length, 0);
+  assert.equal(result.sourceReview.conclusion, 'no_rule_match_not_proof_of_consistency');
+  assert.match(result.notes, /合成采购规范/);
+  const review = inspectStudySources([{ excerpt: '登记时限：45分钟。责任部门：质量。' }, { excerpt: '登记时限：90分钟。责任部门：质量。' }]);
+  assert.equal(review.conflicts.length, 1); assert.equal(review.conflicts[0].key, '登记时限');
+  assert.deepEqual(review.conflicts[0].claims.map(item => item.sourceIndex), [0, 1]);
+  assert.equal((await prepareKnowledgeStudy({ ...options, canRead: () => false, body: { title: body.title, citations: body.citations } })).status, 403);
 });

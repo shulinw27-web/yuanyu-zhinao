@@ -2,6 +2,10 @@ import { affirmativeRequest } from './agent-turn-understanding-service.js';
 // These are dialogue acts, not grants to read data or execute prior proposals.
 export const isExplanationFollowUp = input => /^(?:请|麻烦|能不能|可以)?\s*(?:这(?:个)?(?:是)?什么意思|那(?:个)?(?:是)?什么意思|什么意思|我(?:没懂|不明白|没看懂)|解释(?:一下|下)?(?:刚才|上面|上一句|你的回复)?|(?:刚才|上面|上一句|你说的)(?:是)?什么意思|说人话)[。！!？?\s]*$/u.test(String(input).trim());
 
+export const isLongTermGoalStatement = input => /^(?:我的?|我们(?:的)?)(?:长期|阶段|工作)目标是/u.test(String(input).trim())
+  && /只(?:讨论|记录|说明)|不(?:执行|查询|读取)|先(?:讨论|记录)/u.test(String(input))
+  && !/(?:现在|立即|同时|顺便|请|帮我).{0,12}(?:查询|读取|执行|发起|创建|分析)/u.test(affirmativeRequest(input));
+
 export const isBroadReportRequest = input => /报告|报表|汇总/u.test(affirmativeRequest(input))
   && /ERP|WMS|MES|QMS|OA|经营|库存|采购|销售|财务|生产/iu.test(affirmativeRequest(input));
 

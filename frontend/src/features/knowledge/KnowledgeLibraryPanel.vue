@@ -1,6 +1,8 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import KnowledgeStudyPanel from './KnowledgeStudyPanel.vue';
+import KnowledgeConversationPanel from './KnowledgeConversationPanel.vue';
+import KnowledgeMaterialReviewPanel from './KnowledgeMaterialReviewPanel.vue';
 
 const props = defineProps({ client: { type: Object, required: true }, canWrite: { type: Boolean, default: false }, canModel: Boolean });
 const emit = defineEmits(['model-candidate']);
@@ -8,6 +10,8 @@ const documents = ref([]); const providers = ref([]); const busy = ref(false); c
 const draft = ref(null); const baseline = ref(''); const chunks = ref([]); const query = ref(''); const answer = ref(null); const source = ref(null);
 const withdrawal = ref(null); const phrase = ref(''); let generation = 0;
 const serverCanWrite = ref(false);
+const answerPolicy = ref(null); const generatedWiki = ref(null);
+const principalKey = ref('');
 const canEdit = computed(() => props.canWrite && serverCanWrite.value);
 const baselineDraft = ref('');
 const pendingNavigation = ref(null);
@@ -16,6 +20,13 @@ const changed = computed(() => draft.value && draft.value.text !== baseline.valu
 const activeCount = computed(() => documents.value.filter(item => item.available).length);
 const selectedProvider = ref('local_private_library');
 const isNew = computed(() => draft.value?.expectedRevision === 0);
+function acceptReviewedMaterial(material) {
+  if (!canEdit.value || busy.value) return;
+  if (dirty.value) { error.value = '当前资料有未保存修改，请先保存或放弃，再转入校对结果。'; return; }
+  if (material.text.length > 120000) { error.value = '校对材料超出资料上限，请拆分后导入。'; return; }
+  newDocument(); draft.value.title = material.title.slice(0, 200); draft.value.source = material.source.slice(0, 200); draft.value.text = material.text;
+  notice.value = '人工校对结果已填入资料编辑框，尚未保存。原文件不变。';
+}
 
 async function run(action) {
   if (busy.value) return;
@@ -33,6 +44,8 @@ async function refresh(ticket) {
   const [list, state] = await Promise.all([props.client.list(), props.client.providers()]);
   if (ticket !== generation) return;
   documents.value = list.documents; providers.value = state.providers; serverCanWrite.value = state.canWrite === true;
+  answerPolicy.value = state.answerPolicy;
+  principalKey.value = state.principalKey || '';
 }
 const reload = () => run(async ticket => { answer.value = null; source.value = null; await refresh(ticket); });
 function newDocument() {
@@ -111,11 +124,14 @@ onUnmounted(() => { generation++; });
     <header><div><h2>知识资料</h2><p>管理当前身份的资料，核对原文和引用。不会自动发布制度或写入长期记忆。</p></div><button :disabled="busy" @click="reload">刷新目录</button></header>
     <p v-if="error" role="alert" class="knowledge-error">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
     <slot />
-    <KnowledgeStudyPanel :client="client" :evidence="answer?.evidence || []" :can-write="canEdit" :can-model="canModel && canEdit" @model-candidate="emit('model-candidate', $event)" />
+    <KnowledgeMaterialReviewPanel :client="client" :can-write="canEdit" @reviewed-material="acceptReviewedMaterial" />
+    <KnowledgeStudyPanel :client="client" :evidence="answer?.evidence || []" :generated="generatedWiki" :can-write="canEdit" :can-model="canModel && canEdit" @model-candidate="emit('model-candidate', $event)" />
     <label>检索来源<select v-model="selectedProvider" :disabled="busy" @change="answer = null; source = null"><option value="local_private_library">本人资料 · 词法检索</option><option value="weknora_local" :disabled="!providers.find(item => item.provider === 'weknora_local')?.configured">WeKnora · 服务端授权资料</option></select></label>
     <div class="knowledge-status"><span>{{ activeCount }} 份可用 / {{ documents.length }} 份资料</span><span v-for="provider in providers" :key="provider.provider">{{ provider.provider === 'local_private_library' ? '本地词法检索' : 'WeKnora 项目接入' }}：{{ provider.configured ? '已配置' : '未配置' }}</span></div>
+    <details><summary>管理员接入诊断</summary><p>当前身份绑定指纹（不是密钥，也不授予权限）：</p><pre>{{ principalKey }}</pre><p>由管理员将此指纹映射至允许访问的 WeKnora 库和文档；不能按显示名称猜测身份，也不能把方舟密钥填入 WeKnora 配置。</p></details>
     <form class="knowledge-search" @submit.prevent="search"><label>查询资料<input v-model="query" maxlength="4000" placeholder="例如：供应商资质过期如何处理？" required :disabled="busy" /></label><button :disabled="busy || !query.trim()">查找原文依据</button></form>
     <section v-if="answer" class="knowledge-results" aria-label="检索依据"><p>{{ answer.message }}</p><article v-for="item in answer.evidence" :key="item.citation.chunkId"><h3>{{ item.title }}</h3><small>{{ item.source }} · {{ item.sourceVersion }} · 修订 {{ item.revision }}</small><pre>{{ item.excerpt }}</pre><button :disabled="busy" @click="openCitation(item.citation)">重新核验并打开引用</button></article></section>
+    <KnowledgeConversationPanel :client="client" :evidence="answer?.evidence || []" :policy="answerPolicy" :can-write="canEdit" @wiki-draft="generatedWiki = $event" />
     <section v-if="source" class="knowledge-source" aria-label="已核验原文"><h3>{{ source.title }} · 当前有效引用</h3><small v-if="source.provider === 'local_private_library'">{{ source.citation.start }}–{{ source.citation.end }} UTF-16 字符偏移（不是 PDF 页码）</small><small v-else>WeKnora 分块定位 · {{ source.citation.chunkId }}（不代表 PDF 页码）</small><pre>{{ source.excerpt }}</pre></section>
     <div class="knowledge-columns">
       <aside><div class="knowledge-toolbar"><h3>资料目录</h3><button v-if="canEdit" :disabled="busy" @click="newDocument">＋ 新建</button></div><p v-if="!documents.length">尚无资料。保存后才能检索，不会自动使用其他用户的资料。</p>

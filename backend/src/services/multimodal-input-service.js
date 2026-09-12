@@ -188,11 +188,13 @@ const normalizeExtractedText = (value) => normalizeUntrustedText(String(value ||
 
 const documentEvidence = ({ attachment, page, text, assessment }) => ({
   source: '受控多模态解析',
-  id: `${attachment.id}:page-${page}`,
-  title: `${attachment.name} · 第 ${page} 页`,
+  id: `${attachment.id}:${attachment.mimeType === 'application/pdf' ? `page-${page}` : 'document-text'}`,
+  title: `${attachment.name} · ${attachment.mimeType === 'application/pdf' ? `第 ${page} 页` : '文档文本（非分页定位）'}`,
   classification: attachment.classification,
   statement: text,
-  locator: { attachmentId: attachment.id, page, mimeType: attachment.mimeType },
+  locator: { attachmentId: attachment.id, mimeType: attachment.mimeType,
+    ...(attachment.mimeType === 'application/pdf' ? { page, kind: 'pdf_page' }
+      : { kind: attachment.mimeType.includes('spreadsheetml') ? 'worksheet_cells_in_text' : attachment.mimeType.includes('wordprocessingml') ? 'paragraphs_tables_in_text' : 'structured_document_text' }) },
   confidence: 'extracted_text',
   contentHash: createHash('sha256').update(text).digest('hex'),
   promptSecurity: { status: assessment.safe ? 'validated' : 'quarantined', fingerprint: assessment.fingerprint }

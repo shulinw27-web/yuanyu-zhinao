@@ -6,7 +6,7 @@ import { selectAgentGoalMemory } from './agent-memory-selection-service.js';
 import { describeQueryCoverage, extractQueryBusinessIds, MAX_QUERY_BUSINESS_IDS, validateAgentReadInput, validateAgentQueryAnswer } from './agent-query-service.js';
 import { getAgentSkills, resolveAgentSkill } from './agent-skill-registry.js';
 import { generateLocalSummary, getLocalModelRuntime, inspectModelPromptSafety, recordPromptSafetyBlock } from './local-model-gateway.js';
-import { isExplanationFollowUp, isBroadReportRequest, dialogueFallback } from './agent-dialogue-intent-service.js';
+import { isExplanationFollowUp, isBroadReportRequest, isLongTermGoalStatement, dialogueFallback } from './agent-dialogue-intent-service.js';
 import { conversationMaterial, understandAgentTurn, prohibitsAction } from './agent-turn-understanding-service.js';
 import { conversationDocuments } from './conversation-material-index.js';
 import { cancelAgentRun, claimAgentExecution, createAgentRun, forgetAgentLongTermMemory, getAgentLongTermMemory, getAgentMemory, getAgentRun, getAgentRuns, recordAgentEndpointDispatch, recordAgentEndpointReceipt, recordAgentExecution, recordAgentExecutionFailure } from './agent-run-store.js';
@@ -263,7 +263,10 @@ export async function runPrivateAgent(request, role, identityScope, options = {}
   appendAgentEvidenceEvent(traceId, { type: 'turn_understanding_started', stage: 'understanding', status: 'started', actor: { type: 'service', id: 'agent-turn-understanding' }, summary: '正在结合本会话理解当前诉求；尚未读取业务系统或执行动作。' });
   const publishedOntology = await getPublishedAgentOntology(role.id, identityScope);
   const retrievedMaterial = !multimodal.attachments.length ? options.conversationContext?.materialRetrieval?.text || '' : '';
-  const turn = await understandAgentTurn({ input, history: inspectModelPromptSafety(conversationHistory).safe ? conversationHistory : '', material: `${retrievedMaterial}\n${multimodalContent.summary || ''}\n${multimodalContent.modelContext || ''}`, attachments: multimodal.attachments, safetyIdentifier: `role-${role.id}`, publishedModel: publishedOntology?.prompt || '' });
+  const turn = !multimodal.attachments.length && isLongTermGoalStatement(input)
+    ? { intent: 'dialogue', source: 'explicit_goal_statement', resolvedRequest: input, needsClarification: false,
+      answer: '了解，这是你说明的长期目标，本轮只作为讨论上下文；没有读取企业数据、发起业务操作或自动保存长期记忆。需要跨任务保留时，可点击“固定为长期记忆”。' }
+    : await understandAgentTurn({ input, history: inspectModelPromptSafety(conversationHistory).safe ? conversationHistory : '', material: `${retrievedMaterial}\n${multimodalContent.summary || ''}\n${multimodalContent.modelContext || ''}`, attachments: multimodal.attachments, safetyIdentifier: `role-${role.id}`, publishedModel: publishedOntology?.prompt || '' });
   appendAgentEvidenceEvent(traceId, { type: 'turn_understanding_completed', stage: 'understanding', status: turn?.source === 'understanding_failed' ? 'failed' : 'completed', actor: { type: 'service', id: 'agent-turn-understanding' }, summary: '本轮理解结果已返回；工具仍需服务器独立校验。', details: { intent: turn?.intent || 'legacy_mock_route', source: turn?.source || 'mock', failureCode: turn?.failureCode || null, diagnostics: turn?.diagnostics || null, timing: turn?.timing || null, modelVersion: publishedOntology?.metadata.modelVersion || null } });
   const explicitComparison = /对比|比较/.test(input) && extractQueryBusinessIds(input).length > 1 && !prohibitsAction(input, 'read_business');
   const refreshRead = shouldRefreshPublishedRead({ input, turn, hasTaskRoot: extractQueryBusinessIds(options.conversationContext?.taskGoal || '').length > 0, materialOnly: Boolean(retrievedMaterial || multimodal.attachments.length) });
@@ -373,7 +376,8 @@ export async function runPrivateAgent(request, role, identityScope, options = {}
       summary: '识别为自然语言对话，不读取企业业务系统。',
       details: { orchestrator: route.orchestrator, primaryDomain: null, dataAccess: 'not_requested' }
     });
-    appendAgentEvidenceEvent(traceId, {
+    const goalAcknowledgement = turn?.source === 'explicit_goal_statement';
+    if (!goalAcknowledgement) appendAgentEvidenceEvent(traceId, {
       type: 'model_inference_started', stage: 'model_inference', status: 'started', actor: { type: 'service', id: 'model-gateway' },
       summary: '模型网关开始生成自然语言对话回复。', details: { safetyIdentifier: `role-${role.id}`, dataAccess: 'not_requested' }
     });
@@ -383,10 +387,10 @@ export async function runPrivateAgent(request, role, identityScope, options = {}
       safetyIdentifier: `role-${role.id}`,
       attachments: multimodal.attachments
     });
-    const modelFailed = !['ark', 'local', 'openai', 'deepseek', 'compatible', 'mock'].includes(summary.source);
+    const modelFailed = !goalAcknowledgement && !['ark', 'local', 'openai', 'deepseek', 'compatible', 'mock'].includes(summary.source);
     appendAgentEvidenceEvent(traceId, {
-      type: 'model_inference_completed', stage: 'model_inference', status: modelFailed ? 'failed' : 'completed', actor: { type: 'service', id: 'model-gateway' },
-      summary: modelFailed ? '模型未返回可用回答，已显示备用说明，可重试。' : '自然语言对话回复已生成。', details: { source: summary.source, responseFingerprint: createMemoryDecision(summary.text).assessment.fingerprint }
+      type: goalAcknowledgement ? 'goal_statement_acknowledged' : 'model_inference_completed', stage: goalAcknowledgement ? 'routing' : 'model_inference', status: modelFailed ? 'failed' : 'completed', actor: { type: 'service', id: goalAcknowledgement ? 'intent-policy' : 'model-gateway' },
+      summary: goalAcknowledgement ? '已确认讨论型目标陈述；未调用模型、读取业务数据或固定长期记忆。' : modelFailed ? '模型未返回可用回答，已显示备用说明，可重试。' : '自然语言对话回复已生成。', details: { source: summary.source, responseFingerprint: createMemoryDecision(summary.text).assessment.fingerprint }
     });
     agent.inferenceSource = summary.source;
     const desktopCommand = !dialogueOnly && !modelFailed && canOwnExecutableAgentRun(role)

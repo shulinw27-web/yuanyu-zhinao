@@ -18,6 +18,14 @@ for (const surface of ['agent', 'semantic-operations']) {
     assert.ok(calls.every(call => !call.headers)); // no competing role or credentials
     await client.read('../foreign?revision=9', '1&role=admin');
     assert.ok(calls.at(-1).path.includes('..%2Fforeign%3Frevision%3D9?revision=1%26role%3Dadmin'));
+    await client.studies(); await client.study('study-1', 2); await client.saveStudy('study-1', { expectedRevision: 2 });
+    await client.restoreStudy('study-1', { revision: 1, expectedRevision: 2, confirmed: true });
+    await client.prepareStudy({ title: '业务主题', citations: [] });
+    await client.answer({ question: '由谁负责', history: [] }); await client.previewMaterial({ attachments: [], confirmed: true });
+    assert.equal(calls.length, 16);
+    assert.ok(calls[10].path.endsWith('/studies/study-1?revision=2'));
+    assert.equal(calls[11].method, 'PUT'); assert.equal(calls[12].method, 'POST');
+    assert.ok(calls.every(call => !call.headers));
   });
 }
 test('knowledge SDK rejects unknown surfaces', () => {

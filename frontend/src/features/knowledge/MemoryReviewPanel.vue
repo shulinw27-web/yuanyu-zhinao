@@ -1,6 +1,7 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue';
-const props = defineProps({ client: { type: Object, required: true } });
+import { onMounted, onUnmounted, ref, watch } from 'vue';
+const props = defineProps({ client: { type: Object, required: true }, snapshot: Array });
+const emit = defineEmits(['updated']);
 const items = ref([]); const editing = ref(null); const deleting = ref(null); const error = ref(''); const busy = ref(false); const phrase = ref('');
 let generation = 0;
 async function run(action) {
@@ -10,19 +11,20 @@ async function run(action) {
   catch (cause) { if (ticket === generation) error.value = cause.status === 409 ? '记忆已经变化，请刷新后重新校对，没有覆盖修改。' : cause.message || '操作失败'; }
   finally { if (ticket === generation) busy.value = false; }
 }
-const refresh = () => run(async ticket => { const result = await props.client.agentMemory(); if (ticket === generation) { items.value = result; editing.value = null; deleting.value = null; } });
+watch(() => props.snapshot, value => { if (value) items.value = value; });
+const refresh = () => run(async ticket => { const result = await props.client.agentMemory(); if (ticket === generation) { items.value = result; editing.value = null; deleting.value = null; emit('updated', result); } });
 const save = () => run(async ticket => {
   if (phrase.value !== '确认修改' || !editing.value) return;
   const target = editing.value;
   await props.client.correctAgentMemory(target.id, { content: target.content, expectedFingerprint: target.fingerprint, confirmed: true });
   const result = await props.client.agentMemory();
-  if (ticket === generation) { items.value = result; editing.value = null; phrase.value = ''; }
+  if (ticket === generation) { items.value = result; editing.value = null; phrase.value = ''; emit('updated', result); }
 });
 const remove = () => run(async ticket => {
   if (phrase.value !== '确认删除' || !deleting.value) return;
   const target = deleting.value;
   await props.client.forgetAgentMemory(target.id);
-  if (ticket === generation) { items.value = items.value.filter(item => item.id !== target.id); deleting.value = null; phrase.value = ''; }
+  if (ticket === generation) { items.value = items.value.filter(item => item.id !== target.id); deleting.value = null; phrase.value = ''; emit('updated', items.value); }
 });
 onMounted(refresh); onUnmounted(() => { generation++; });
 </script>

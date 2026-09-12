@@ -198,6 +198,12 @@ test('WK: isolated real HTTP server exercises authentication, scoped CRUD, searc
     }
     assert.equal(ready, true, logs);
     assert.equal((await call('', 'GET', undefined, 'alice', { 'x-identity-session': 'invalid-test-session' })).status, 401);
+    const goalStatement = await call('/api/agent/message', 'POST', { text: '我的长期目标是推进合成供应链数据质量核对，只讨论不执行。' });
+    assert.equal(goalStatement.status, 200);
+    assert.equal(goalStatement.payload.lifecycle.state, 'conversation_completed');
+    assert.equal(goalStatement.payload.evidence.length, 0);
+    assert.equal(goalStatement.payload.command, null);
+    assert.match(goalStatement.payload.text, /没有读取企业数据/);
     assert.equal((await call('/documents/http-doc', 'PUT', body())).status, 200);
     const semanticBase = '/api/semantic-operations/knowledge-library';
     const semanticBrief = await call(`${semanticBase}/brief`, 'POST', { query: '供应商' });

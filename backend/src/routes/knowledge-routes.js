@@ -1,6 +1,6 @@
 import { previewLibraryDocument, saveLibraryDocument, retractLibraryDocument, listLibraryDocuments, readLibraryDocument, searchLibraryDocuments,
-  listKnowledgeStudies, saveKnowledgeStudy, readKnowledgeStudy,
-  createLocalKnowledgeProvider, buildKnowledgeBrief, getEffectiveAccess, loadWeKnoraRuntimeProvider } from '../domains/governance/public-api.js';
+  listKnowledgeStudies, saveKnowledgeStudy, readKnowledgeStudy, restoreKnowledgeStudy, prepareKnowledgeStudy,
+  createLocalKnowledgeProvider, buildKnowledgeBrief, getEffectiveAccess, loadWeKnoraRuntimeProvider, answerKnowledgeQuestion, knowledgeAnswerPolicy, previewKnowledgeMaterial, knowledgePrincipalKey } from '../domains/governance/public-api.js';
 
 export async function handleKnowledgeRoutes({ req, res, url, role, agentIdentity, effectiveAccess, selectActionRole, denyButton, readBody, send }) {
   const base = ['/api/agent/knowledge-library', '/api/semantic-operations/knowledge-library']
@@ -16,8 +16,26 @@ export async function handleKnowledgeRoutes({ req, res, url, role, agentIdentity
   // POST read operations also require a page grant; app's GET guard alone is insufficient.
   if (!(effectiveAccess || getEffectiveAccess(role, agentIdentity)).pagePermissionIds.includes(page)) return reply({ error: 'PAGE_PERMISSION_DENIED', status: 403 });
   if (req.method === 'GET' && url.pathname === `${base}/studies`) return reply(await listKnowledgeStudies(context));
+  if (req.method === 'POST' && url.pathname === `${base}/materials/preview`) {
+    if (!selectActionRole(writePermission)) { denyButton(writePermission); return true; }
+    return reply(await previewKnowledgeMaterial({ body: await readBody(req), roleId: role, canRead }));
+  }
+  if (req.method === 'POST' && url.pathname === `${base}/answer`) {
+    if (!selectActionRole(writePermission)) { denyButton(writePermission); return true; }
+    return reply(await answerKnowledgeQuestion({ body: await readBody(req), resolveProvider, canRead, safetyIdentifier: `knowledge-${role}` }));
+  }
+  if (req.method === 'POST' && url.pathname === `${base}/studies/prepare`) {
+    if (!selectActionRole(writePermission)) { denyButton(writePermission); return true; }
+    return reply(await prepareKnowledgeStudy({ body: await readBody(req), resolveProvider, canRead }));
+  }
+  const restoreMatch = url.pathname.slice(base.length).match(/^\/studies\/([A-Za-z0-9][A-Za-z0-9_.-]{0,99})\/restore$/);
+  if (restoreMatch && req.method === 'POST') {
+    if (!selectActionRole(writePermission)) { denyButton(writePermission); return true; }
+    return reply(await restoreKnowledgeStudy({ context, id: restoreMatch[1], body: await readBody(req), resolveProvider, canRead }));
+  }
   const studyMatch = url.pathname.slice(base.length).match(/^\/studies\/([A-Za-z0-9][A-Za-z0-9_.-]{0,99})$/);
-  if (studyMatch && req.method === 'GET') return reply(await readKnowledgeStudy({ context, id: studyMatch[1], resolveProvider, canRead }));
+  if (studyMatch && req.method === 'GET') return reply(await readKnowledgeStudy({ context, id: studyMatch[1],
+    revision: url.searchParams.has('revision') ? Number(url.searchParams.get('revision')) : undefined, resolveProvider, canRead }));
   if (studyMatch && req.method === 'PUT') {
     if (!selectActionRole(writePermission)) { denyButton(writePermission); return true; }
     return reply(await saveKnowledgeStudy({ context, id: studyMatch[1], body: await readBody(req), resolveProvider, canRead }));
@@ -25,6 +43,8 @@ export async function handleKnowledgeRoutes({ req, res, url, role, agentIdentity
   if (req.method === 'GET' && url.pathname === `${base}/providers`) return reply({
     providers: [createLocalKnowledgeProvider(context).status(), (await loadWeKnoraRuntimeProvider(context)).status()],
     automaticChatInjection: false,
+    answerPolicy: knowledgeAnswerPolicy(),
+    principalKey: knowledgePrincipalKey(context),
     canWrite: (effectiveAccess || getEffectiveAccess(role, agentIdentity)).buttonPermissionIds?.includes(writePermission) === true
   });
   if (req.method === 'POST' && url.pathname === `${base}/brief`) {

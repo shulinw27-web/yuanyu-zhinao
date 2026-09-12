@@ -1,5 +1,7 @@
 # 参考 WeKnora 升级
 
+最新第四批：已增加来源约束模型问答、生成式 Wiki、有限冲突提示、Wiki 历史复验恢复和多模态校对入口。修复标点规范化引文误拒绝与非 PDF 虚假页码；真实方舟四例通过。项目 WeKnora Key/映射、实时业务联合规划、区域级候选联动、企业同步共享及生产评测仍未完成。当前状态以 [第四批验收](../development/WEKNORA_UPGRADE_ACCEPTANCE.md) 为准，下面各批次描述保留历史含义。
+
 2026-09-12 实施进度：第一至三批已落地资料生命周期、词法检索、双端校对界面、只读提供方/私有配置、人工理解草稿与目标记忆修正。独立 WeKnora 合成 RAG 三轮通过；真实项目凭据/授权映射、联合回答、多模态坐标联动和自动 Wiki 等仍未完成。以下是完整方向，不应将“计划采纳”读作已上线。详见 [最新验收](../development/WEKNORA_UPGRADE_ACCEPTANCE.md) 与 [使用指南](../guides/KNOWLEDGE_WORKSPACE_GUIDE.md)。
 
 [返回架构目录](README.md) · [返回文档中心](../README.md)

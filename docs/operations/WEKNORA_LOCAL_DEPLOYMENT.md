@@ -1,5 +1,7 @@
 # WeKnora 本地部署（D 盘）
 
+2026-09-12 第四批项目更新：来源问答与 Wiki 已用现有方舟 Key 完成四个合成用例验证，配置及数据仅在隔离进程。未改变 WeKnora 容器、模型密钥或现有账户。项目专用 Key 的 API 集成表单已限定唯一合成库及只读检索，等待创建确认；项目真实绑定仍未完成。新增仓库外配置助手，见 [知识工作区指南](../guides/KNOWLEDGE_WORKSPACE_GUIDE.md) 第6节。勿把 Ark 生成验证当成 WeKnora 适配器联通。
+
 2026-09-12 最新：独立合成库已完成文档解析、索引、摘要及三轮同会话 RAG 验证。修复内置“快速问答”未绑定主对话模型，现使用已验证的方舟模型。项目新增私有配置和可选混合检索代码，但未配置项目只读 Key/资源绑定。见 [最新验收](../development/WEKNORA_UPGRADE_ACCEPTANCE.md) 和 [配置指南](../guides/KNOWLEDGE_WORKSPACE_GUIDE.md)。下文为此前部署阶段记录，未验收范围以本段及最新报告为准。
 
 [返回运维目录](README.md) · [参考 WeKnora 升级](../architecture/WEKNORA_UPGRADE_REFERENCE.md)
