@@ -14,6 +14,7 @@ export function createKnowledgeClient(request, surface) {
     providers: () => request(`${base}/providers`),
     answer: body => post('/answer', body),
     jointBrief: surface === 'agent' ? body => post('/joint-brief', body) : undefined,
+    jointPlans: surface === 'agent' ? () => request(`${base}/joint-plans`) : undefined,
     previewMaterial: body => post('/materials/preview', body),
     preview: text => post('/preview', { text }),
     save: (id, body) => request(`${base}${documentPath(id)}`, { method: 'PUT', body: JSON.stringify(body) }),

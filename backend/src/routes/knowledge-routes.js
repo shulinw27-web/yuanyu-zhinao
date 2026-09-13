@@ -1,6 +1,6 @@
 import { previewLibraryDocument, saveLibraryDocument, retractLibraryDocument, listLibraryDocuments, readLibraryDocument, searchLibraryDocuments,
   listKnowledgeStudies, saveKnowledgeStudy, readKnowledgeStudy, restoreKnowledgeStudy, prepareKnowledgeStudy,
-  createLocalKnowledgeProvider, buildKnowledgeBrief, getEffectiveAccess, loadWeKnoraRuntimeProvider, answerKnowledgeQuestion, knowledgeAnswerPolicy, previewKnowledgeMaterial, knowledgePrincipalKey, buildKnowledgeBusinessBrief } from '../domains/governance/public-api.js';
+  createLocalKnowledgeProvider, buildKnowledgeBrief, getEffectiveAccess, loadWeKnoraRuntimeProvider, answerKnowledgeQuestion, knowledgeAnswerPolicy, previewKnowledgeMaterial, knowledgePrincipalKey, buildKnowledgeBusinessBrief, listKnowledgeBusinessPlans } from '../domains/governance/public-api.js';
 
 export async function handleKnowledgeRoutes({ req, res, url, role, agentIdentity, effectiveAccess, selectActionRole, denyButton, readBody, send }) {
   const base = ['/api/agent/knowledge-library', '/api/semantic-operations/knowledge-library']
@@ -15,6 +15,9 @@ export async function handleKnowledgeRoutes({ req, res, url, role, agentIdentity
   const reply = result => { send(res, result.error ? result.status || 400 : 200, result); return true; };
   // POST read operations also require a page grant; app's GET guard alone is insufficient.
   if (!(effectiveAccess || getEffectiveAccess(role, agentIdentity)).pagePermissionIds.includes(page)) return reply({ error: 'PAGE_PERMISSION_DENIED', status: 403 });
+  if (req.method === 'GET' && url.pathname === `${base}/joint-plans` && !semantic) {
+    return reply(await listKnowledgeBusinessPlans({ context, canRead }));
+  }
   if (req.method === 'POST' && url.pathname === `${base}/joint-brief` && !semantic) {
     if (!selectActionRole(writePermission)) { denyButton(writePermission); return true; }
     return reply(await buildKnowledgeBusinessBrief({ context, body: await readBody(req), resolveProvider,

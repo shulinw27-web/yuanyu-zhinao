@@ -47,6 +47,13 @@ if (!process.argv.includes('--live-synthetic')) {
     const login = await call('/api/auth/oa/login', null, { account: 'admin@demo.local', password: 'synthetic-evaluation-only' });
     if (login.status !== 200 || !login.data.sessionId) throw new Error('login');
     const session = login.data.sessionId;
+    const catalogue = await call('/api/agent/knowledge-library/joint-plans', session);
+    check('business_plan_catalogue_without_published_model', catalogue.status === 200 && catalogue.data.available === false
+      && catalogue.data.businessRead === false && catalogue.data.plans?.length === 0);
+    const semanticCatalogue = await call('/api/semantic-operations/knowledge-library/joint-plans', session);
+    check('semantic_has_no_business_plan_catalogue', semanticCatalogue.status === 404);
+    const anonymousCatalogue = await call('/api/agent/knowledge-library/joint-plans', null);
+    check('anonymous_plan_catalogue_denied', anonymousCatalogue.status === 401);
     for (const surface of ['agent', 'semantic-operations']) {
       const route = `/api/${surface}/knowledge-library`;
       const providers = await call(`${route}/providers`, session);

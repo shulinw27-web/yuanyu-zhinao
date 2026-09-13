@@ -4,13 +4,28 @@ import { getPublishedAgentOntology, runPublishedOntologyRead, validatePublishedR
 import { assessPromptContent } from './prompt-security-service.js';
 import { prohibitsAction } from './agent-turn-understanding-service.js';
 
+export async function listKnowledgeBusinessPlans({ context, canRead, getOntology = getPublishedAgentOntology }) {
+  if (!validKnowledgeIdentity(context) || typeof canRead !== 'function' || !await canRead()) return knowledgeFailure('KNOWLEDGE_ACCESS_DENIED', 403);
+  try {
+    const ontology = await getOntology(context.roleId, context.identityScope);
+    if (!await canRead()) return knowledgeFailure('KNOWLEDGE_ACCESS_DENIED', 403);
+    return { mode: 'published_read_plan_metadata_only', available: !!ontology,
+      model: ontology ? { version: ontology.published.version, fingerprint: ontology.published.fingerprint } : null,
+      plans: ontology?.metadata?.readPlans || [], execution: 'none', businessRead: false,
+      note: '方案元数据不授予业务对象权限；实际读取仍逐项校验。' };
+  } catch { return knowledgeFailure('KNOWLEDGE_JOINT_UNAVAILABLE', 503); }
+}
+
 // Explicit read-only composition. Keep policy excerpts separate from business facts;
 // this endpoint neither calls a model nor infers execution authorization from a document.
 export async function buildKnowledgeBusinessBrief({ context, body, resolveProvider, canRead,
   getOntology = getPublishedAgentOntology, readBusiness = runPublishedOntologyRead, revalidateBusiness = validatePublishedReadEvidence }) {
   if (!validKnowledgeIdentity(context) || typeof canRead !== 'function') return knowledgeFailure('KNOWLEDGE_ACCESS_DENIED', 403);
-  if (!body || Array.isArray(body) || Object.keys(body).some(key => !['question', 'targets', 'citations', 'confirmed'].includes(key))
+  if (!body || Array.isArray(body) || Object.keys(body).some(key => !['question', 'targets', 'citations', 'confirmed', 'planId', 'expectedModelFingerprint', 'expectedModelVersion'].includes(key))
     || body.confirmed !== true || !validKnowledgeQuery(body.question, 5) || !Array.isArray(body.targets)
+    || body.planId !== undefined && !validKnowledgeId(body.planId)
+    || body.expectedModelFingerprint !== undefined && (typeof body.expectedModelFingerprint !== 'string' || !/^[a-f0-9]{24}$/.test(body.expectedModelFingerprint))
+    || body.expectedModelVersion !== undefined && (typeof body.expectedModelVersion !== 'string' || !body.expectedModelVersion || body.expectedModelVersion.length > 100)
     || body.targets.length < 1 || body.targets.length > 3 || !body.targets.every(validKnowledgeId)
     || new Set(body.targets).size !== body.targets.length || prohibitsAction(body.question, 'read_business')
     || !assessPromptContent(body.question, { source: 'joint_read_question', maxCharacters: 4000 }).safe) return knowledgeFailure('KNOWLEDGE_JOINT_INPUT_INVALID');
@@ -20,8 +35,10 @@ export async function buildKnowledgeBusinessBrief({ context, body, resolveProvid
     const before = await knowledge(); if (before.error) return before;
     const ontology = await getOntology(context.roleId, context.identityScope);
     if (!ontology) return knowledgeFailure('KNOWLEDGE_PUBLISHED_MODEL_REQUIRED', 409);
+    if (body.expectedModelFingerprint !== undefined && body.expectedModelFingerprint !== ontology.published.fingerprint
+      || body.expectedModelVersion !== undefined && body.expectedModelVersion !== ontology.published.version) return knowledgeFailure('KNOWLEDGE_MODEL_SELECTION_STALE', 409);
     const execute = () => readBusiness({ ontology, roleId: context.roleId, scope: context.identityScope,
-      target: body.targets, input: body.question, allowModelAnalysis: false });
+      target: body.targets, input: body.question, allowModelAnalysis: false, planId: body.planId });
     const first = await execute();
     const ready = result => ['completed', 'partial'].includes(result?.status) && Array.isArray(result.records)
       && result.analysis?.status === 'not_requested';

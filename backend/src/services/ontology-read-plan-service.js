@@ -14,7 +14,7 @@ const binary = new Set(['add', 'sub', 'mul', 'max', 'eq', 'ne', 'and', 'or', 'gt
 export function validateOntologyReadPlans(draft) {
   try {
     const plans = draft.scenario?.readPlans || [];
-    if (!Array.isArray(plans) || plans.length > 1 || new Set(plans.map(p => p?.id)).size !== plans.length) fail('READ_PLAN_FORMAT');
+    if (!Array.isArray(plans) || plans.length > 3 || new Set(plans.map(p => p?.id)).size !== plans.length) fail('READ_PLAN_FORMAT');
     if (plans.length && (draft.scenario?.decisionBindings?.length || draft.scenario.requireCaseReplay !== true)) fail('READ_PLAN_REPLAY_REQUIRED');
     for (const plan of plans) {
       if (!identifier(plan.id) || !Array.isArray(plan.datasets) || !plan.datasets.length || plan.datasets.length > 24

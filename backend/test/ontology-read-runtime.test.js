@@ -66,6 +66,15 @@ test('unknown operators, undeclared joins, output cycles and no replay gate fail
     const d = draft(0); mutate(d); assert.equal(validateOntologyReadPlans(d).status, 'failed');
   }
 });
+test('read plan catalogue is bounded and rejects duplicate identities', () => {
+  const d = draft(0);
+  d.scenario.readPlans = Array.from({ length: 3 }, (_, i) => ({ ...crossChannelReadPlan(0), id: `plan_${i}` }));
+  assert.equal(validateOntologyReadPlans(d).status, 'passed');
+  d.scenario.readPlans.push({ ...crossChannelReadPlan(0), id: 'fourth' });
+  assert.equal(validateOntologyReadPlans(d).status, 'failed');
+  d.scenario.readPlans = [crossChannelReadPlan(0), crossChannelReadPlan(0)];
+  assert.equal(validateOntologyReadPlans(d).status, 'failed');
+});
 test('deployment grant and model policy are intersected before any connector calls', async () => {
   grants(); const d = draft(0); d.accessPolicies[0].effect = 'deny'; let calls = 0;
   await assert.rejects(executeOntologyReadPlan({ draft: d, plan: d.scenario.readPlans[0], target: 'ORD-X900', roleId: 'executive', scope, retrieve: () => { calls++; return []; } }), /READ_OBJECT_FORBIDDEN/);
@@ -108,8 +117,10 @@ test('revoking deployment grants hides old assistant history from the same conve
   const after = await getAgentConversationContext(conversation.id, scope, accessContext);
   assert.ok(!after.prompt.includes('PRIVATE_CREDIT_RESULT_7000'));
 });
-test('read-plan publication requires fingerprint-bound positive and negative replay; metadata is tenant scoped', async () => {
+test('multiple published plans require explicit selection and per-plan replay; metadata is tenant scoped', async () => {
   grants(); const role = getRole('executive'); const d = draft(0);
+  const alternative = { ...crossChannelReadPlan(0.5), id: 'cross_channel_alternative', label: '另一授信口径' };
+  d.scenario.readPlans.push(alternative);
   const definition = { ...d, modelingProfile: 'general', scenario: { ...d.scenario, objective: '回放测试', questions: ['缺口是多少？'], actionBindings: [] },
     policies: ['只读，不授权写入'], stateMachines: [], events: [], metrics: [],
     glossaryTerms: [{ term: '曙光额度', definition: '授信减应收减承诺', objectType: 'CreditAccount' }],
@@ -121,11 +132,13 @@ test('read-plan publication requires fingerprint-bound positive and negative rep
   await simulateBuildOAMetaModel(role);
   assert.equal((await publishGovernedOntology({ role, identityScope: scope })).code, 'PUBLICATION_REPLAY_REQUIRED');
   const fingerprint = (await getOAMetaModelDraft()).fingerprint;
-  const { creditV1, creditGapV1, creditV2: _b, creditGapV2: _g, ...common } = expected;
+  const { creditV1, creditGapV1, creditV2, creditGapV2, ...common } = expected;
   const positive = { planId: d.scenario.readPlans[0].id, target: 'ORD-X900', records: source, expected: { ...common, credit: creditV1, creditGap: creditGapV1 } };
   const negative = { planId: positive.planId, target: positive.target, records: [], expectedError: 'READ_ROOT_NOT_FOUND' };
   assert.equal((await runOntologyReadReplay({ body: { candidateFingerprint: fingerprint, cases: [positive, positive] }, role, identityScope: scope })).status, 'failed');
-  assert.equal((await runOntologyReadReplay({ body: { candidateFingerprint: fingerprint, cases: [positive, negative] }, role, identityScope: scope })).status, 'passed');
+  assert.notEqual((await runOntologyReadReplay({ body: { candidateFingerprint: fingerprint, cases: [positive, negative] }, role, identityScope: scope })).status, 'passed');
+  const alternatePositive = { ...positive, planId: alternative.id, expected: { ...common, credit: creditV2, creditGap: creditGapV2 } };
+  assert.equal((await runOntologyReadReplay({ body: { candidateFingerprint: fingerprint, cases: [positive, negative, alternatePositive, { ...negative, planId: alternative.id }] }, role, identityScope: scope })).status, 'passed');
   const deployed = await publishGovernedOntology({ role, identityScope: scope, deploy: async (candidate, version) => ({ status: 'published', deployment: { sourceFingerprint: (await getOAMetaModelDraft()).fingerprint, version } }) });
   assert.ok(!deployed.error, deployed.error);
   assert.ok((await getPublishedAgentOntology('executive', scope)).metadata.modelVersion);
@@ -138,7 +151,14 @@ test('read-plan publication requires fingerprint-bound positive and negative rep
       return new Response(JSON.stringify({ records: source.filter(r => r.objectType === query.objectType && query.filter.values.includes(r.payload[query.filter.field])), queryCoverage: { schemaVersion: 'ontology-query.v1', complete: true, queryFingerprint: ontologyQueryFingerprint(query) } }));
     };
     const ontology = await getPublishedAgentOntology('executive', scope);
-    const partial = await runPublishedOntologyRead({ ontology, roleId: 'executive', scope, target: 'ORD-X900', input: '完整影响范围' });
+    const read = options => runPublishedOntologyRead({ ontology, roleId: 'executive', scope, target: 'ORD-X900', allowModelAnalysis: false, ...options });
+    assert.equal((await read({})).code, 'ONTOLOGY_PLAN_SELECTION_REQUIRED');
+    assert.equal((await read({ planId: 'not-published' })).code, 'ONTOLOGY_PLAN_SELECTION_REQUIRED');
+    const alternateResult = await read({ planId: alternative.id });
+    assert.equal(alternateResult.results.find(item => item.id === 'credit').value, creditV2);
+    assert.equal(alternateResult.metadata.selectedReadPlan.id, alternative.id);
+    const partial = await read({ planId: positive.planId, input: '完整影响范围' });
+    assert.equal(partial.results.find(item => item.id === 'credit').value, creditV1);
     assert.equal(partial.status, 'partial', partial.text);
     assert.ok(partial.timing.sourceReadMs >= 0); assert.equal(partial.timing.analysisMs, 0);
     assert.equal(partial.coverage.globalEnterpriseCoverage, false);
@@ -147,12 +167,14 @@ test('read-plan publication requires fingerprint-bound positive and negative rep
     await saveLibraryDocument({ ...jointContext, id: 'joint-policy', body: { expectedRevision: 0, title: '订单信用合成制度', source: '合成测试', sourceVersion: 'v1', kind: 'reference', text: '订单履约前核验授信和库存，信用额度必须根据授权财务来源计算。' } });
     const localKnowledge = createLocalKnowledgeProvider(jointContext);
     const joint = await buildKnowledgeBusinessBrief({ context: jointContext,
-      body: { question: '完整核验 ORD-X900 库存及授信缺口', targets: ['ORD-X900'], citations: (await localKnowledge.search({ query: '授信', limit: 3 })).results.map(item => item.citation), confirmed: true },
+      body: { question: '完整核验 ORD-X900 库存及授信缺口', targets: ['ORD-X900'], citations: (await localKnowledge.search({ query: '授信', limit: 3 })).results.map(item => item.citation), confirmed: true,
+        planId: positive.planId, expectedModelFingerprint: ontology.published.fingerprint, expectedModelVersion: ontology.published.version },
       resolveProvider: () => localKnowledge, canRead: () => true });
     assert.equal(joint.status, 'partial', JSON.stringify(joint));
     assert.equal(joint.business.results.find(item => item.id === 'credit').value, expected.creditV1);
+    assert.equal(joint.business.metadata.selectedReadPlan.id, positive.planId);
     assert.equal(joint.modelCalled, false); assert.equal(joint.knowledge.sources.length, 1);
-    const stale = await runPublishedOntologyRead({ ontology: { ...ontology, published: { ...ontology.published, fingerprint: 'stale' } }, roleId: 'executive', scope, target: 'ORD-X900' });
+    const stale = await read({ ontology: { ...ontology, published: { ...ontology.published, fingerprint: 'stale' } }, planId: positive.planId });
     assert.equal(stale.code, 'ONTOLOGY_VERSION_CHANGED'); assert.equal(stale.records, undefined);
     const tooMany = await runPublishedOntologyRead({ ontology, roleId: 'executive', scope, target: ['a','b','c','d'] });
     assert.equal(tooMany.status, 'needs_input');

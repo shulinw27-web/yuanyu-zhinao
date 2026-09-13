@@ -1,6 +1,6 @@
 # 项目文档中心
 
-第六批：[业务端只读联合核验](guides/KNOWLEDGE_WORKSPACE_GUIDE.md) · [实现与测试边界](development/WEKNORA_UPGRADE_ACCEPTANCE.md)。知识来源和业务计算分列、明确编号和逐次确认；不属于自动联合推理或生产放行。
+第七批：[发布方案目录与只读联合核验](guides/KNOWLEDGE_WORKSPACE_GUIDE.md) · [实现与测试边界](development/WEKNORA_UPGRADE_ACCEPTANCE.md)。最多三个经回放方案，每轮明确选一个，模型变更拒绝旧选择；不属于自动联合推理或生产放行。
 
 最新第五批（2026-09-13）：[真实 WeKnora 项目接入验收](development/WEKNORA_UPGRADE_ACCEPTANCE.md) · [本机复现与使用](guides/KNOWLEDGE_WORKSPACE_GUIDE.md)。专用只读 Key/合成文档绑定已启用，双端检索及各三轮方舟回答通过；生产共享与业务联合规划仍待完成。下文旧批次“尚未接入”指当时状态。
 

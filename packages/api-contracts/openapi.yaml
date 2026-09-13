@@ -21,6 +21,15 @@ tags:
   - { name: SemanticOperations, description: 独立语义运营任务、证据、巡检、通知与受控报告 }
   - { name: Platform, description: 平台运行状态与配置 }
 paths:
+  /agent/knowledge-library/joint-plans:
+    get:
+      tags: [Agent]
+      operationId: listKnowledgeBusinessReadPlans
+      description: 仅业务端；按当前身份获取已发布模型版本、指纹与读取方案名称、根对象类型和输出。不读取业务记录，元数据权限不代表业务对象授权。
+      responses:
+        '200': { description: '方案目录；没有可访问模型时 available=false、plans=[]' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: 目录不可用 }
   /agent/knowledge-library/joint-brief:
     post:
       tags: [Agent]
@@ -1340,6 +1349,9 @@ components:
       additionalProperties: false
       required: [question, targets, citations, confirmed]
       properties:
+        planId: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$', description: 多方案时必须明确选择；单方案兼容省略 }
+        expectedModelFingerprint: { type: string, pattern: '^[a-f0-9]{24}$', description: 界面取得的模型指纹；变化时拒绝读取 }
+        expectedModelVersion: { type: string, minLength: 1, maxLength: 100 }
         question: { type: string, minLength: 1, maxLength: 4000 }
         targets: { type: array, minItems: 1, maxItems: 3, uniqueItems: true, items: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$' } }
         citations: { type: array, minItems: 1, maxItems: 5, items: { $ref: '#/components/schemas/KnowledgeCitation' } }

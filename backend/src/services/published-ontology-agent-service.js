@@ -23,7 +23,7 @@ export async function getPublishedAgentOntology(roleId, scope) {
   const grant = getOntologyRuntimeGrant(scope, roleId);
   if (!grant?.metadata) return null;
   const published = await getPublishedOntologyModel();
-  if (!published || published.tenantId !== scope.tenantId) return null;
+  if (!published || published.tenantId !== scope.tenantId || !getOntologyRuntimeGrant(scope, roleId)?.metadata) return null;
   const draft = published.draft;
   const metadata = {
     modelVersion: published.version, modelFingerprint: published.fingerprint,
@@ -46,8 +46,9 @@ export async function validatePublishedReadEvidence({ ontology, roleId, scope, r
   return true;
 }
 
-export async function runPublishedOntologyRead({ ontology, roleId, scope, target, input = '', allowModelAnalysis = true }) {
-  const plans = ontology.published.draft.scenario?.readPlans || [];
+export async function runPublishedOntologyRead({ ontology, roleId, scope, target, input = '', allowModelAnalysis = true, planId }) {
+  const publishedPlans = ontology.published.draft.scenario?.readPlans || [];
+  const plans = planId === undefined ? publishedPlans : publishedPlans.filter(plan => plan.id === planId);
   const targets = [...new Set(Array.isArray(target) ? target : [target])];
   if (plans.length !== 1 || !targets.length || targets.length > 3 || targets.some(t => typeof t !== 'string' || !t || t.length > 100)) return { status: 'needs_input', code: 'ONTOLOGY_PLAN_SELECTION_REQUIRED', text: '请选择一个明确的只读方案和最多三个根对象编号；本次未读取数据。' };
   const readStartedAt = Date.now();
@@ -109,7 +110,8 @@ export async function runPublishedOntologyRead({ ontology, roleId, scope, target
     await validatePublishedReadEvidence({ ontology, roleId, scope, records });
     const status = partial || analysis.status === 'incomplete' ? 'partial' : 'completed';
     return { status, code: status === 'partial' ? 'ONTOLOGY_READ_PARTIAL' : 'ONTOLOGY_READ_COMPLETED', results, queries, records, coverage, analysis, timing,
-      comparisons: comparisons.map(c => ({ target: c.target, results: c.results, coverage: c.coverage })), metadata: ontology.metadata,
+      comparisons: comparisons.map(c => ({ target: c.target, results: c.results, coverage: c.coverage })),
+      metadata: { ...ontology.metadata, selectedReadPlan: { id: plans[0].id, label: plans[0].label } },
       text: `${partial ? '当前只完成声明计划的局部读取，不能代表完整影响范围。\n' : ''}${analysis.status === 'incomplete' ? '计算已完成，但解释未通过校验或预算限制，尚未完成分析。\n' : ''}${answer}\n\n依据：已发布模型 ${ontology.published.version}（${ontology.published.fingerprint}）；${records.length} 条授权来源记录、${queries.length} 个关联查询步骤。\n记录时间：${dates.join('、')}。这是来源快照计算，不作实时履约承诺；本次未执行任何业务写入。` };
   } catch (error) {
     const code = /^[A-Z_]+$/.test(error.message) ? error.message : 'ONTOLOGY_SOURCE_UNAVAILABLE';

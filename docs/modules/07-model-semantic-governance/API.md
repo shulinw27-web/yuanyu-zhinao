@@ -19,7 +19,7 @@
 
 新增 `POST /api/meta-models/oa-governance/read-plan-replay`，需要 `meta_model.publish` 及执行角色检查。正文 `{candidateFingerprint,cases}`；每例 `planId/target/records` 加完整 `expected` 或 `expectedError`，2–24 例。原 `case-replay` 兼容 `mode=ontology-read`，不能借原校验入口绕过发布角色检查。存储回放摘要及指纹，不存原始记录。
 
-草稿 `scenario.readPlans` 最多一个方案，强制 `requireCaseReplay=true`，不混用旧 `decisionBindings`。创建运营提案可传 `adoptionMode=merge|replace`，缺省 merge，采纳时使用已存模式，不允许确认参数偷换。智脑 `/api/agent/message` 响应新增 `semanticContext` 计算和版本证据。连接器 `ontology-query.v1`、部署权限与错误边界见 [完整指南](../../guides/PUBLISHED_MODEL_WORKBENCH.md)。
+草稿 `scenario.readPlans` 最多三个不同编号的方案，强制 `requireCaseReplay=true`，每个须正例和反例，不混用旧 `decisionBindings`。每轮只执行明确选定的一个；业务知识页通过 `GET /api/agent/knowledge-library/joint-plans` 获取目录，再向 `joint-brief` 提交 `planId`、`expectedModelVersion`、`expectedModelFingerprint`（24位），旧选择变化则拒绝读取。主聊天尚无多方案选择控件，不自动猜选。创建运营提案可传 `adoptionMode=merge|replace`，缺省 merge，采纳时使用已存模式，不允许确认参数偷换。智脑 `/api/agent/message` 响应包含 `semanticContext` 计算和版本证据。连接器 `ontology-query.v1`、部署权限与错误边界见 [完整指南](../../guides/PUBLISHED_MODEL_WORKBENCH.md)。
 
 ## 2026-09-10 提案与材料兼容扩展
 

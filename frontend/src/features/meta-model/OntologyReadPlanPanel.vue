@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
+import { parseReadPlanImport } from './ontology-read-plan-import.js';
 const props = defineProps({ draft: Object, canEdit: Boolean });
 const emit = defineEmits(['apply-plan']);
 const pending = ref(null); const error = ref('');
@@ -12,8 +13,7 @@ const importPlan = async event => {
   try {
     if (file.size > 150000) throw new Error('方案超过 150 KB，请缩小。');
     const value = JSON.parse(await file.text());
-    const input = Array.isArray(value) ? value : value.scenario?.readPlans || value.readPlans || [value];
-    if (input.length !== 1 || !input[0]?.datasets?.length || !input[0]?.outputs?.length) throw new Error('当前支持一个活动只读方案，必须含 datasets 和 outputs。');
+    const input = parseReadPlanImport(value);
     if (props.draft === currentDraft && props.canEdit) pending.value = input;
   } catch (e) { error.value = e.message; }
 };
@@ -38,7 +38,7 @@ const expression = (e, depth = 0) => {
   <details class="ontology-read-panel">
     <summary>智脑关联查询与计算 · {{ plans.length ? '已配置，需回放验收' : '尚未配置' }}</summary>
     <p>模型结构本身不是计算器。导入经人工审阅的只读方案，检查关联链和口径，再保存、校验、回放正反例及发布。对象访问还需要部署授权与 IAM；导入不会授予权限。</p>
-    <label>导入只读方案 JSON（仅预览）<input type="file" accept=".json,application/json" :disabled="!canEdit" @change="importPlan" /></label>
+    <label>导入只读方案 JSON（1–3个，仅预览）<input type="file" accept=".json,application/json" :disabled="!canEdit" @change="importPlan" /></label>
     <button v-if="pending" type="button" :disabled="!canEdit" @click="apply">采用预览方案到未保存草稿</button>
     <p v-if="error" role="alert">{{ error }}</p>
     <article v-for="plan in pending || plans" :key="plan.id">
