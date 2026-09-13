@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import KnowledgeStudyPanel from './KnowledgeStudyPanel.vue';
 import KnowledgeConversationPanel from './KnowledgeConversationPanel.vue';
 import KnowledgeMaterialReviewPanel from './KnowledgeMaterialReviewPanel.vue';
+import KnowledgeBusinessBriefPanel from './KnowledgeBusinessBriefPanel.vue';
 
 const props = defineProps({ client: { type: Object, required: true }, canWrite: { type: Boolean, default: false }, canModel: Boolean });
 const emit = defineEmits(['model-candidate']);
@@ -132,6 +133,7 @@ onUnmounted(() => { generation++; });
     <form class="knowledge-search" @submit.prevent="search"><label>查询资料<input v-model="query" maxlength="4000" placeholder="例如：供应商资质过期如何处理？" required :disabled="busy" /></label><button :disabled="busy || !query.trim()">查找原文依据</button></form>
     <section v-if="answer" class="knowledge-results" aria-label="检索依据"><p>{{ answer.message }}</p><article v-for="item in answer.evidence" :key="item.citation.chunkId"><h3>{{ item.title }}</h3><small>{{ item.source }} · {{ item.sourceVersion }} · 修订 {{ item.revision }}</small><pre>{{ item.excerpt }}</pre><button :disabled="busy" @click="openCitation(item.citation)">重新核验并打开引用</button></article></section>
     <KnowledgeConversationPanel :client="client" :evidence="answer?.evidence || []" :policy="answerPolicy" :can-write="canEdit" @wiki-draft="generatedWiki = $event" />
+    <KnowledgeBusinessBriefPanel :client="client" :evidence="answer?.evidence || []" :can-write="canEdit" />
     <section v-if="source" class="knowledge-source" aria-label="已核验原文"><h3>{{ source.title }} · 当前有效引用</h3><small v-if="source.provider === 'local_private_library'">{{ source.citation.start }}–{{ source.citation.end }} UTF-16 字符偏移（不是 PDF 页码）</small><small v-else>WeKnora 分块定位 · {{ source.citation.chunkId }}（不代表 PDF 页码）</small><pre>{{ source.excerpt }}</pre></section>
     <div class="knowledge-columns">
       <aside><div class="knowledge-toolbar"><h3>资料目录</h3><button v-if="canEdit" :disabled="busy" @click="newDocument">＋ 新建</button></div><p v-if="!documents.length">尚无资料。保存后才能检索，不会自动使用其他用户的资料。</p>

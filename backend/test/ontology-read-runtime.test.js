@@ -11,6 +11,9 @@ import { getOAMetaModelDraft, saveOAMetaModelDraft, validateOAMetaModelDraft, si
 import { runOntologyReadReplay, publishGovernedOntology } from '../src/services/ontology-runtime-service.js';
 import { getRole } from '../src/services/authorization-service.js';
 import { turnUnderstandingTimeout, hasConflictingMaterialTotals } from '../src/services/agent-turn-understanding-service.js';
+import { buildKnowledgeBusinessBrief } from '../src/services/knowledge-business-brief-service.js';
+import { saveLibraryDocument } from '../src/services/knowledge-library-service.js';
+import { createLocalKnowledgeProvider } from '../src/services/knowledge-evidence-service.js';
 
 test('material headings cannot contradict final metric totals; different versions remain distinct', () => {
   assert.equal(hasConflictingMaterialTotals('2)南仓自有可用件数:60 piece\n更正为40\n- 南仓自有可用件数:40 piece'), true);
@@ -140,6 +143,15 @@ test('read-plan publication requires fingerprint-bound positive and negative rep
     assert.ok(partial.timing.sourceReadMs >= 0); assert.equal(partial.timing.analysisMs, 0);
     assert.equal(partial.coverage.globalEnterpriseCoverage, false);
     assert.equal(partial.coverage.status, 'declared_plan_only');
+    const jointContext = { identityScope: { ...scope, deviceId: 'read-test' }, roleId: 'executive' };
+    await saveLibraryDocument({ ...jointContext, id: 'joint-policy', body: { expectedRevision: 0, title: '订单信用合成制度', source: '合成测试', sourceVersion: 'v1', kind: 'reference', text: '订单履约前核验授信和库存，信用额度必须根据授权财务来源计算。' } });
+    const localKnowledge = createLocalKnowledgeProvider(jointContext);
+    const joint = await buildKnowledgeBusinessBrief({ context: jointContext,
+      body: { question: '完整核验 ORD-X900 库存及授信缺口', targets: ['ORD-X900'], citations: (await localKnowledge.search({ query: '授信', limit: 3 })).results.map(item => item.citation), confirmed: true },
+      resolveProvider: () => localKnowledge, canRead: () => true });
+    assert.equal(joint.status, 'partial', JSON.stringify(joint));
+    assert.equal(joint.business.results.find(item => item.id === 'credit').value, expected.creditV1);
+    assert.equal(joint.modelCalled, false); assert.equal(joint.knowledge.sources.length, 1);
     const stale = await runPublishedOntologyRead({ ontology: { ...ontology, published: { ...ontology.published, fingerprint: 'stale' } }, roleId: 'executive', scope, target: 'ORD-X900' });
     assert.equal(stale.code, 'ONTOLOGY_VERSION_CHANGED'); assert.equal(stale.records, undefined);
     const tooMany = await runPublishedOntologyRead({ ontology, roleId: 'executive', scope, target: ['a','b','c','d'] });

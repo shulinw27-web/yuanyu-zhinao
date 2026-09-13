@@ -26,6 +26,11 @@ for (const surface of ['agent', 'semantic-operations']) {
     assert.ok(calls[10].path.endsWith('/studies/study-1?revision=2'));
     assert.equal(calls[11].method, 'PUT'); assert.equal(calls[12].method, 'POST');
     assert.ok(calls.every(call => !call.headers));
+    if (surface === 'agent') {
+      await client.jointBrief({ question: '核验', targets: ['ORD-1'], citations: [], confirmed: true });
+      assert.equal(calls.at(-1).path, '/agent/knowledge-library/joint-brief');
+      assert.equal(calls.at(-1).method, 'POST');
+    } else assert.equal(client.jointBrief, undefined);
   });
 }
 test('knowledge SDK rejects unknown surfaces', () => {

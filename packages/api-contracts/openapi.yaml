@@ -21,6 +21,20 @@ tags:
   - { name: SemanticOperations, description: 独立语义运营任务、证据、巡检、通知与受控报告 }
   - { name: Platform, description: 平台运行状态与配置 }
 paths:
+  /agent/knowledge-library/joint-brief:
+    post:
+      tags: [Agent]
+      operationId: verifyKnowledgeWithBusinessFacts
+      description: 仅业务端；确认后读取最多三个明确根对象，使用已发布读取方案及当前对象授权。复验资料与业务快照，分别返回，不调用模型或执行业务写入。
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/KnowledgeBusinessBriefInput' } } }
+      responses:
+        '200': { description: 只读并列核验，包含声明图覆盖边界，不是跨系统原子事务或制度适用性裁决 }
+        '400': { description: 输入、根对象或确认无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 来源、已发布模型或业务快照无效/变化，不返回部分敏感结果 }
+        '503': { description: 联合读取不可用 }
   /agent/knowledge-library/answer:
     post:
       tags: [Agent]
@@ -1321,6 +1335,15 @@ components:
             provider: { type: string }
             model: { type: string }
             confirmed: { const: true }
+    KnowledgeBusinessBriefInput:
+      type: object
+      additionalProperties: false
+      required: [question, targets, citations, confirmed]
+      properties:
+        question: { type: string, minLength: 1, maxLength: 4000 }
+        targets: { type: array, minItems: 1, maxItems: 3, uniqueItems: true, items: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$' } }
+        citations: { type: array, minItems: 1, maxItems: 5, items: { $ref: '#/components/schemas/KnowledgeCitation' } }
+        confirmed: { const: true }
     KnowledgeMaterialInput:
       type: object
       additionalProperties: false

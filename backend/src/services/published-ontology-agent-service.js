@@ -36,7 +36,17 @@ export async function getPublishedAgentOntology(roleId, scope) {
   return { published, metadata, prompt };
 }
 
-export async function runPublishedOntologyRead({ ontology, roleId, scope, target, input = '' }) {
+export async function validatePublishedReadEvidence({ ontology, roleId, scope, records }) {
+  for (const r of records) {
+    const { grant } = requireOntologyObjectAccess(ontology.published.draft, r.objectType, roleId, scope);
+    if (!grant.classifications.includes(r.classification) || !admitSemanticRecord(r, roleId, scope, true)) throw new Error('READ_RECORD_SCOPE');
+  }
+  const current = await getPublishedAgentOntology(roleId, scope);
+  if (current?.published.version !== ontology.published.version || current?.published.fingerprint !== ontology.published.fingerprint) throw new Error('ONTOLOGY_VERSION_CHANGED');
+  return true;
+}
+
+export async function runPublishedOntologyRead({ ontology, roleId, scope, target, input = '', allowModelAnalysis = true }) {
   const plans = ontology.published.draft.scenario?.readPlans || [];
   const targets = [...new Set(Array.isArray(target) ? target : [target])];
   if (plans.length !== 1 || !targets.length || targets.length > 3 || targets.some(t => typeof t !== 'string' || !t || t.length > 100)) return { status: 'needs_input', code: 'ONTOLOGY_PLAN_SELECTION_REQUIRED', text: '请选择一个明确的只读方案和最多三个根对象编号；本次未读取数据。' };
@@ -62,7 +72,7 @@ export async function runPublishedOntologyRead({ ontology, roleId, scope, target
     const dates = [...new Set(records.map(r => r.occurredAt))];
     const factual = comparisons.map(c => `${c.target}：\n${c.results.map(r => `${r.label}：${typeof r.value === 'boolean' ? r.value ? '是' : '否' : r.value}${r.unit ? ` ${r.unit}` : ''}`).join('\n')}`).join('\n\n');
     let analysis = { status: 'not_requested', source: null }; let answer = factual;
-    if (plans[0].analysis?.enabled) {
+    if (allowModelAnalysis && plans[0].analysis?.enabled) {
       const encoded = encodeOntologyAnalysisEvidence(records);
       // Keep the original budget and safety surface. Encoding must not let a
       // formerly blocked payload bypass the gateway's prompt security checks.
@@ -96,12 +106,7 @@ export async function runPublishedOntologyRead({ ontology, roleId, scope, target
       }
     }
     // Recheck AFTER model latency too: no revoked data or stale model answers.
-    for (const r of records) {
-      const { grant } = requireOntologyObjectAccess(ontology.published.draft, r.objectType, roleId, scope);
-      if (!grant.classifications.includes(r.classification) || !admitSemanticRecord(r, roleId, scope, true)) throw new Error('READ_RECORD_SCOPE');
-    }
-    const current = await getPublishedAgentOntology(roleId, scope);
-    if (current?.published.version !== ontology.published.version || current?.published.fingerprint !== ontology.published.fingerprint) throw new Error('ONTOLOGY_VERSION_CHANGED');
+    await validatePublishedReadEvidence({ ontology, roleId, scope, records });
     const status = partial || analysis.status === 'incomplete' ? 'partial' : 'completed';
     return { status, code: status === 'partial' ? 'ONTOLOGY_READ_PARTIAL' : 'ONTOLOGY_READ_COMPLETED', results, queries, records, coverage, analysis, timing,
       comparisons: comparisons.map(c => ({ target: c.target, results: c.results, coverage: c.coverage })), metadata: ontology.metadata,

@@ -4,6 +4,8 @@
 
 ### 以语义层连接企业数据，以 Agent 承接业务与工作
 
+第六批增量：业务端加入“知识依据＋业务事实”只读联合核验，按已发布模型及明确编号计算，原文与事实分列、版本/权限复验；不执行处置、不调用额外模型。自然语言自动联合规划仍待开发。[使用指南](docs/guides/KNOWLEDGE_WORKSPACE_GUIDE.md) · [第六批验收](docs/development/WEKNORA_UPGRADE_ACCEPTANCE.md)。
+
 2026-09-13 第五批：项目已通过专用只读 Key 接通本机 WeKnora 合成库，双端真实检索/引用回读/身份隔离及混合检索通过；两端各三轮方舟问答通过，实际订单和金额不足时明确未知。修复有效分块状态误判、摘要误作原文候选和检索诊断标记。范围仅合成库，实时业务联合规划仍未完成。[最新验收与剩余项](docs/development/WEKNORA_UPGRADE_ACCEPTANCE.md)。以下旧批次保留历史状态。
 
 最新第四批：来源约束的连续问答、模型 Wiki 草稿、历史恢复、多模态人工校对已加入双端知识工作区。模型只选来源片段，服务端回填原文；真实方舟四个合成用例通过。项目 WeKnora Key/映射和实时业务联合规划仍待完成。[操作与边界](docs/guides/KNOWLEDGE_WORKSPACE_GUIDE.md) · [第四批验收](docs/development/WEKNORA_UPGRADE_ACCEPTANCE.md)。

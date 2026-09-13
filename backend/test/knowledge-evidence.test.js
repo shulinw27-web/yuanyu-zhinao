@@ -118,6 +118,9 @@ test('WK evidence: both route surfaces require their own page and write grants; 
     }
   }
   assert.equal((await call(semantic, '/providers', { pages: ['page.agent.view'] })).status, 403);
+  assert.equal((await call(agent, '/joint-brief', { method: 'POST', pages: ['page.agent.view'], payload: {} })).status, 403);
+  assert.equal((await call(agent, '/joint-brief', { method: 'POST', pages: ['page.agent.view'], grant: true, payload: {} })).status, 400);
+  assert.equal((await call(semantic, '/joint-brief', { method: 'POST', pages: ['page.world.view'], grant: true, payload: {} })).status, 404);
   assert.equal((await call(semantic, '/documents/routed', { method: 'PUT', pages: ['page.world.view'], grant: true, payload: body })).status, 200);
   assert.equal((await call(agent, '/documents/routed?revision=1', { pages: ['page.agent.view'] })).data.text, body.text);
 });
@@ -126,6 +129,9 @@ async function withUpstream(run) {
   const state = { calls: [], mode: 'ok', permitted: true, updated: '2026-09-12T00:00:00Z', text: '采购前核验供应商资质。', chunkStatus: 2, chunkType: 'text' };
   const grant = () => ({ principalKey: knowledgePrincipalKey(context), tenantId: 10000, knowledgeBaseId: 'kb-test', knowledgeIds: ['doc-test'] });
   const server = createServer(async (req, res) => {
+    // Applies to failures/redirects too: a fixture must not leave a pooled socket
+    // pointing at a port that Windows can reassign to the next fixture.
+    res.setHeader('Connection', 'close');
     let raw = ''; for await (const chunk of req) raw += chunk;
     state.calls.push({ path: req.url, method: req.method, body: raw && JSON.parse(raw), key: req.headers['x-api-key'] });
     if (state.mode === 'timeout') return;
@@ -139,7 +145,6 @@ async function withUpstream(run) {
       parse_status: 'completed', enable_status: state.mode === 'disabled' ? 'disabled' : 'enabled', deleted_at: null };
     else data = { id: 'chunk-test', tenant_id: state.mode === 'tenant-mismatch' ? 20000 : 10000, knowledge_base_id: 'kb-test', knowledge_id: 'doc-test',
       updated_at: state.updated, content: state.text, status: state.chunkStatus, is_enabled: true, deleted_at: null, chunk_type: state.chunkType };
-    res.setHeader('Connection', 'close'); // Each fixture owns its short-lived port; do not reuse a prior fixture's pooled socket.
     res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ success: true, data }));
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));

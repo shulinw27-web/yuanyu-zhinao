@@ -4,6 +4,7 @@ export { listKnowledgeStudies, saveKnowledgeStudy, readKnowledgeStudy, restoreKn
 export { getEffectiveAccess } from '../../services/access-control-service.js';
 export { createLocalKnowledgeProvider, buildKnowledgeBrief } from '../../services/knowledge-evidence-service.js';
 export { answerKnowledgeQuestion, knowledgeAnswerPolicy } from '../../services/knowledge-answer-service.js';
+export { buildKnowledgeBusinessBrief } from '../../services/knowledge-business-brief-service.js';
 export { previewKnowledgeMaterial } from '../../services/knowledge-material-review-service.js';
 export { knowledgePrincipalKey } from '../../services/weknora-knowledge-provider.js';
 export { previewLibraryDocument, saveLibraryDocument, retractLibraryDocument, listLibraryDocuments, readLibraryDocument, searchLibraryDocuments } from '../../services/knowledge-library-service.js';
