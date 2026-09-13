@@ -4,14 +4,28 @@ const props = defineProps({ client: { type: Object, required: true }, evidence: 
 const emit = defineEmits(['wiki-draft']);
 const question = ref(''); const consent = ref(false); const result = ref(null); const error = ref(''); const busy = ref(false);
 const questions = ref([]); let generation = 0;
+const supplement = ref(null);
+const currentEvidence = computed(() => supplement.value?.evidence?.length ? supplement.value.evidence : props.evidence);
 const fingerprint = computed(() => JSON.stringify([props.evidence.map(item => item.citation), props.policy]));
-watch(fingerprint, () => { generation++; result.value = null; questions.value = []; consent.value = false; busy.value = false; });
+watch(fingerprint, () => { generation++; result.value = null; supplement.value = null; questions.value = []; consent.value = false; busy.value = false; });
+watch(question, () => { consent.value = false; });
+async function findMore() {
+  if (busy.value || !props.canWrite || !props.evidence.length || !question.value.trim()) return;
+  const ticket = ++generation; busy.value = true; consent.value = false; result.value = null; error.value = '';
+  try {
+    const response = await props.client.supplement({ question: question.value.trim(), citations: props.evidence.map(s => s.citation), confirmed: true });
+    if (ticket !== generation) return;
+    supplement.value = response;
+    if (!response.evidence.length) error.value = '所选文档中未召回新的依据；这不代表整个知识库没有相关规则。';
+  } catch { if (ticket === generation) { supplement.value = null; error.value = '补查未通过来源或权限核验，请重新检索。'; } }
+  finally { if (ticket === generation) busy.value = false; }
+}
 async function ask(purpose = 'answer') {
   if (busy.value || !consent.value || !props.canWrite || !props.policy?.enabled) return;
   const ticket = ++generation; busy.value = true; error.value = ''; result.value = null;
   const input = question.value.trim();
   try {
-    const response = await props.client.answer({ question: input, history: questions.value, citations: props.evidence.map(item => item.citation),
+    const response = await props.client.answer({ question: input, history: questions.value, citations: currentEvidence.value.map(item => item.citation),
       purpose, consent: { provider: props.policy.provider, model: props.policy.model, confirmed: true } });
     if (ticket !== generation) return;
     result.value = response; questions.value = [...questions.value, input].slice(-6);
@@ -30,7 +44,11 @@ onUnmounted(() => { generation++; });
 <template>
   <section class="knowledge-conversation" aria-label="基于选定资料的模型问答" :aria-busy="busy">
     <h3>与本次资料对话</h3>
-    <p>只使用当前 {{ evidence.length }} 条资料及最近 6 个用户问题。每轮重新核验来源，不把旧模型答案当成事实，不执行业务操作。</p>
+    <p>只使用当前 {{ currentEvidence.length }} 条资料及最近 6 个用户问题。每轮重新核验来源，不把旧模型答案当成事实，不执行业务操作。</p>
+    <section v-if="supplement?.evidence?.length" aria-label="补查来源预览">
+      <p>已在原来选定的文档内补查。以下片段将替换当前问答引用；请查看后重新确认模型发送权限。</p>
+      <details v-for="(item, index) in supplement.evidence" :key="index"><summary>{{ item.title }}</summary><blockquote>{{ item.excerpt }}</blockquote></details>
+    </section>
     <p v-if="!policy?.enabled">服务端尚未允许知识资料进入模型；原文检索和人工校对仍可使用。</p>
     <template v-else>
       <p>模型：{{ policy.provider }} / {{ policy.model }} · {{ policy.dataEgress }}</p>
@@ -48,6 +66,7 @@ onUnmounted(() => { generation++; });
     <form @submit.prevent="ask()">
       <label>问题或 Wiki 主题<textarea v-model="question" rows="3" maxlength="4000" :disabled="busy" placeholder="例如：供应商资质过期时，采购和仓库各应怎么做？" /></label>
       <div><button :disabled="busy || !canWrite || !policy?.enabled || !consent || !evidence.length || !question.trim()">{{ busy ? '核验来源并生成…' : '依据资料回答' }}</button>
+        <button type="button" :disabled="busy || !canWrite || !evidence.length || !question.trim()" @click="findMore">在所选文档内补查并预览</button>
         <button type="button" :disabled="busy || !canWrite || !policy?.enabled || !consent || !evidence.length || !question.trim()" @click="ask('wiki')">生成待校对 Wiki 草稿</button>
         <button type="button" :disabled="busy" @click="questions = []; result = null; consent = false">清空本轮上下文</button></div>
     </form>

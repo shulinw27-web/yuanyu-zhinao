@@ -19,8 +19,9 @@ export function createLocalKnowledgeProvider(context) {
   return {
     id,
     status: () => ({ provider: id, mode: 'lexical_bm25', configured: true, embedding: 'not_configured', rerank: 'not_configured' }),
-    async search({ query, limit = 5 }) {
-      const found = await searchLibraryDocuments({ ...scope, query, limit });
+    async search({ query, limit = 5, documentIds }) {
+      if (documentIds !== undefined && (!Array.isArray(documentIds) || !documentIds.length || documentIds.length > 5 || !documentIds.every(validKnowledgeId))) return knowledgeFailure('KNOWLEDGE_INPUT_INVALID');
+      const found = await searchLibraryDocuments({ ...scope, query, limit, documentIds });
       if (found.error) return found;
       return { ...found, results: found.results.map(item => ({ ...item, provider: id,
         citation: { ...item.citation, provider: id, contentHash: item.contentHash } })) };
@@ -53,11 +54,11 @@ const safeEvidence = item => item && typeof item.excerpt === 'string' && item.ex
 
 // No cache, model call, tools or side effects. The caller supplies a live page/identity guard.
 // This is an extractive briefing, NOT a generated business answer or a publication.
-export async function buildKnowledgeBrief({ provider, query, limit = 5, canRead }) {
+export async function buildKnowledgeBrief({ provider, query, limit = 5, canRead, documentIds }) {
   if (!validKnowledgeQuery(query, limit)) return knowledgeFailure('KNOWLEDGE_QUERY_INVALID');
   try {
     if (typeof canRead !== 'function' || !await canRead()) return knowledgeFailure('KNOWLEDGE_ACCESS_DENIED', 403);
-    const result = await provider.search({ query, limit });
+    const result = await provider.search({ query, limit, ...(documentIds ? { documentIds } : {}) });
     if (result.error) return result;
     if (!Array.isArray(result.results) || result.results.length > limit) return knowledgeFailure('KNOWLEDGE_PROVIDER_RESPONSE_INVALID', 502);
     const evidence = [];
@@ -67,6 +68,7 @@ export async function buildKnowledgeBrief({ provider, query, limit = 5, canRead 
       if (fresh.error) return knowledgeFailure('KNOWLEDGE_EVIDENCE_CHANGED', 409);
       // Search text and metadata cannot override the authoritative source read.
       if (!safeEvidence(fresh)) return knowledgeFailure('KNOWLEDGE_CONTENT_REJECTED');
+      if (documentIds && !documentIds.includes(fresh.id)) return knowledgeFailure('KNOWLEDGE_ACCESS_DENIED', 403);
       evidence.push(fresh);
       if (evidence.reduce((total, item) => total + item.excerpt.length, 0) > 16000) return knowledgeFailure('KNOWLEDGE_EVIDENCE_BUDGET_EXCEEDED', 413);
     }

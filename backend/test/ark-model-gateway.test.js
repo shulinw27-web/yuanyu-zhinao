@@ -12,6 +12,7 @@ import { readState } from '../src/repositories/runtime-state-repository.js';
 import { understandAgentTurn } from '../src/services/agent-turn-understanding-service.js';
 import { createAgentConversation, recordAgentConversationExchange, getAgentConversationContext } from '../src/services/agent-conversation-service.js';
 import { bufferDiagnosticStream } from '../../scripts/ark-stream-diagnostic.mjs';
+import { recoverReadPlanJson } from '../src/services/read-plan-json-recovery.js';
 
 const envelope = (answer = '你好，我可以协助分析问题和整理工作，尚未执行任何操作。') => ({ schemaVersion: 'agent-summary.v1', answer, proposedAction: null, claimsExecution: false, executionReceipt: null });
 const reply = (value = envelope()) => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(value), reasoning_content: 'never expose this reasoning' } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -29,6 +30,74 @@ const withArk = async (overrides, handler) => {
     resetModelGatewayObservability(); resetModelGovernanceForTest();
   }
 };
+
+test('DM-09: native read-plan transport preserves long JSON literals without widening chat limits', async () => {
+  await withArk({}, async () => {
+    const answer = { preconditions: [], outputs: [{ id: 'example', label: 'Ａ－甲', unit: '', expression: { op: 'literal', value: '业务说明'.repeat(2100) } }] };
+    globalThis.fetch = async (_url, request) => {
+      const schema = JSON.parse(JSON.parse(request.body).messages[0].content.split('不得用 agent-summary.v1 作为外层键，也不要返回 Schema 本身：')[1]);
+      assert.ok(schema.$defs.readExpression); assert.ok(schema.properties.answer.anyOf);
+      return reply(envelope(answer));
+    };
+    const result = await generateModelSummary({ ...options, answerContract: 'read_plan' });
+    assert.equal(result.source, 'ark'); assert.deepEqual(JSON.parse(result.text), answer);
+    globalThis.fetch = async () => reply(envelope(JSON.stringify(answer)));
+    assert.equal((await generateModelSummary({ ...options, answerContract: 'read_plan' })).source, 'output_safety');
+    assert.equal((await generateModelSummary(options)).source, 'output_safety');
+    for (const value of ['业务说明'.repeat(10001), `${'说明'.repeat(4500)}我已经提交采购订单`, `${'说明'.repeat(4500)}sk-${'a'.repeat(24)}`]) {
+      globalThis.fetch = async () => reply(envelope({ preconditions: [], outputs: [{ id: 'unsafe', label: '测试', unit: '', expression: { op: 'literal', value } }] }));
+      assert.equal((await generateModelSummary({ ...options, answerContract: 'read_plan' })).source, 'output_safety');
+    }
+  });
+});
+
+test('DM-09: read-plan output budget respects reservation and truncated completions are never accepted', async () => {
+  await withArk({ ARK_MAX_TOKENS: '2048', MODEL_MAX_RESERVED_OUTPUT_TOKENS: '3000' }, async () => {
+    globalThis.fetch = async (_url, request) => {
+      assert.equal(JSON.parse(request.body).max_tokens, 3000);
+      assert.equal(JSON.parse(request.body).response_format.type, 'json_schema');
+      assert.equal(JSON.parse(request.body).response_format.json_schema.strict, true);
+      // Even syntactically complete JSON is not trusted if the provider reports truncation.
+      return new Response(JSON.stringify({ choices: [{ finish_reason: 'length', message: { content: JSON.stringify(envelope({ unsupported: true, reason: 'missing_rule', questions: ['说明规则'] })) } }] }));
+    };
+    const result = await generateModelSummary({ ...options, answerContract: 'read_plan' });
+    assert.equal(result.source, 'output_safety'); assert.deepEqual(result.safety.signals, ['output_token_limit']);
+    globalThis.fetch = async (_url, request) => { assert.equal(JSON.parse(request.body).max_tokens, 2048); return reply(); };
+    assert.equal((await generateModelSummary(options)).source, 'ark');
+  });
+});
+
+test('DM-11: JSON syntax diagnostics contain only size, offset and masked punctuation, never rejected text', async () => {
+  await withArk({}, async () => {
+    const raw = '{"answer":"synthetic confidential text",invalid}';
+    globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ message: { content: raw } }] }));
+    const result = await generateModelSummary({ ...options, answerContract: 'read_plan' });
+    assert.equal(result.source, 'output_safety'); assert.equal(result.jsonDiagnostics.characters, raw.length);
+    assert.ok(Number.isInteger(result.jsonDiagnostics.offset));
+    assert.match(result.jsonDiagnostics.syntax, /^[x{}[\],:"'\\]*$/);
+    assert.doesNotMatch(JSON.stringify(result), /confidential/);
+  });
+});
+
+test('DM-13: bounded bracket recovery preserves values and never repairs or authorizes actions', async () => {
+  const answer = { preconditions: [], outputs: [{ id: 'difference', label: '括号 ] 与引号 " 保留', unit: '', expression: ['sub', 'literal', 8, 'literal', 3] }] };
+  const breakEnvelope = value => JSON.stringify(value).replace(',3]}', ',3]]}');
+  const broken = breakEnvelope(envelope(answer));
+  assert.deepEqual(recoverReadPlanJson(broken), { parsed: envelope(answer), removedClosingBrackets: 1 });
+  for (const raw of ['{"a":1,}', '{"a":1', '{"a":1} trailing', '{"a":1}]', '{"a":[1}}', '{"a":[1]]]]]]]]]]}']) assert.equal(recoverReadPlanJson(raw), null);
+  await withArk({}, async () => {
+    const respond = text => new Response(JSON.stringify({ choices: [{ message: { content: text } }] }));
+    globalThis.fetch = async () => respond(broken);
+    const result = await generateModelSummary({ ...options, answerContract: 'read_plan' });
+    assert.equal(result.source, 'ark'); assert.deepEqual(JSON.parse(result.text), answer); assert.equal(result.syntaxRecovery.removedClosingBrackets, 1);
+    assert.equal((await generateModelSummary(options)).source, 'output_safety');
+    for (const unsafe of [{ ...envelope(answer), claimsExecution: true }, { ...envelope(answer), proposedAction: 'write' },
+      envelope({ ...answer, secret: `sk-${'a'.repeat(24)}` })]) {
+      globalThis.fetch = async () => respond(breakEnvelope(unsafe));
+      assert.equal((await generateModelSummary({ ...options, answerContract: 'read_plan' })).source, 'output_safety');
+    }
+  });
+});
 
 test('ontology analysis requests a native structured answer and safely serializes it for downstream validation', async () => {
   await withArk({}, async () => {

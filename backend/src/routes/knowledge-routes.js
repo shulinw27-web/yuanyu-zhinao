@@ -1,6 +1,6 @@
 import { previewLibraryDocument, saveLibraryDocument, retractLibraryDocument, listLibraryDocuments, readLibraryDocument, searchLibraryDocuments,
   listKnowledgeStudies, saveKnowledgeStudy, readKnowledgeStudy, restoreKnowledgeStudy, prepareKnowledgeStudy,
-  createLocalKnowledgeProvider, buildKnowledgeBrief, getEffectiveAccess, loadWeKnoraRuntimeProvider, answerKnowledgeQuestion, knowledgeAnswerPolicy, previewKnowledgeMaterial, knowledgePrincipalKey, buildKnowledgeBusinessBrief, listKnowledgeBusinessPlans } from '../domains/governance/public-api.js';
+  createLocalKnowledgeProvider, buildKnowledgeBrief, getEffectiveAccess, loadWeKnoraRuntimeProvider, answerKnowledgeQuestion, supplementKnowledgeSources, proposeSemanticReadPlan, knowledgeAnswerPolicy, previewKnowledgeMaterial, knowledgePrincipalKey, buildKnowledgeBusinessBrief, listKnowledgeBusinessPlans } from '../domains/governance/public-api.js';
 
 export async function handleKnowledgeRoutes({ req, res, url, role, agentIdentity, effectiveAccess, selectActionRole, denyButton, readBody, send }) {
   const base = ['/api/agent/knowledge-library', '/api/semantic-operations/knowledge-library']
@@ -31,6 +31,16 @@ export async function handleKnowledgeRoutes({ req, res, url, role, agentIdentity
   if (req.method === 'POST' && url.pathname === `${base}/answer`) {
     if (!selectActionRole(writePermission)) { denyButton(writePermission); return true; }
     return reply(await answerKnowledgeQuestion({ body: await readBody(req), resolveProvider, canRead, safetyIdentifier: `knowledge-${role}` }));
+  }
+  if (req.method === 'POST' && url.pathname === `${base}/answer-sources`) {
+    if (!selectActionRole(writePermission)) { denyButton(writePermission); return true; }
+    return reply(await supplementKnowledgeSources({ body: await readBody(req), resolveProvider,
+      canRead: () => { const access = getEffectiveAccess(role, agentIdentity); return access.pagePermissionIds.includes(page) && access.buttonPermissionIds.includes(writePermission); } }));
+  }
+  if (req.method === 'POST' && url.pathname === `${base}/read-plan-proposal` && semantic) {
+    if (!selectActionRole(writePermission)) { denyButton(writePermission); return true; }
+    return reply(await proposeSemanticReadPlan({ body: await readBody(req), safetyIdentifier: `semantic-read-plan-${role}`,
+      canRead: () => { const access = getEffectiveAccess(role, agentIdentity); return access.pagePermissionIds.includes(page) && access.buttonPermissionIds.includes(writePermission); } }));
   }
   if (req.method === 'POST' && url.pathname === `${base}/studies/prepare`) {
     if (!selectActionRole(writePermission)) { denyButton(writePermission); return true; }

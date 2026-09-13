@@ -13,6 +13,8 @@ export function createKnowledgeClient(request, surface) {
     saveStudy: (id, body) => request(`${base}/studies/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }),
     providers: () => request(`${base}/providers`),
     answer: body => post('/answer', body),
+    supplement: body => post('/answer-sources', body),
+    proposeReadPlan: surface === 'semantic-operations' ? body => post('/read-plan-proposal', body) : undefined,
     jointBrief: surface === 'agent' ? body => post('/joint-brief', body) : undefined,
     jointPlans: surface === 'agent' ? () => request(`${base}/joint-plans`) : undefined,
     previewMaterial: body => post('/materials/preview', body),

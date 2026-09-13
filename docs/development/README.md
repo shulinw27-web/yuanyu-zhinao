@@ -11,6 +11,8 @@
 - [真实开发与系统联调准备事项](DEVELOPMENT_READINESS.md)
 - [开发路线](DEVELOPMENT_ROADMAP.md)
 - [参考 WeKnora 升级：实施、接口与验收](WEKNORA_UPGRADE_ACCEPTANCE.md)
+- [双 Agent × WeKnora 合成业务联调及问题清单](DUAL_AGENT_WEKNORA_MOCK_TEST.md)
+- [双 Agent × WeKnora 修复与回归](DUAL_AGENT_WEKNORA_REPAIR.md)
 - [历史查询与受控样本映射接入指南](SEMANTIC_DATA_CONTRACT_GUIDE.md)
 - [火山方舟模型接入与测试](ARK_MODEL_INTEGRATION.md)
 - [双端多模态验证与修复报告](AGENT_MULTIMODAL_ACCEPTANCE_2026-09-07.md)

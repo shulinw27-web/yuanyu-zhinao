@@ -1,5 +1,9 @@
 # 项目文档中心
 
+最新修复：[双 Agent × WeKnora 回归](development/DUAL_AGENT_WEKNORA_REPAIR.md)。已补齐问答契约/诊断、规则召回、双端选定文档补查和运营只读方案候选；简单授信方案已完成生成到发布后业务读取验证，仍需人工校对和独立回放。
+
+2026-09-13 最新实测：[双 Agent × WeKnora 合成业务联调](development/DUAL_AGENT_WEKNORA_MOCK_TEST.md)。18 类对象、22 条关系候选及人工审定后的业务解释通过；首轮 21/23，问答、Wiki 稳定性及关键词漏检仍待修复，不代表全自动建模验收。
+
 第七批：[发布方案目录与只读联合核验](guides/KNOWLEDGE_WORKSPACE_GUIDE.md) · [实现与测试边界](development/WEKNORA_UPGRADE_ACCEPTANCE.md)。最多三个经回放方案，每轮明确选一个，模型变更拒绝旧选择；不属于自动联合推理或生产放行。
 
 最新第五批（2026-09-13）：[真实 WeKnora 项目接入验收](development/WEKNORA_UPGRADE_ACCEPTANCE.md) · [本机复现与使用](guides/KNOWLEDGE_WORKSPACE_GUIDE.md)。专用只读 Key/合成文档绑定已启用，双端检索及各三轮方舟回答通过；生产共享与业务联合规划仍待完成。下文旧批次“尚未接入”指当时状态。

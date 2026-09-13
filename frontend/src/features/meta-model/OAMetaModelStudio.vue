@@ -4,7 +4,7 @@ import OntologyScenarioPanel from './OntologyScenarioPanel.vue';
 import OntologyCaseReplay from './OntologyCaseReplay.vue';
 import OntologyReadPlanPanel from './OntologyReadPlanPanel.vue';
 
-const props = defineProps({ metaModel: Object, draft: Object, authoringProfile: Object, simulation: Object, semanticContext: Object, role: String, message: String, replayCases: Function, buttonPermissionIds: { type: Array, default: () => [] } });
+const props = defineProps({ metaModel: Object, draft: Object, authoringProfile: Object, simulation: Object, semanticContext: Object, role: String, message: String, replayCases: Function, knowledgeClient: Object, buttonPermissionIds: { type: Array, default: () => [] } });
 const emit = defineEmits(['save-draft', 'validate-draft', 'simulate-build', 'publish']);
 const localDraft = ref(null); const selectedId = ref(''); const relationFrom = ref(''); const relationTo = ref(''); const relationLabel = ref('关联'); const draggingId = ref('');
 const savedDraftShape = ref('');
@@ -140,7 +140,7 @@ const saveDraft = () => emit('save-draft', { modelingProfile: localDraft.value.m
 <template>
   <section v-if="metaModel && localDraft" class="panel meta-model-studio">
     <OntologyScenarioPanel :draft="localDraft" :can-edit="canModel" :profile="authoringProfile" :selected-object="selectedObject" :simulation="simulation" @replace-draft="localDraft = $event; selectedId = $event.objectTypes[0]?.id || ''" @change-profile="localDraft.modelingProfile = $event" @change-granularity="selectedObject.granularity = $event" />
-    <OntologyReadPlanPanel :draft="localDraft" :can-edit="canModel" @apply-plan="localDraft.scenario.readPlans = $event; localDraft.scenario.requireCaseReplay = true" />
+    <OntologyReadPlanPanel :draft="localDraft" :can-edit="canModel" :client="knowledgeClient" :saved-fingerprint="draft?.fingerprint" :has-unsaved-changes="hasUnsavedChanges" @apply-plan="localDraft.scenario.readPlans = $event; localDraft.scenario.requireCaseReplay = true" />
     <OntologyCaseReplay :fingerprint="draft?.fingerprint" :role="role" :read-plan-mode="Boolean(localDraft.scenario?.readPlans?.length)" :disabled="!canValidate || hasUnsavedChanges" :execute="replayCases" />
     <p v-if="hasUnsavedChanges" role="status">有未保存修改。请先保存，再校验、模拟构建或登记；旧版本的通过结果不适用于当前编辑。</p>
     <div class="section-header"><div><span class="eyebrow">SEMANTIC META MODEL WORKBENCH · SEMANTICA</span><h2>可视化语义建模</h2><p>候选对象和关系来自 Semantica 图谱；将它们加入画布、补齐业务规则后，再登记为智脑可用的语义模型。</p></div><div class="meta-status"><b>{{ canModel ? '可编辑' : '只读查看' }}</b><small>{{ metaModel.code }} · 草稿 {{ localDraft.id }}</small></div></div>

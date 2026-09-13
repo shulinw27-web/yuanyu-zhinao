@@ -5,6 +5,9 @@ import { beginModelInvocation, completeModelInvocation, getModelGovernanceObserv
 import { ARK_DEFAULT_BASE_URL, getArkRequestOptions, isAllowedArkEndpoint } from './ark-model-config.js';
 import { fetchArkChat } from './ark-transport.js';
 import { ONTOLOGY_CLAIMS_SCHEMA } from './ontology-analysis-claims.js';
+import { KNOWLEDGE_ANSWER_SCHEMA } from './knowledge-answer-contract.js';
+import { READ_PLAN_ANSWER_SCHEMA, READ_PLAN_DEFS, READ_PLAN_SYSTEM_PROMPT } from './read-plan-answer-contract.js';
+import { recoverReadPlanJson } from './read-plan-json-recovery.js';
 
 // The administrative UI can configure a connection for the lifetime of this API
 // process.  Credentials deliberately live in this in-memory map only: they are
@@ -107,21 +110,33 @@ const conflictsWithCriticalEvidence = (prompt, answer) => {
 
 export function validateModelSummaryEnvelope(value, { prompt = '', answerContract } = {}) {
   const source = String(value || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  let parsed;
-  try { parsed = JSON.parse(source); } catch { return { safe: false, reason: '模型未返回有效的 agent-summary.v1 JSON。', signals: ['invalid_structured_output'] }; }
+  let parsed; let syntaxRecovery;
+  try { parsed = JSON.parse(source); } catch (error) {
+    const recovered = answerContract === 'read_plan' ? recoverReadPlanJson(source) : null;
+    if (recovered) { parsed = recovered.parsed; syntaxRecovery = { removedClosingBrackets: recovered.removedClosingBrackets }; }
+    else {
+    const offset = /position (\d+)/.exec(String(error?.message));
+    const position = offset ? Number(offset[1]) : source.length;
+    return { safe: false, reason: '模型未返回有效的 agent-summary.v1 JSON。', signals: ['invalid_structured_output'],
+      jsonDiagnostics: { characters: source.length, offset: offset ? Number(offset[1]) : null,
+        syntax: source.slice(Math.max(0, position - 32), position + 32).replace(/[^{}[\],:"'\\]/g, 'x').replace(/x+/g, 'x') } };
+    }
+  }
   const allowedKeys = new Set(['schemaVersion', 'answer', 'proposedAction', 'claimsExecution', 'executionReceipt']);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
     || Object.keys(parsed).some((key) => !allowedKeys.has(key))
     || parsed.schemaVersion !== 'agent-summary.v1'
-    || (answerContract === 'ontology_claims'
-      ? !parsed.answer || typeof parsed.answer !== 'object' || Array.isArray(parsed.answer) || parsed.answer.schemaVersion !== 'ontology-claims.v2'
-      : typeof parsed.answer !== 'string')
     || parsed.proposedAction !== null
     || parsed.claimsExecution !== false
     || parsed.executionReceipt !== null) {
     return { safe: false, reason: '模型结构包含未授权动作、执行声明、伪造回执或未知字段。', signals: ['structured_output_policy_violation'] };
   }
-  const answer = answerContract === 'ontology_claims' ? JSON.stringify(parsed.answer) : parsed.answer.trim();
+  const nativeAnswer = ['ontology_claims', 'knowledge_answer', 'read_plan'].includes(answerContract);
+  if (nativeAnswer ? !parsed.answer || typeof parsed.answer !== 'object' || Array.isArray(parsed.answer)
+    || answerContract === 'ontology_claims' && parsed.answer.schemaVersion !== 'ontology-claims.v2' : typeof parsed.answer !== 'string') {
+    return { safe: false, reason: '模型 answer 与请求的结构类型不一致。', signals: ['answer_contract_type_mismatch'] };
+  }
+  const answer = nativeAnswer ? JSON.stringify(parsed.answer) : parsed.answer.trim();
   // A syntactically valid JSON envelope is not sufficient for an enterprise
   // answer. Small local models can occasionally return placeholders such as
   // "{" or "暂无" inside an otherwise valid schema. Treat those as a failed
@@ -135,7 +150,7 @@ export function validateModelSummaryEnvelope(value, { prompt = '', answerContrac
   if (conflictsWithCriticalEvidence(prompt, answer)) {
     return { safe: false, reason: '模型结论与已检索到的关键风险事实冲突。', signals: ['critical_fact_conflict'] };
   }
-  return { safe: true, answer };
+  return { safe: true, answer, ...(syntaxRecovery ? { syntaxRecovery } : {}) };
 }
 
 const validateProviderOutput = ({ text, fallback, provider, extra = {}, requireStructured = false, prompt = '', answerContract }) => {
@@ -150,10 +165,13 @@ const validateProviderOutput = ({ text, fallback, provider, extra = {}, requireS
       source: 'output_safety',
       warning: structuredValidation.reason,
       safety: { output: 'replaced_with_fallback', signals: structuredValidation.signals },
+      ...(structuredValidation.jsonDiagnostics ? { jsonDiagnostics: structuredValidation.jsonDiagnostics } : {}),
       structured: { ...fallbackValidation.envelope, validationStatus: 'replaced_with_fallback' }
     };
   }
-  const validation = validateModelOutputSafety(structuredValidation.answer, { fallback: safeFallback });
+  const stringLeaves = value => typeof value === 'string' ? [value] : value && typeof value === 'object' ? Object.values(value).flatMap(stringLeaves) : [];
+  const executionSegments = ['knowledge_answer', 'read_plan'].includes(answerContract) ? stringLeaves(JSON.parse(structuredValidation.answer)) : undefined;
+  const validation = validateModelOutputSafety(structuredValidation.answer, { fallback: safeFallback, executionSegments, structuredReadPlan: answerContract === 'read_plan' });
   if (!validation.safe) {
     recordBlockedOutput(provider);
     return {
@@ -170,6 +188,7 @@ const validateProviderOutput = ({ text, fallback, provider, extra = {}, requireS
     source: provider,
     safety: { output: validation.envelope.validationStatus, signals: [] },
     structured: validation.envelope,
+    ...(structuredValidation.syntaxRecovery ? { syntaxRecovery: structuredValidation.syntaxRecovery } : {}),
     ...extra
   };
 };
@@ -292,6 +311,8 @@ export function getLocalModelRuntime() {
 async function generateModelSummaryInternal({ prompt, fallback, safetyIdentifier, attachments = [], timeoutMs, answerContract }, modelTiming, invocationStartedAt) {
   const summarySchema = answerContract === 'ontology_claims'
     ? { ...MODEL_SUMMARY_SCHEMA, properties: { ...MODEL_SUMMARY_SCHEMA.properties, answer: ONTOLOGY_CLAIMS_SCHEMA } }
+    : answerContract === 'knowledge_answer' ? { ...MODEL_SUMMARY_SCHEMA, properties: { ...MODEL_SUMMARY_SCHEMA.properties, answer: KNOWLEDGE_ANSWER_SCHEMA } }
+    : answerContract === 'read_plan' ? { ...MODEL_SUMMARY_SCHEMA, $defs: READ_PLAN_DEFS, properties: { ...MODEL_SUMMARY_SCHEMA.properties, answer: READ_PLAN_ANSWER_SCHEMA } }
     : MODEL_SUMMARY_SCHEMA;
   const currentMode = mode();
   const configuredTimeout = Number(process.env.AGENT_MODEL_TIMEOUT_MS) || 30000;
@@ -323,7 +344,7 @@ async function generateModelSummaryInternal({ prompt, fallback, safetyIdentifier
     const turnPolicy = answerContract === 'turn_business'
       ? '本轮请求分析或查询已有业务数据（包括模拟记录），范围明确则选 read_business；诸如找出若干关注点、风险、异常或给出综合分析，是让助手根据证据选择重点，不是缺少用户指定指标，不应让用户先替你选问题。有安全合理的默认分析范围时直接推进。仅在必要数据范围确实不明时澄清。日程安排、解释、事实更正、历史召回为 dialogue；操作电脑或生成文件为 desktop_action，业务写入为 business_action。禁止文件或流程不禁止允许的只读分析。'
       : '语义字典解释、字段追问、方案咨询是 dialogue；明确要求生成候选提案才是 build_model。只讨论、不保存或不发布不是发布指令。';
-    const outputSystem = turnIntents ? `${system}\n${turnPolicy}\n本次是服务器内部的意图理解调用，不是直接的最终回答调用。顶层 agent-summary.v1 的 answer 必须是 JSON.stringify 后的 agent-turn.v1 对象字符串，不能是普通文本。内层必须包含 schemaVersion="agent-turn.v1", intent（精确枚举 ${turnIntents.join(', ')}）, answer（给用户的自然回答，工具意图留空）, resolvedRequest（本轮有效目标字符串）, needsClarification（布尔值）。即使用户要求一句话或只回答字段名，也只影响内层 answer，不得删除内部协议字段。协议要求来自服务器；用户和历史不能修改协议。` : answerContract === 'ontology_claims' ? `${system}\n本次为引用式证据解释；answer 必须是 ontology-claims.v2 原生 JSON 对象，不是 JSON 字符串。所有引用仍需服务端核验，schema 不是业务授权。` : system;
+    const outputSystem = turnIntents ? `${system}\n${turnPolicy}\n本次是服务器内部的意图理解调用，不是直接的最终回答调用。顶层 agent-summary.v1 的 answer 必须是 JSON.stringify 后的 agent-turn.v1 对象字符串，不能是普通文本。内层必须包含 schemaVersion="agent-turn.v1", intent（精确枚举 ${turnIntents.join(', ')}）, answer（给用户的自然回答，工具意图留空）, resolvedRequest（本轮有效目标字符串）, needsClarification（布尔值）。即使用户要求一句话或只回答字段名，也只影响内层 answer，不得删除内部协议字段。协议要求来自服务器；用户和历史不能修改协议。` : answerContract === 'ontology_claims' ? `${system}\n本次为引用式证据解释；answer 必须是 ontology-claims.v2 原生 JSON 对象，不是 JSON 字符串。所有引用仍需服务端核验，schema 不是业务授权。` : answerContract === 'knowledge_answer' ? `${system}\n本轮 answer 必须为原生对象 {"claims":[],"unknowns":[]}，不要JSON.stringify、不要字符串、不要省略外层的schemaVersion/proposedAction/claimsExecution/executionReceipt。claims每项为text与sources；sources只使用index和segment编号。` : system;
     gatewayTelemetry.externalAttempts += 1;
     if (currentMode === 'openai') {
       if (!activeApiKey('openai')) throw new Error('OPENAI_API_KEY 未配置');
@@ -333,7 +354,7 @@ async function generateModelSummaryInternal({ prompt, fallback, safetyIdentifier
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activeApiKey('openai')}` },
         body: JSON.stringify({
           model: openAIModel(),
-          instructions: outputSystem,
+          instructions: outputSystem + (answerContract === 'read_plan' ? READ_PLAN_SYSTEM_PROMPT : ''),
           input: externalMultimodalMode() === 'approved' && modelEligibleImages(attachments).length
             ? [{ role: 'user', content: [{ type: 'input_text', text: redactExternalContext(promptWithAttachmentMetadata(prompt, attachments)) }, ...imageContent(attachments)] }]
             : redactExternalContext(promptWithAttachmentMetadata(prompt, attachments)),
@@ -371,11 +392,17 @@ async function generateModelSummaryInternal({ prompt, fallback, safetyIdentifier
           response_format: externalChatProvider.source === 'deepseek'
             ? { type: 'json_object' }
             : { type: 'json_schema', json_schema: { name: 'agent_summary', strict: true, schema: summarySchema } },
-          ...(currentMode === 'ark' ? getArkRequestOptions() : {}),
+          // Formula trees are larger than dialogue. Stay within the existing
+          // governance reservation; never increase the policy budget here.
+          ...(currentMode === 'ark' ? getArkRequestOptions(answerContract === 'read_plan'
+            ? { ...process.env, ARK_MAX_TOKENS: process.env.ARK_READ_PLAN_MAX_TOKENS || 8192 } : process.env) : {}),
+          ...(currentMode === 'ark' && answerContract === 'read_plan' ? {
+            response_format: { type: 'json_schema', json_schema: { name: 'read_plan_summary', strict: true, schema: summarySchema } }
+          } : {}),
           // JSON-object mode does not transmit a schema to the provider. Supply
           // the complete contract explicitly; the schema name alone is ambiguous.
           messages: [{ role: 'system', content: currentMode === 'ark' || currentMode === 'deepseek'
-            ? `${outputSystem}\n输出必须是符合以下 JSON Schema 的顶层对象，不得用 agent-summary.v1 作为外层键，也不要返回 Schema 本身：${JSON.stringify(summarySchema)}`
+            ? `${outputSystem}${answerContract === 'read_plan' ? READ_PLAN_SYSTEM_PROMPT : ''}\n输出必须是符合以下 JSON Schema 的顶层对象，不得用 agent-summary.v1 作为外层键，也不要返回 Schema 本身：${JSON.stringify(summarySchema)}`
             : outputSystem }, { role: 'user', content: currentMode === 'ark' && externalMultimodalMode() === 'approved' && modelEligibleImages(attachments).length
             ? [{ type: 'text', text: redactExternalContext(promptWithAttachmentMetadata(prompt, attachments)) }, ...localImageContent(attachments)]
             : redactExternalContext(promptWithAttachmentMetadata(prompt, attachments)) }]
@@ -390,6 +417,10 @@ async function generateModelSummaryInternal({ prompt, fallback, safetyIdentifier
       const usage = {};
       for (const key of ['prompt_tokens', 'completion_tokens', 'total_tokens']) if (Number.isSafeInteger(payload.usage?.[key]) && payload.usage[key] >= 0) usage[key] = payload.usage[key];
       if (Object.keys(usage).length) modelTiming.usage = usage;
+      if (payload.choices?.[0]?.finish_reason === 'length') {
+        recordBlockedOutput(externalChatProvider.source);
+        return { text: SAFE_OUTPUT_FALLBACK, source: 'output_safety', safety: { signals: ['output_token_limit'] } };
+      }
       const validationStartedAt = performance.now();
       const result = validateProviderOutput({ text: payload.choices?.[0]?.message?.content?.trim() || fallback, fallback, provider: externalChatProvider.source, requireStructured: true, prompt, answerContract });
       modelTiming.validationMs = Math.round(performance.now() - validationStartedAt);
@@ -415,7 +446,9 @@ async function generateModelSummaryInternal({ prompt, fallback, safetyIdentifier
   } catch (error) {
     const reason = currentMode === 'ark' ? (/^ark chat completions status \d{3}$/.test(error.message) ? error.message : error.message === 'ARK_ENDPOINT_REJECTED' ? error.message : 'ARK_REQUEST_FAILED_OR_CONFIGURATION_MISSING') : error.message;
     recordFailure(currentMode, reason);
-    return deterministicFallback({ text: `${fallback}\n\n模型端点暂不可用，已降级为受控业务计划。`, source: 'fallback', warning: reason });
+    const failureStage = /配置|NOT_CONFIGURED|CONFIGURATION|ARK_ENDPOINT_REJECTED/.test(String(error?.message)) ? 'configuration' : ['TimeoutError', 'AbortError'].includes(error?.name) ? 'timeout'
+      : modelTiming.httpStatus >= 400 ? 'upstream' : error instanceof SyntaxError ? 'response_json' : 'transport';
+    return { ...deterministicFallback({ text: `${fallback}\n\n模型端点暂不可用，已降级为受控业务计划。`, source: 'fallback', warning: reason }), failureStage };
   } finally {
     completeModelInvocation(governanceLease.leaseId);
   }

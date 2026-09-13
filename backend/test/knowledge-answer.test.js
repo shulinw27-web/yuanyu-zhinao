@@ -6,6 +6,9 @@ import { createLocalKnowledgeProvider, buildKnowledgeBrief } from '../src/servic
 import { answerKnowledgeQuestion, knowledgeAnswerPolicy, knowledgeQuoteSegments } from '../src/services/knowledge-answer-service.js';
 import { isLongTermGoalStatement } from '../src/services/agent-dialogue-intent-service.js';
 import { runPrivateAgent } from '../src/services/private-agent-service.js';
+import { validateModelSummaryEnvelope } from '../src/services/local-model-gateway.js';
+import { supplementKnowledgeSources } from '../src/services/knowledge-supplement-service.js';
+import { validateModelOutputSafety } from '../src/services/prompt-security-service.js';
 const context = { identityScope: { tenantId: 'answer-fixture', subjectId: 'alice' }, roleId: 'executive' };
 const policy = () => ({ enabled: true, provider: 'ark', model: 'synthetic-model' });
 const original = '供应商资质过期需采购主管复核。';
@@ -95,4 +98,52 @@ test('knowledge answer: reference selection preserves original full-width punctu
   assert.equal(invalid.status, 502);
   const unicode = '🚀'.repeat(601);
   assert.equal(knowledgeQuoteSegments(unicode).join(''), unicode);
+});
+
+test('DM-01/02: native knowledge object and bounded contract retry never replay arbitrary model output', async () => {
+  const options = await fixture(); let calls = 0;
+  const answer = { claims: [], unknowns: ['本轮片段不足，需要补查规则。'] };
+  const envelope = { schemaVersion: 'agent-summary.v1', answer, proposedAction: null, claimsExecution: false, executionReceipt: null };
+  assert.equal(validateModelSummaryEnvelope(JSON.stringify(envelope), { answerContract: 'knowledge_answer' }).safe, true);
+  assert.equal(validateModelSummaryEnvelope(JSON.stringify({ ...envelope, claimsExecution: true }), { answerContract: 'knowledge_answer' }).safe, false);
+  const result = await answerKnowledgeQuestion({ ...options, generate: async input => {
+    calls++; assert.equal(input.answerContract, 'knowledge_answer'); assert.ok(input.timeoutMs <= 45000);
+    assert.doesNotMatch(input.prompt, /secret-provider-response/);
+    return calls === 1 ? { source: 'ark', text: '{secret-provider-response' } : options.generate();
+  } });
+  assert.equal(calls, 2); assert.equal(result.diagnostics.attempts[0].stage, 'answer_json'); assert.equal(result.modelCalled, true);
+  calls = 0;
+  const failed = await answerKnowledgeQuestion({ ...options, generate: async () => { calls++; return { source: 'fallback', failureStage: 'upstream', modelTiming: { httpStatus: 503 }, warning: 'private upstream' }; } });
+  assert.equal(calls, 2); assert.equal(failed.status, 503); assert.doesNotMatch(JSON.stringify(failed), /private upstream/);
+});
+
+test('DM-01: no retry for revoked access, configuration policy or upstream authentication', async () => {
+  const options = await fixture(); let calls = 0; let allowed = true;
+  const result = await answerKnowledgeQuestion({ ...options, canRead: () => allowed, generate: async () => { calls++; allowed = false; return { source: 'fallback', failureStage: 'timeout' }; } });
+  assert.equal(result.status, 403); assert.equal(calls, 1);
+  for (const generated of [{ source: 'model_governance' }, { source: 'prompt_safety' }, { source: 'fallback', failureStage: 'upstream', modelTiming: { httpStatus: 401 } }]) {
+    calls = 0; await answerKnowledgeQuestion({ ...options, generate: async () => { calls++; return generated; } }); assert.equal(calls, 1);
+  }
+});
+
+test('DM-04: supplement searches only selected documents and previews without cloud invocation', async () => {
+  const options = await fixture();
+  await saveLibraryDocument({ ...context, id: 'other', body: { expectedRevision: 0, title: '未选择制度', source: '合成规范', sourceVersion: '1', kind: 'policy', text: '供应商资质由未选择部门复核。' } });
+  const input = { ...options, body: { question: '供应商资质', citations: options.body.citations, confirmed: true } };
+  const result = await supplementKnowledgeSources(input);
+  assert.equal(result.modelCalled, false); assert.equal(result.consentRequired, true); assert.equal(result.searches, 1);
+  assert.equal(result.evidence.length, 1); assert.equal(result.evidence[0].id, 'supplier');
+  assert.equal((await supplementKnowledgeSources({ ...input, body: { ...input.body, confirmed: false } })).status, 400);
+  assert.equal((await supplementKnowledgeSources({ ...input, canRead: () => false })).status, 403);
+});
+
+test('DM-01: execution safety does not join unrelated JSON string leaves or negate a later real claim', () => {
+  const texts = ['审批通过不等于货权转移已执行', 'OA审批需要回执核验'];
+  assert.equal(validateModelOutputSafety(JSON.stringify(texts), { executionSegments: texts }).safe, true);
+  assert.equal(validateModelOutputSafety('审批通过不等于货权转移已执行OA业务数据。').safe, true);
+  for (const text of ['我已执行OA业务数据修改。', '不能认定已执行，但我已创建采购订单。', '不代表已执行然而我已经提交采购订单。']) {
+    assert.equal(validateModelOutputSafety(text).safe, false, text);
+  }
+  const forged = ['审批通过不等于货权转移已执行', '我已创建采购订单'];
+  assert.equal(validateModelOutputSafety(JSON.stringify(forged), { executionSegments: forged }).safe, false);
 });

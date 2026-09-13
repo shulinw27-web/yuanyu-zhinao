@@ -26,7 +26,8 @@ export async function runOntologyReadReplay({ body, role, identityScope }) {
       rows.push({ planId: plan.id, kind: 'positive', status: passed ? 'passed' : 'failed', actual: values });
     } catch (error) {
       const allowedErrors = ['READ_ROOT_NOT_FOUND', 'READ_LOOKUP_NOT_UNIQUE', 'READ_RECORD_CONFLICT', 'READ_RECORD_SCOPE', 'READ_REQUIRED_FIELD', 'READ_EXPECTED_SINGLE_RECORD', 'READ_PRECONDITION_FAILED', 'READ_GRAPH_CYCLE', 'READ_DANGLING_EDGE', 'READ_EDGE_STATE_UNKNOWN', 'READ_EXPANSION_DEPTH_LIMIT'];
-      rows.push({ planId: plan.id, kind: 'negative', status: allowedErrors.includes(error.message) && error.message === item.expectedError ? 'passed' : 'failed', code: allowedErrors.includes(error.message) ? error.message : 'READ_REPLAY_FAILED' });
+      const diagnosticErrors = [...allowedErrors, 'READ_NOT_NUMERIC', 'READ_NOT_BOOLEAN', 'READ_COMPUTATION_LIMIT', 'READ_OUTPUT_INVALID', 'READ_FIELD_TYPE', 'READ_FIELD_VALUE'];
+      rows.push({ planId: plan.id, kind: 'negative', status: allowedErrors.includes(error.message) && error.message === item.expectedError ? 'passed' : 'failed', code: diagnosticErrors.includes(error.message) ? error.message : 'READ_REPLAY_FAILED' });
     }
   }
   const coverage = plans.every(p => ['positive', 'negative'].every(kind => rows.some(r => r.planId === p.id && r.kind === kind && r.status === 'passed')));

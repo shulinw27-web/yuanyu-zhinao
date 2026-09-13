@@ -26,6 +26,12 @@ for (const surface of ['agent', 'semantic-operations']) {
     assert.ok(calls[10].path.endsWith('/studies/study-1?revision=2'));
     assert.equal(calls[11].method, 'PUT'); assert.equal(calls[12].method, 'POST');
     assert.ok(calls.every(call => !call.headers));
+    await client.supplement({ question: '审批回执', citations: [], confirmed: true });
+    assert.ok(calls.at(-1).path.endsWith('/answer-sources'));
+    if (surface === 'semantic-operations') {
+      await client.proposeReadPlan({ request: '生成额度计算预览' });
+      assert.ok(calls.at(-1).path.endsWith('/read-plan-proposal'));
+    } else assert.equal(client.proposeReadPlan, undefined);
     if (surface === 'agent') {
       await client.jointPlans();
       assert.equal(calls.at(-1).path, '/agent/knowledge-library/joint-plans');

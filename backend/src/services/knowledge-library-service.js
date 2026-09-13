@@ -112,7 +112,7 @@ export async function readLibraryDocument({ id, revision, identityScope, roleId 
   return { ...metadata(document), text: current(document).text, chunks: current(document).chunks };
 }
 
-export async function searchLibraryDocuments({ query, limit = 5, identityScope, roleId }) {
+export async function searchLibraryDocuments({ query, limit = 5, identityScope, roleId, documentIds }) {
   const started = performance.now();
   const key = scopeKey(identityScope, roleId);
   if (!key) return failure('KNOWLEDGE_IDENTITY_REQUIRED', 403);
@@ -120,6 +120,7 @@ export async function searchLibraryDocuments({ query, limit = 5, identityScope, 
   const library = await readSemanticGovernanceState(namespace, key, empty);
   const businessIds = extractQueryBusinessIds(query);
   const documents = library.documents.filter(document => visibleNow(current(document)))
+    .filter(document => !documentIds || documentIds.includes(document.id))
     .filter(document => current(document).kind === 'policy' || !businessIds.length
       || matchingQueryBusinessIds({ id: document.id, text: current(document).text }, businessIds).length === businessIds.length);
   const chunks = documents.flatMap(document => current(document).chunks);

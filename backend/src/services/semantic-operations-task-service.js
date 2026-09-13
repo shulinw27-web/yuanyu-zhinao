@@ -230,9 +230,12 @@ export async function createSemanticOperationsTask({ body, role, identityScope }
   const createdAt = now();
   const trace = await createAgentEvidenceTrace({ roleId: role?.id, identityScope, input: text, requestId: id, platform: identityScope?.platform, kind: 'semantic_operations_task' });
   const sourceDiscovery = ['build_model', 'discover_sources'].includes(classified.intent)
-    ? discoverSemanticSources({ request: contextualText, role })
+    ? discoverSemanticSources({ request: workspaceDiscovery.objectTypes.length ? [...new Set(workspaceDiscovery.objectTypes.flatMap(item => item.sourceSystems || []))].join(' / ') : contextualText, role })
     : null;
-  const planning = conversationalIntent ? null : await planSemanticOperationsRequest({ request: contextualText || '根据上传材料建设语义模型', authoritativeIntent: classified.intent, sourceDiscovery, identityScope });
+  const planning = conversationalIntent ? null : await planSemanticOperationsRequest({ request: contextualText || '根据上传材料建设语义模型', authoritativeIntent: classified.intent, sourceDiscovery, identityScope,
+    materialFacts: { objects: workspaceDiscovery.objectTypes.map(item => ({ id: item.id, key: item.key, granularity: item.granularity, systems: item.sourceSystems,
+      fields: item.fieldDefinitions.map(f => ({ name: f.name, type: f.type, unit: f.unit, reference: f.reference, referenceField: f.referenceField })) })),
+      relationshipCount: workspaceDiscovery.relationshipTypes.length, documentNames: workspace.documents.map(item => item.name) } });
   const task = {
     id,
     traceId: trace.id,

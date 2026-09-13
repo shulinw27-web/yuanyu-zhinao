@@ -196,7 +196,7 @@ onMounted(async () => {
 
           <template v-else-if="activeView === 'model'">
             <div class="ops-section-head"><div><span>HUMAN REVIEW SURFACE</span><h2>Agent生成，运营人员精调</h2><p>画布不是主要入口，而是处理命名、字段、关系和核心元对象映射的精细校对面。</p></div></div>
-            <OAMetaModelStudio :meta-model="model" :draft="draft" :authoring-profile="profile" :simulation="simulation" :semantic-context="semanticContext" :role="role" :message="message" :replay-cases="client.replayOntologyCases" :button-permission-ids="buttonPermissionIds" @save-draft="saveDraft" @validate-draft="validateDraft" @simulate-build="simulateBuild" @publish="publishModel"/>
+            <OAMetaModelStudio :meta-model="model" :draft="draft" :authoring-profile="profile" :simulation="simulation" :semantic-context="semanticContext" :role="role" :message="message" :replay-cases="client.replayOntologyCases" :knowledge-client="client.knowledge" :button-permission-ids="buttonPermissionIds" @save-draft="saveDraft" @validate-draft="validateDraft" @simulate-build="simulateBuild" @publish="publishModel"/>
           </template>
 
           <KnowledgeLibraryPanel v-else-if="activeView === 'knowledge'" :client="client.knowledge" :can-write="buttonPermissionIds.includes('meta_model.draft.save')" :can-model="canModel" @model-candidate="prepareKnowledgeModelCandidate" />

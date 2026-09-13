@@ -277,11 +277,11 @@ export function partitionUntrustedContent(items = [], { source = 'retrieved_cont
   return { allowed, quarantined, compromised: quarantined.length > 0 };
 }
 
-const sanitizeDisplayText = (value) => normalizeUntrustedText(value)
+const sanitizeDisplayText = (value, maxCharacters = MAX_MODEL_OUTPUT_CHARACTERS) => normalizeUntrustedText(value)
   .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '[已移除脚本内容]')
   .replace(/<[^>]{1,1000}>/g, '[已移除HTML]')
   .replace(/javascript\s*:/gi, '[已阻止的协议]:')
-  .slice(0, MAX_MODEL_OUTPUT_CHARACTERS);
+  .slice(0, maxCharacters);
 
 const secretPatterns = [
   /\bsk-[A-Za-z0-9_-]{16,}\b/,
@@ -299,19 +299,29 @@ const unauthorizedExecutionPatterns = [
   /\b(?:bypassed|deleted|disabled|executed)\b.{0,24}\b(?:approval|authorization|MES|ERP|QMS|production)\b/i
 ];
 
-export function validateModelOutputSafety(value, { fallback = '模型输出未通过安全校验，已返回受控业务结果。' } = {}) {
+export function validateModelOutputSafety(value, { fallback = '模型输出未通过安全校验，已返回受控业务结果。', executionSegments, structuredReadPlan = false } = {}) {
+  const maxCharacters = structuredReadPlan ? 40000 : MAX_MODEL_OUTPUT_CHARACTERS;
   const raw = String(value || '');
-  const sanitized = sanitizeDisplayText(raw);
-  const assessment = assessPromptContent(sanitized, { source: 'model_output', maxCharacters: MAX_MODEL_OUTPUT_CHARACTERS });
+  const sanitized = sanitizeDisplayText(raw, maxCharacters);
+  const assessment = assessPromptContent(raw, { source: 'model_output', maxCharacters });
   const signals = [...assessment.signals];
   if (raw.includes(SYSTEM_PROMPT_CANARY)) signals.push('system_prompt_canary_leak');
   if (secretPatterns.some((pattern) => pattern.test(raw))) signals.push('secret_material');
-  const claimsExecution = unauthorizedExecutionPatterns.some((pattern) => pattern.test(sanitized));
+  // Structured answers contain unrelated string leaves (claims, IDs, labels).
+  // Do not invent an execution sentence by joining the end of one leaf to the
+  // start of another. Negation masks are local and stop at contrast clauses.
+  const statements = (executionSegments || [sanitized]).flatMap(part => sanitizeDisplayText(part, maxCharacters).split(/[。；;！？!?\n]/u));
+  const claimsExecution = statements.some(part => {
+    const claim = part.replace(/(?:不等于|不代表|不能(?:据此)?(?:认定|视为))(?:(?!但|然而|却)[^，,。；;！？!?\n]){0,18}?(?:已(?:经)?(?:执行|完成|创建|提交|下发))/gu, '[否定执行状态]');
+    return unauthorizedExecutionPatterns.some((pattern) => pattern.test(claim));
+  });
   if (claimsExecution) signals.push('unauthorized_execution_claim');
-  if (raw.length > MAX_MODEL_OUTPUT_CHARACTERS) signals.push('output_too_long');
+  if (raw.length > maxCharacters) signals.push('output_too_long');
 
   const blocked = !assessment.safe || signals.some((signal) => ['system_prompt_canary_leak', 'secret_material', 'unauthorized_execution_claim', 'output_too_long'].includes(signal));
-  const answer = blocked ? sanitizeDisplayText(fallback) : sanitized;
+  // Structured data must not be rewritten by display normalization (NFKC can
+  // change string literals and therefore business semantics).
+  const answer = blocked ? sanitizeDisplayText(fallback) : structuredReadPlan ? raw : sanitized;
   return {
     safe: !blocked,
     text: answer,

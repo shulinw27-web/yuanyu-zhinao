@@ -111,7 +111,7 @@ test('WK evidence: both route surfaces require their own page and write grants; 
     const denied = await call(base, '/documents/routed', { method: 'PUT', pages: [page], payload: body });
     assert.equal(denied.status, 403); assert.equal(denied.permission, write);
     assert.equal((await call(base, '/brief', { method: 'POST', pages: [page], payload: { query: '资质', tenantId: 'other' } })).status, 400);
-    for (const suffix of ['/answer', '/materials/preview', '/studies/prepare', '/studies/draft-1/restore']) {
+    for (const suffix of ['/answer', '/answer-sources', '/materials/preview', '/studies/prepare', '/studies/draft-1/restore', ...(base === semantic ? ['/read-plan-proposal'] : [])]) {
       const deniedNew = await call(base, suffix, { method: 'POST', pages: [page], payload: {} });
       assert.equal(deniedNew.status, 403); assert.equal(deniedNew.permission, write);
       assert.equal((await call(base, suffix, { method: 'POST', pages: [page], grant: true, payload: {} })).status, 400);
@@ -122,6 +122,7 @@ test('WK evidence: both route surfaces require their own page and write grants; 
   // A stale outer page grant cannot replace the current identity's live IAM grant.
   assert.equal((await call(agent, '/joint-plans', { pages: ['page.agent.view'] })).status, 403);
   assert.equal((await call(semantic, '/joint-plans', { pages: ['page.world.view'] })).status, 404);
+  assert.equal((await call(agent, '/read-plan-proposal', { method: 'POST', pages: ['page.agent.view'], grant: true, payload: {} })).status, 404);
   assert.equal((await call(agent, '/joint-brief', { method: 'POST', pages: ['page.agent.view'], payload: {} })).status, 403);
   assert.equal((await call(agent, '/joint-brief', { method: 'POST', pages: ['page.agent.view'], grant: true, payload: {} })).status, 400);
   assert.equal((await call(semantic, '/joint-brief', { method: 'POST', pages: ['page.world.view'], grant: true, payload: {} })).status, 404);
@@ -131,7 +132,7 @@ test('WK evidence: both route surfaces require their own page and write grants; 
 
 async function withUpstream(run) {
   const state = { calls: [], mode: 'ok', permitted: true, updated: '2026-09-12T00:00:00Z', text: '采购前核验供应商资质。', chunkStatus: 2, chunkType: 'text' };
-  const grant = () => ({ principalKey: knowledgePrincipalKey(context), tenantId: 10000, knowledgeBaseId: 'kb-test', knowledgeIds: ['doc-test'] });
+  const grant = () => ({ principalKey: knowledgePrincipalKey(context), tenantId: 10000, knowledgeBaseId: 'kb-test', knowledgeIds: state.documentIds || ['doc-test'] });
   const server = createServer(async (req, res) => {
     // Applies to failures/redirects too: a fixture must not leave a pooled socket
     // pointing at a port that Windows can reassign to the next fixture.
@@ -144,7 +145,8 @@ async function withUpstream(run) {
     if (state.mode === 'oversized') { res.end(JSON.stringify({ success: true, data: 'x'.repeat(270000) })); return; }
     if (state.mode === 'invalid-json') { res.end('invalid'); return; }
     let data;
-    if (req.url.endsWith('/hybrid-search')) data = state.mode === 'malformed' ? {} : [{ id: 'chunk-test', knowledge_id: state.mode === 'foreign' ? 'foreign-document' : 'doc-test', content: '不可信的检索缓存片段' }];
+    if (req.url.endsWith('/hybrid-search')) data = state.candidates || (state.mode === 'malformed' ? {} : [{ id: 'chunk-test', knowledge_id: state.mode === 'foreign' ? 'foreign-document' : 'doc-test', content: '不可信的检索缓存片段' }]);
+    else if (state.responses?.[req.url]) data = state.responses[req.url];
     else if (req.url === '/api/v1/knowledge/doc-test') data = { id: 'doc-test', ...{ tenant_id: 10000, knowledge_base_id: 'kb-test' }, title: '供应商资质', updated_at: state.updated,
       parse_status: 'completed', enable_status: state.mode === 'disabled' ? 'disabled' : 'enabled', deleted_at: null };
     else data = { id: 'chunk-test', tenant_id: state.mode === 'tenant-mismatch' ? 20000 : 10000, knowledge_base_id: 'kb-test', knowledge_id: 'doc-test',
@@ -172,6 +174,25 @@ test('WK provider: mock HTTP contract sends bounded document allowlist, no vecto
   assert.equal(JSON.stringify(result).includes('synthetic-test-key'), false);
   assert.equal(provider.status().readiness, 'not_live_verified');
   assert.equal((await provider.search({ query: '资质 ORD-100', limit: 5 })).results.length, 0);
+}));
+
+test('DM-03: bounded candidate pool diversifies documents before topK and respects supplemental scope', async () => withUpstream(async ({ state, make }) => {
+  state.documentIds = ['dictionary', 'rules'];
+  state.candidates = [...Array.from({ length: 6 }, (_, i) => ({ id: `chunk-${i}`, knowledge_id: 'dictionary' })), { id: 'rule-chunk', knowledge_id: 'rules' }];
+  state.responses = {};
+  for (const id of state.documentIds) state.responses[`/api/v1/knowledge/${id}`] = { id, tenant_id: 10000, knowledge_base_id: 'kb-test', title: id, updated_at: state.updated, parse_status: 'completed', enable_status: 'enabled' };
+  for (const c of state.candidates) state.responses[`/api/v1/chunks/by-id/${c.id}`] = { ...c, tenant_id: 10000, knowledge_base_id: 'kb-test', updated_at: state.updated,
+    content: c.knowledge_id === 'rules' ? 'execution_receipt_id是实际执行回执。' : 'execution_receipt_id字段定义。', status: 2, is_enabled: true, chunk_type: 'text' };
+  const result = await make().search({ query: 'execution_receipt_id', limit: 2 });
+  assert.equal(state.calls[0].body.match_count, 8);
+  assert.deepEqual(result.results.map(r => r.id), ['dictionary', 'rules']);
+  const before = state.calls.length;
+  assert.equal((await make().search({ query: '执行', documentIds: ['foreign'] })).status, 403);
+  assert.equal(state.calls.length, before);
+  state.candidates = [{ id: 'rule-chunk', knowledge_id: 'rules' }];
+  const scoped = await make().search({ query: '执行', documentIds: ['rules'] });
+  assert.deepEqual(scoped.results.map(r => r.id), ['rules']);
+  assert.deepEqual(state.calls.findLast(c => c.path.endsWith('/hybrid-search')).body.knowledge_ids, ['rules']);
 }));
 
 test('WK provider: absent mapping, wrong identity and unconfigured provider cannot issue network calls', async () => withUpstream(async ({ state, make, grant }) => {

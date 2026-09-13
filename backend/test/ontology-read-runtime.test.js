@@ -127,6 +127,13 @@ test('multiple published plans require explicit selection and per-plan replay; m
     dataContracts: d.objectTypes.map(o => ({ id: o.id, objectType: o.id, sourceSystem: o.sourceSystems[0], schemaVersion: '1' })),
     qualityRules: d.objectTypes.map(o => ({ id: o.id, objectType: o.id, rule: 'not_null' })),
     lineageEdges: d.objectTypes.map(o => ({ from: o.source, to: o.id })) };
+  const badDefinition = structuredClone(definition);
+  badDefinition.scenario.readPlans[0].outputs[0].expression = { op: 'add', args: [{ op: 'literal', value: null }, { op: 'literal', value: 1 }] };
+  await saveOAMetaModelDraft(badDefinition, role);
+  const badCase = { planId: badDefinition.scenario.readPlans[0].id, target: 'ORD-X900', records: source, expectedError: 'READ_NOT_NUMERIC' };
+  const badReplay = await runOntologyReadReplay({ body: { candidateFingerprint: (await getOAMetaModelDraft()).fingerprint, cases: [badCase, badCase] }, role, identityScope: scope });
+  assert.equal(badReplay.status, 'failed');
+  assert.ok(badReplay.results.every(row => row.code === 'READ_NOT_NUMERIC' && row.status === 'failed'));
   await saveOAMetaModelDraft(definition, role);
   assert.equal((await validateOAMetaModelDraft(role)).draft.validation.status, 'passed');
   await simulateBuildOAMetaModel(role);

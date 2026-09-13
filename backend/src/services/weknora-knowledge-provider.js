@@ -80,17 +80,27 @@ export function createWeKnoraKnowledgeProvider({ context, baseUrl = 'http://127.
   return {
     id: providerId,
     status: () => ({ provider: providerId, configured, mode: retrievalMode, embedding: retrievalMode === 'hybrid' ? 'provider_managed' : 'disabled', rerank: 'disabled', readiness: 'not_live_verified' }),
-    async search({ query, limit = 5 }) {
+    async search({ query, limit = 5, documentIds }) {
       if (!validKnowledgeQuery(query, limit)) return knowledgeFailure('KNOWLEDGE_QUERY_INVALID');
       try {
         const grant = await binding();
+        if (documentIds !== undefined && (!Array.isArray(documentIds) || !documentIds.length || documentIds.length > 5 || documentIds.some(id => !grant.knowledgeIds.includes(id)))) return knowledgeFailure('KNOWLEDGE_ACCESS_DENIED', 403);
+        const selectedIds = documentIds || grant.knowledgeIds;
+        const candidateLimit = Math.min(20, limit * 4);
         const candidates = await request(`/knowledge-bases/${grant.knowledgeBaseId}/hybrid-search`, {
-          query_text: query, match_count: limit, knowledge_ids: grant.knowledgeIds,
+          query_text: query, match_count: candidateLimit, knowledge_ids: selectedIds,
           disable_vector_match: retrievalMode !== 'hybrid', disable_keywords_match: false, skip_context_enrichment: true
         });
-        if (!Array.isArray(candidates) || candidates.length > limit) reject('KNOWLEDGE_PROVIDER_RESPONSE_INVALID');
-        const results = []; const seen = new Set(); const businessIds = extractQueryBusinessIds(query);
+        if (!Array.isArray(candidates) || candidates.length > candidateLimit) reject('KNOWLEDGE_PROVIDER_RESPONSE_INVALID');
+        // Diversify before truncating: a dictionary's generated child chunks
+        // must not occupy every slot and hide rules in another document.
+        for (const candidate of candidates) if (!validKnowledgeId(candidate?.id) || !selectedIds.includes(candidate?.knowledge_id)) reject('KNOWLEDGE_PROVIDER_SCOPE_MISMATCH', 403);
+        const first = []; const rest = []; const documentsSeen = new Set();
         for (const candidate of candidates) {
+          (documentsSeen.has(candidate.knowledge_id) ? rest : first).push(candidate); documentsSeen.add(candidate.knowledge_id);
+        }
+        const results = []; const seen = new Set(); const businessIds = extractQueryBusinessIds(query);
+        for (const candidate of [...first, ...rest]) {
           // Never trust returned snippets, URLs or a provider's claim of authority.
           if (!validKnowledgeId(candidate?.id) || !grant.knowledgeIds.includes(candidate?.knowledge_id)) reject('KNOWLEDGE_PROVIDER_SCOPE_MISMATCH', 403);
           if (seen.has(candidate.id)) continue;
@@ -103,6 +113,7 @@ export function createWeKnoraKnowledgeProvider({ context, baseUrl = 'http://127.
           }
           if (businessIds.length && matchingQueryBusinessIds({ id: evidence.id, text: evidence.excerpt }, businessIds).length !== businessIds.length) continue;
           results.push(evidence);
+          if (results.length === limit) break;
         }
         if (knowledgeDigest(grant) !== knowledgeDigest(await binding())) reject('KNOWLEDGE_ACCESS_DENIED', 403);
         return { mode: `weknora_${retrievalMode}`, results, noEvidence: !results.length,
