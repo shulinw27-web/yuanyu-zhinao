@@ -123,7 +123,7 @@ test('WK evidence: both route surfaces require their own page and write grants; 
 });
 
 async function withUpstream(run) {
-  const state = { calls: [], mode: 'ok', permitted: true, updated: '2026-09-12T00:00:00Z', text: '采购前核验供应商资质。' };
+  const state = { calls: [], mode: 'ok', permitted: true, updated: '2026-09-12T00:00:00Z', text: '采购前核验供应商资质。', chunkStatus: 2, chunkType: 'text' };
   const grant = () => ({ principalKey: knowledgePrincipalKey(context), tenantId: 10000, knowledgeBaseId: 'kb-test', knowledgeIds: ['doc-test'] });
   const server = createServer(async (req, res) => {
     let raw = ''; for await (const chunk of req) raw += chunk;
@@ -138,7 +138,7 @@ async function withUpstream(run) {
     else if (req.url === '/api/v1/knowledge/doc-test') data = { id: 'doc-test', ...{ tenant_id: 10000, knowledge_base_id: 'kb-test' }, title: '供应商资质', updated_at: state.updated,
       parse_status: 'completed', enable_status: state.mode === 'disabled' ? 'disabled' : 'enabled', deleted_at: null };
     else data = { id: 'chunk-test', tenant_id: state.mode === 'tenant-mismatch' ? 20000 : 10000, knowledge_base_id: 'kb-test', knowledge_id: 'doc-test',
-      updated_at: state.updated, content: state.text, status: 2, is_enabled: true, deleted_at: null, chunk_type: 'text' };
+      updated_at: state.updated, content: state.text, status: state.chunkStatus, is_enabled: true, deleted_at: null, chunk_type: state.chunkType };
     res.setHeader('Connection', 'close'); // Each fixture owns its short-lived port; do not reuse a prior fixture's pooled socket.
     res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ success: true, data }));
   });
@@ -184,6 +184,8 @@ test('WK runtime: private file configuration enables hybrid only explicitly, re-
     assert.equal(state.calls[0].body.disable_vector_match, false);
     assert.deepEqual(state.calls[0].body.knowledge_ids, ['doc-test']);
     assert.equal(provider.status().mode, 'hybrid');
+    assert.equal((await provider.search({ query: '资质', limit: 5 })).mode, 'weknora_hybrid');
+    assert.equal((await brief(provider)).diagnostics.embedding, 'provider_requested_not_attested');
     const before = state.calls.length;
     await writeFile(file, JSON.stringify({ ...config, bindings: [] }));
     assert.equal((await brief(provider)).status, 403); assert.equal(state.calls.length, before);
@@ -233,6 +235,25 @@ test('WK provider: stale chunks and revoked mappings invalidate citations, injec
   state.mode = 'timeout';
   assert.equal((await make({ timeoutMs: 30 }).search({ query: '供应商', limit: 5 })).status, 503);
   assert.equal((await provider.read({ ...citation, knowledgeBaseId: 'kb-other' })).status, 404);
+}));
+
+test('WK provider: real v0.8.0 default text status is valid, pending chunks fail and generated summaries are not sources', async () => withUpstream(async ({ state, make }) => {
+  const provider = make();
+  for (const status of [0, 2]) {
+    state.chunkStatus = status;
+    assert.equal((await brief(provider)).status, 'evidence_ready');
+  }
+  const citation = (await provider.search({ query: '资质', limit: 3 })).results[0].citation;
+  for (const status of [1, 3, -1, '0', null]) {
+    state.chunkStatus = status;
+    assert.equal((await provider.read(citation)).status, 404);
+  }
+  state.chunkStatus = 0;
+  for (const type of ['summary', 'image_caption', 'parent_text', 'faq']) {
+    state.chunkType = type;
+    assert.equal((await provider.search({ query: '资质', limit: 3 })).results.length, 0);
+    assert.equal((await provider.read(citation)).code, 'KNOWLEDGE_CHUNK_TYPE_UNSUPPORTED');
+  }
 }));
 
 test('WK provider: local-only endpoint cannot be repurposed for SSRF or credentials in URL', () => {

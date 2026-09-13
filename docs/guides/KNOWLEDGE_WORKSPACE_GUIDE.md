@@ -94,3 +94,18 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\wsl\workspace\projec
 左侧预览本地图片/PDF；右侧选择片段、核对解析器位置和文本，填写人工修正。Excel 保留工作表/单元格标记，Word 保留段落/表格标记，不宣称是渲染页。没有原图区域坐标就不显示虚构框选。截断、未识别页、公式缓存等限制会一并提示。
 
 确认核对后“转入资料编辑框”，检查标题、来源和正文，再确认保存个人参考资料。不会覆盖电脑上的原文件，也不会把校对者提供的定位当成服务器认证事实。当前编辑框有未保存内容时拒绝覆盖。离开页面会释放原文件预览和未保存解析结果；本入口不新增二进制文件存储。
+
+## 9. 本机真实接入与复现（2026-09-13）
+
+专用只读 Key 和私有文件已配置；只允许演示管理员 `admin@demo.local` 读取唯一合成库的一份制度，其他账号默认无绑定。正常启动 API 时显式指定：
+
+```powershell
+$env:WEKNORA_CONFIG_FILE = 'D:\wsl\private\yuanyu-zhinao\weknora.local.json'
+npm run start:ark
+```
+
+两端使用同一 API，登录管理员后进入资料页，选择 WeKnora，检索“原料异常”。查看原文及引用，再按第7节完成本次模型使用确认。Key 配置不自动开放知识资料出网；若 `KNOWLEDGE_MODEL_ALLOWED_MODES` 未设置，模型按钮禁用是预期行为。正式环境须先审查数据分级，不能为试用将全部企业资料开放。
+
+`npm run evaluate:weknora -- --live-synthetic --hybrid` 在隔离项目 API 下检查双端读取和权限拒绝，再调用真实混合适配器；`--live-synthetic --answer` 检查双端各三轮方舟问答。无参数不发请求。测试只接受既定合成库/文档绑定，结束关闭测试 API，不修改常驻服务策略。生成摘要不作为原文引用，默认状态0和已索引状态2的文本可读，待处理状态1仍拒绝。
+
+图形保存助手 `scripts/weknora-credential-intake.mjs` 是管理员显式启动的一次性工具，不是常驻 Web 管理接口。启动前以 `WEKNORA_SETUP_BINDING` 提供已批准的非敏感绑定元数据（principalKey、tenantId、knowledgeBaseId、knowledgeIds），密钥只能在隐藏输入框填写，不能作为启动参数。固定写入同一私有文件、拒绝覆盖；现有配置无需再次运行。用户仍可采用第6节 PowerShell 隐藏输入助手。

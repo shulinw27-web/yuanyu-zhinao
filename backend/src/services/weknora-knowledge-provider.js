@@ -9,7 +9,7 @@ export const knowledgePrincipalKey = context => validKnowledgeIdentity(context)
   ? knowledgeDigest([context.identityScope.tenantId, context.identityScope.subjectId, context.roleId]) : null;
 
 // Server-only factory. Not registered from request bodies/environment automatically.
-// v0.8.0 read adapter: explicit document allowlist, keyword search only, no uploads.
+// v0.8.0 read adapter: explicit document allowlist, opt-in hybrid, no uploads.
 export function createWeKnoraKnowledgeProvider({ context, baseUrl = 'http://127.0.0.1:18081', apiKey, resolveScope, timeoutMs = 2000, retrievalMode = 'keyword_only' } = {}) {
   const scope = structuredClone(context);
   const principalKey = knowledgePrincipalKey(scope);
@@ -61,7 +61,10 @@ export function createWeKnoraKnowledgeProvider({ context, baseUrl = 'http://127.
       || document.enable_status !== 'enabled' || document.parse_status !== 'completed') reject('KNOWLEDGE_DOCUMENT_NOT_FOUND', 404);
     const chunk = await request(`/chunks/by-id/${chunkId}`);
     if (!inScope(chunk, grant) || chunk.id !== chunkId || chunk.knowledge_id !== documentId
-      || chunk.deleted_at || chunk.is_enabled !== true || chunk.status !== 2 || chunk.chunk_type !== 'text') reject('KNOWLEDGE_DOCUMENT_NOT_FOUND', 404);
+      || chunk.deleted_at || chunk.is_enabled !== true || ![0, 2].includes(chunk.status)) reject('KNOWLEDGE_DOCUMENT_NOT_FOUND', 404);
+    // v0.8.0's repository treats Default(0) and Indexed(2) as available;
+    // Stored(1) is pending. Generated summaries are not authoritative source text.
+    if (chunk.chunk_type !== 'text') reject('KNOWLEDGE_CHUNK_TYPE_UNSUPPORTED', 422);
     if (typeof chunk.content !== 'string' || !chunk.content.trim() || chunk.content.length > 12000
       || typeof document.title !== 'string' || !document.title.trim() || document.title.length > 200
       || !Number.isFinite(Date.parse(document.updated_at)) || !Number.isFinite(Date.parse(chunk.updated_at))) reject('KNOWLEDGE_PROVIDER_RESPONSE_INVALID');
@@ -92,12 +95,18 @@ export function createWeKnoraKnowledgeProvider({ context, baseUrl = 'http://127.
           if (!validKnowledgeId(candidate?.id) || !grant.knowledgeIds.includes(candidate?.knowledge_id)) reject('KNOWLEDGE_PROVIDER_SCOPE_MISMATCH', 403);
           if (seen.has(candidate.id)) continue;
           seen.add(candidate.id);
-          const evidence = await load(candidate.knowledge_id, candidate.id);
+          let evidence;
+          try { evidence = await load(candidate.knowledge_id, candidate.id); }
+          catch (error) {
+            if (error.code === 'KNOWLEDGE_CHUNK_TYPE_UNSUPPORTED') continue;
+            throw error;
+          }
           if (businessIds.length && matchingQueryBusinessIds({ id: evidence.id, text: evidence.excerpt }, businessIds).length !== businessIds.length) continue;
           results.push(evidence);
         }
         if (knowledgeDigest(grant) !== knowledgeDigest(await binding())) reject('KNOWLEDGE_ACCESS_DENIED', 403);
-        return { mode: 'weknora_keyword_only', results, noEvidence: !results.length };
+        return { mode: `weknora_${retrievalMode}`, results, noEvidence: !results.length,
+          retrieval: { embedding: retrievalMode === 'hybrid' ? 'provider_requested_not_attested' : 'not_used', rerank: 'not_used' } };
       } catch (error) { return handled(error); }
     },
     async read(citation) {

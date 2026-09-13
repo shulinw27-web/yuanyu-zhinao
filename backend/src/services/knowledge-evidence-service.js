@@ -81,6 +81,8 @@ export async function buildKnowledgeBrief({ provider, query, limit = 5, canRead 
       mode: 'extractive_no_llm', provider: provider.id, evidence,
       message: evidence.length ? '以下是当前可访问资料的原文摘录；不是实时业务事实，也未执行任何业务操作。' : '当前可访问资料中没有找到依据。',
       execution: 'none', modelCalled: false, published: false,
-      diagnostics: { evidenceCount: evidence.length, sourceChecks: evidence.length * 2, embedding: 'not_used', rerank: 'not_used' } };
+      diagnostics: { evidenceCount: evidence.length, sourceChecks: evidence.length * 2,
+        retrievalMode: result.mode || 'unknown',
+        embedding: result.retrieval?.embedding === 'provider_requested_not_attested' ? 'provider_requested_not_attested' : 'not_used', rerank: 'not_used' } };
   } catch { return knowledgeFailure('KNOWLEDGE_PROVIDER_UNAVAILABLE', 503); }
 }

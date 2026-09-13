@@ -1,5 +1,7 @@
 # 项目文档中心
 
+最新第五批（2026-09-13）：[真实 WeKnora 项目接入验收](development/WEKNORA_UPGRADE_ACCEPTANCE.md) · [本机复现与使用](guides/KNOWLEDGE_WORKSPACE_GUIDE.md)。专用只读 Key/合成文档绑定已启用，双端检索及各三轮方舟回答通过；生产共享与业务联合规划仍待完成。下文旧批次“尚未接入”指当时状态。
+
 最新第四批：[知识工作区指南](guides/KNOWLEDGE_WORKSPACE_GUIDE.md) · [WeKnora 第四批验收](development/WEKNORA_UPGRADE_ACCEPTANCE.md)。来源问答、Wiki 生成/历史恢复和多模态校对已交付，真实方舟四例通过；项目 WeKnora Key/映射尚未启用。下文第三批条目保留历史范围。
 
 最新知识能力：[知识工作区指南](guides/KNOWLEDGE_WORKSPACE_GUIDE.md) · [WeKnora 第三批验收](development/WEKNORA_UPGRADE_ACCEPTANCE.md)。已交付资料界面、来源草稿、记忆校对与私有配置代码；真实项目 Key/映射未启用，独立实例三轮合成问答已通过。
