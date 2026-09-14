@@ -1,4 +1,5 @@
 const definitions = [
+  ['anomaly.report.changed', 'AnomalyReport', ['reportId', 'revision', 'status', 'action']],
   ['knowledge.study.changed', 'KnowledgeStudy', ['documentId', 'revision']],
   ['knowledge.document.changed', 'KnowledgeDocument', ['documentId', 'revision', 'status', 'contentHash']],
   ['risk.case.acknowledged', 'RiskCase', ['riskId', 'severity', 'status']],

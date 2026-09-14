@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { createAgentClient } from '@healthcare-ai/agent-sdk';
 import KnowledgeLibraryPanel from '../../../frontend/src/features/knowledge/KnowledgeLibraryPanel.vue';
 import MemoryReviewPanel from '../../../frontend/src/features/knowledge/MemoryReviewPanel.vue';
+import AnomalyAssistantPanel from '../../../frontend/src/features/agent/AnomalyAssistantPanel.vue';
 
 const props = defineProps({
   layout: { type: String, default: 'desktop' },
@@ -82,6 +83,7 @@ const activeAlert = computed(() => [...notices.value].sort((left, right) => ({ P
 const alertCount = computed(() => notices.value.length);
 const agentHealthy = computed(() => operations.value?.status === 'healthy');
 const pageMeta = computed(() => ({
+  anomalies: { eyebrow: 'INCIDENT INTAKE', title: '异常助手', description: '汇报、证据、校对与确认；不自动执行下游业务操作。' },
   knowledge: { eyebrow: 'SOURCE REVIEW', title: '知识资料', description: '管理个人资料、检索依据并重新核验引用。资料不代替实时业务数据。' },
   assistant: { eyebrow: 'PRIVATE AGENT', title: '智脑工作台', description: '像与业务同事沟通一样提出问题；涉及数据与动作时，智脑会自动进入受控任务流程。' },
   alerts: { eyebrow: '24 / 7 MONITORING', title: '风险告警', description: '仅呈现当前身份与组织数据范围内的事件。' },
@@ -750,6 +752,7 @@ onUnmounted(() => {
         <div class="brand-lockup sidebar-brand"><span class="brand-mark">Z</span><div><b>元域智脑</b><small>PRIVATE AGENT</small></div></div>
         <button class="new-task" @click="startConversation"><span>＋</span>新建任务</button>
         <nav class="workspace-nav" aria-label="智脑功能导航">
+          <button :class="{ active: view === 'anomalies' }" @click="view = 'anomalies'"><span>!</span><b>异常助手</b><small>现场汇报与结构化校对</small></button>
           <button :class="{ active: view === 'knowledge' }" @click="view = 'knowledge'"><span>▤</span><b>知识资料</b><small>原文校对与证据检索</small></button>
           <button :class="{ active: view === 'assistant' }" @click="view = 'assistant'"><span>◈</span><b>智脑</b><small>对话与任务规划</small></button>
           <button :class="{ active: view === 'alerts' }" @click="view = 'alerts'"><span>⌁</span><b>告警</b><small>授权范围内的风险</small><em v-if="alertCount">{{ alertCount }}</em></button>
@@ -817,6 +820,7 @@ onUnmounted(() => {
           <article v-for="notice in notices" :key="notice.id" :class="['collection-card', 'alert-card', `severity-${(notice.severity || 'P2').toLowerCase()}`]"><div class="card-icon">{{ notice.channel === '虚拟电话' ? '☎' : '⌁' }}</div><div><span><b class="alert-level">{{ notice.severity || 'P2' }}</b> AI 基座告警 · {{ notice.channel || '站内信' }}</span><h3>{{ notice.title }}</h3><p>{{ notice.description || notice.detail || '点击后，智脑会结合授权证据解释风险。' }}</p><small>{{ notice.id }} · {{ notice.status || notice.riskStatus }}</small></div><button @click="askAboutAlert(notice)">交给智脑分析</button></article>
         </section>
 
+        <AnomalyAssistantPanel v-else-if="view === 'anomalies'" :client="client.anomalies" />
         <KnowledgeLibraryPanel v-else-if="view === 'knowledge'" :client="client.knowledge" :can-write="true"><MemoryReviewPanel :client="client" :snapshot="memories" @updated="memories = $event" /></KnowledgeLibraryPanel>
         <section v-else class="collection-view">
           <div v-if="!workItems.length" class="empty-state"><span>✓</span><h2>当前没有待办</h2><p>需要确认、审批或复核的任务会出现在这里。</p></div>
@@ -839,7 +843,7 @@ onUnmounted(() => {
         <section class="context-section safety-context"><span class="context-label">安全边界</span><p><i/>仅使用当前身份可访问的数据</p><p><i/>模型不直接执行系统写入</p><p><i/>高风险动作需要确认与审批</p></section>
       </aside>
 
-<nav class="mobile-navigation" aria-label="智脑功能导航"><button :class="{ active: view === 'assistant' }" @click="view = 'assistant'"><span>◈</span>智脑</button><button :class="{ active: view === 'alerts' }" @click="view = 'alerts'"><span>⌁</span>告警<i v-if="alertCount">{{ alertCount }}</i></button><button :class="{ active: view === 'tasks' }" @click="view = 'tasks'"><span>✓</span>待办<i v-if="pendingCount">{{ pendingCount }}</i></button><button :class="{ active: view === 'knowledge' }" @click="view = 'knowledge'"><span>▤</span>资料</button><button @click="logout"><span>{{ profile?.name?.slice(0, 1) || 'U' }}</span>我的</button></nav>
+<nav class="mobile-navigation" aria-label="智脑功能导航"><button :class="{ active: view === 'assistant' }" @click="view = 'assistant'"><span>◈</span>智脑</button><button :class="{ active: view === 'anomalies' }" @click="view = 'anomalies'"><span>!</span>异常</button><button :class="{ active: view === 'alerts' }" @click="view = 'alerts'"><span>⌁</span>告警<i v-if="alertCount">{{ alertCount }}</i></button><button :class="{ active: view === 'tasks' }" @click="view = 'tasks'"><span>✓</span>待办<i v-if="pendingCount">{{ pendingCount }}</i></button><button :class="{ active: view === 'knowledge' }" @click="view = 'knowledge'"><span>▤</span>资料</button><button @click="logout"><span>{{ profile?.name?.slice(0, 1) || 'U' }}</span>我的</button></nav>
       <div v-if="loading" class="loading-toast"><i/>正在同步智脑状态…</div>
     </section>
   </main>

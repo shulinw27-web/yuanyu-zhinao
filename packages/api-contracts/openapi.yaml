@@ -21,6 +21,87 @@ tags:
   - { name: SemanticOperations, description: 独立语义运营任务、证据、巡检、通知与受控报告 }
   - { name: Platform, description: 平台运行状态与配置 }
 paths:
+  /agent/anomalies:
+    get:
+      tags: [Agent]
+      operationId: listAnomalyReports
+      description: 当前企业、主体及原始角色的个人汇报记录；需page.agent.view。不是钉钉群共享收件箱。
+      responses:
+        '200': { description: reports、fields、policy及未接入能力；integration为not_connected }
+        '403': { description: 当前主体没有访问权限 }
+    post:
+      tags: [Agent]
+      operationId: createAnomalyReport
+      description: 需agent.prompt.run。只记录人工或模拟来源，不信任客户端传入的钉钉身份。同requestId同内容幂等；不会自动调用字段提取模型或写ERP。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [requestId, expectedRevision, source]
+              properties:
+                requestId: { type: string, minLength: 1, maxLength: 100 }
+                expectedRevision: { type: integer, const: 0 }
+                source: { $ref: '#/components/schemas/AnomalySource' }
+      responses:
+        '200': { description: 草稿及来源，execution为none }
+        '400': { description: 来源格式错误或材料安全检查拒绝 }
+        '403': { description: 权限不足 }
+        '409': { description: 同消息键内容冲突或缺少附件解析确认 }
+        '413': { description: 材料或个人工作区超限 }
+        '422': { description: 附件未能解析，未创建假观察 }
+  /agent/anomalies/{id}/{action}:
+    post:
+      tags: [Agent]
+      operationId: changeAnomalyReport
+      description: 需page.agent.view及agent.prompt.run。所有动作必须提供当前expectedRevision。extract还需精确模型consent；edit/retract需reason；confirm需confirmed=true。补充、更正或AI提取退回草稿。确认只是汇报登记，不是业务审批或执行。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, maxLength: 100 } }
+        - { name: action, in: path, required: true, schema: { type: string, enum: [append, edit, extract, confirm, retract] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedRevision]
+              properties:
+                expectedRevision: { type: integer, minimum: 1 }
+                source: { $ref: '#/components/schemas/AnomalySource' }
+                fields:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    location: { type: [string, 'null'], maxLength: 300 }
+                    equipment: { type: [string, 'null'], maxLength: 300 }
+                    batch: { type: [string, 'null'], maxLength: 300 }
+                    phenomenon: { type: [string, 'null'], maxLength: 300 }
+                    quantity: { type: [string, 'null'], maxLength: 300 }
+                    occurredAt: { type: [string, 'null'], maxLength: 300 }
+                    reportedAction: { type: [string, 'null'], maxLength: 300 }
+                reason: { type: string, minLength: 1, maxLength: 500 }
+                confirmed: { type: boolean, const: true }
+                consent:
+                  type: object
+                  additionalProperties: false
+                  required: [provider, model, confirmed]
+                  properties:
+                    provider: { type: string }
+                    model: { type: string }
+                    confirmed: { type: boolean, const: true }
+      responses:
+        '200': { description: 新版本的个人异常记录；无下游执行 }
+        '400': { description: 无效字段、缺少原因或包含当前动作不接受的字段 }
+        '403': { description: 权限不足或模型用途未开放 }
+        '404': { description: 当前范围没有此记录 }
+        '409': { description: 版本/模型/确认冲突或记录已撤回 }
+        '413': { description: 版本或容量超限 }
+        '422': { description: 确认缺少地点/异常现象或附件不可读 }
+        '502': { description: 模型字段或来源引用非法 }
+        '503': { description: 模型未成功返回；diagnostics仅含固定阶段及可选HTTP状态，不含上游正文 }
   /agent/knowledge-library/answer-sources:
     post:
       tags: [Agent]
@@ -1360,6 +1441,24 @@ components:
       required: true
       schema: { type: string, minLength: 1 }
   schemas:
+    AnomalySource:
+      type: object
+      additionalProperties: false
+      required: [kind, text]
+      properties:
+        kind: { type: string, enum: [text, manual_transcript, mock_group] }
+        text: { type: string, maxLength: 6000 }
+        materialConfirmed: { type: boolean }
+        attachments:
+          type: array
+          maxItems: 1
+          items:
+            type: object
+            required: [name, mimeType, dataUrl]
+            properties:
+              name: { type: string, maxLength: 120 }
+              mimeType: { type: string }
+              dataUrl: { type: string }
     MemoryCorrectionInput:
       type: object
       additionalProperties: false

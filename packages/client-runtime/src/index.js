@@ -55,3 +55,4 @@ export function createConnectivityState(runtime = globalThis) {
   runtime.addEventListener?.('offline', () => update(false));
   return { get online() { return online; }, subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); } };
 }
+export { createAnomalyClient } from './anomaly-client.js';

@@ -1,5 +1,7 @@
 # 项目文档中心
 
+新增：[异常助手](guides/ANOMALY_ASSISTANT.md)——非结构化汇报、来源追溯、字段校对、确认与撤回；第一阶段为个人工作区，未连接真实钉钉群或下游系统。
+
 最新修复：[双 Agent × WeKnora 回归](development/DUAL_AGENT_WEKNORA_REPAIR.md)。已补齐问答契约/诊断、规则召回、双端选定文档补查和运营只读方案候选；简单授信方案已完成生成到发布后业务读取验证，仍需人工校对和独立回放。
 
 2026-09-13 最新实测：[双 Agent × WeKnora 合成业务联调](development/DUAL_AGENT_WEKNORA_MOCK_TEST.md)。18 类对象、22 条关系候选及人工审定后的业务解释通过；首轮 21/23，问答、Wiki 稳定性及关键词漏检仍待修复，不代表全自动建模验收。

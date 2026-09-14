@@ -9,6 +9,8 @@
     "apps/*"
   ],
   "scripts": {
+    "test:anomaly": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/anomaly-assistant.test.js",
+    "evaluate:anomaly": "node scripts/evaluate-anomaly-assistant.mjs",
     "docs:check": "node scripts/check-docs.mjs",
     "test:knowledge": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/knowledge-library.test.js backend/test/knowledge-evidence.test.js backend/test/knowledge-study.test.js backend/test/knowledge-answer.test.js backend/test/agent-memory-review.test.js backend/test/weknora-credential-intake.test.js backend/test/knowledge-business-brief.test.js",
     "evaluate:weknora": "node scripts/evaluate-weknora-integration.mjs",
@@ -23,7 +25,7 @@
     "test:semantic-workbench-fixture": "node --test backend/test/semantic-workbench-fixture.test.js",
     "lint": "eslint .",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
-    "quality": "npm run lint && npm run typecheck && npm run test:all",
+    "quality": "npm run lint && npm run typecheck && npm run test:all && npm run test:anomaly",
     "security:source-scan": "node scripts/security-source-scan.mjs",
     "security:licenses": "node scripts/generate-license-inventory.mjs",
     "security:sbom": "npm sbom --sbom-format cyclonedx > output/sbom.cdx.json",

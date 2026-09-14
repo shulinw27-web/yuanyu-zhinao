@@ -156,3 +156,6 @@
 - [生产待办与验收条件](../operations/PRODUCTION_TODO_CHECKLIST.md)
 
 代码核对入口：[智脑服务](../../backend/src/services/private-agent-service.js)、[桌面工具注册表](../../backend/src/services/desktop-tool-registry.js)、[业务草稿工具](../../backend/src/services/agent-workflow-service.js)。
+## 异常助手增量（2026-09-14）
+
+工作台新增异常助手：人工/模拟文字与人工转写输入、已有图片/PDF解析、带来源的模型字段候选、人工校对确认、版本和撤回。属于个人汇报记录，不自动等同业务事实；尚未与普通对话自动联动，也未接入钉钉群、ASR或ERP写回。详情和测试边界见[异常助手](../guides/ANOMALY_ASSISTANT.md)。

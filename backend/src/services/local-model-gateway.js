@@ -8,6 +8,7 @@ import { ONTOLOGY_CLAIMS_SCHEMA } from './ontology-analysis-claims.js';
 import { KNOWLEDGE_ANSWER_SCHEMA } from './knowledge-answer-contract.js';
 import { READ_PLAN_ANSWER_SCHEMA, READ_PLAN_DEFS, READ_PLAN_SYSTEM_PROMPT } from './read-plan-answer-contract.js';
 import { recoverReadPlanJson } from './read-plan-json-recovery.js';
+import { ANOMALY_ANSWER_SCHEMA } from './anomaly-report-contract.js';
 
 // The administrative UI can configure a connection for the lifetime of this API
 // process.  Credentials deliberately live in this in-memory map only: they are
@@ -131,7 +132,7 @@ export function validateModelSummaryEnvelope(value, { prompt = '', answerContrac
     || parsed.executionReceipt !== null) {
     return { safe: false, reason: '模型结构包含未授权动作、执行声明、伪造回执或未知字段。', signals: ['structured_output_policy_violation'] };
   }
-  const nativeAnswer = ['ontology_claims', 'knowledge_answer', 'read_plan'].includes(answerContract);
+  const nativeAnswer = ['ontology_claims', 'knowledge_answer', 'read_plan', 'anomaly_report'].includes(answerContract);
   if (nativeAnswer ? !parsed.answer || typeof parsed.answer !== 'object' || Array.isArray(parsed.answer)
     || answerContract === 'ontology_claims' && parsed.answer.schemaVersion !== 'ontology-claims.v2' : typeof parsed.answer !== 'string') {
     return { safe: false, reason: '模型 answer 与请求的结构类型不一致。', signals: ['answer_contract_type_mismatch'] };
@@ -170,7 +171,7 @@ const validateProviderOutput = ({ text, fallback, provider, extra = {}, requireS
     };
   }
   const stringLeaves = value => typeof value === 'string' ? [value] : value && typeof value === 'object' ? Object.values(value).flatMap(stringLeaves) : [];
-  const executionSegments = ['knowledge_answer', 'read_plan'].includes(answerContract) ? stringLeaves(JSON.parse(structuredValidation.answer)) : undefined;
+  const executionSegments = ['knowledge_answer', 'read_plan', 'anomaly_report'].includes(answerContract) ? stringLeaves(JSON.parse(structuredValidation.answer)) : undefined;
   const validation = validateModelOutputSafety(structuredValidation.answer, { fallback: safeFallback, executionSegments, structuredReadPlan: answerContract === 'read_plan' });
   if (!validation.safe) {
     recordBlockedOutput(provider);
@@ -311,6 +312,7 @@ export function getLocalModelRuntime() {
 async function generateModelSummaryInternal({ prompt, fallback, safetyIdentifier, attachments = [], timeoutMs, answerContract }, modelTiming, invocationStartedAt) {
   const summarySchema = answerContract === 'ontology_claims'
     ? { ...MODEL_SUMMARY_SCHEMA, properties: { ...MODEL_SUMMARY_SCHEMA.properties, answer: ONTOLOGY_CLAIMS_SCHEMA } }
+    : answerContract === 'anomaly_report' ? { ...MODEL_SUMMARY_SCHEMA, properties: { ...MODEL_SUMMARY_SCHEMA.properties, answer: ANOMALY_ANSWER_SCHEMA } }
     : answerContract === 'knowledge_answer' ? { ...MODEL_SUMMARY_SCHEMA, properties: { ...MODEL_SUMMARY_SCHEMA.properties, answer: KNOWLEDGE_ANSWER_SCHEMA } }
     : answerContract === 'read_plan' ? { ...MODEL_SUMMARY_SCHEMA, $defs: READ_PLAN_DEFS, properties: { ...MODEL_SUMMARY_SCHEMA.properties, answer: READ_PLAN_ANSWER_SCHEMA } }
     : MODEL_SUMMARY_SCHEMA;

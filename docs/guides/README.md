@@ -1,5 +1,7 @@
 # 使用指南
 
+- [异常助手：现场汇报与结构化记录](ANOMALY_ASSISTANT.md)：操作、接口、模型开关、测试结果与真实群接入边界。
+
 - [知识资料、理解草稿与记忆校对](KNOWLEDGE_WORKSPACE_GUIDE.md)：双端入口、来源复验、私有 WeKnora 配置及未启用边界。
 
 新增：[已发布语义模型接入智脑](PUBLISHED_MODEL_WORKBENCH.md)——关联计算方案、对象授权、正反例回放、发布消费和版本追问。

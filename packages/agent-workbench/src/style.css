@@ -393,7 +393,7 @@ button, summary { -webkit-tap-highlight-color: transparent; }
   .collection-view { padding: 18px 13px; }
   .collection-card { grid-template-columns: 38px 1fr; }
   .collection-card > button, .collection-card > em { grid-column: 2; justify-self: start; }
-.mobile-navigation { position: fixed; z-index: 12; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: repeat(5, 1fr); height: calc(64px + env(safe-area-inset-bottom)); padding: 6px 8px env(safe-area-inset-bottom); border-top: 1px solid var(--line); background: #111111f5; backdrop-filter: blur(16px); }
+.mobile-navigation { position: fixed; z-index: 12; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); height: calc(64px + env(safe-area-inset-bottom)); padding: 6px 8px env(safe-area-inset-bottom); border-top: 1px solid var(--line); background: #111111f5; backdrop-filter: blur(16px); }
   .mobile-navigation button { position: relative; display: grid; place-items: center; gap: 2px; border-radius: 8px; background: transparent; color: #737373; font-size: 9px; }
   .mobile-navigation button.active { color: var(--text); }
   .mobile-navigation button > span { font-size: 15px; }

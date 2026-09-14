@@ -1,5 +1,5 @@
 import { API_ERROR_CODES } from '@healthcare-ai/api-contracts';
-import { resilientFetch, createKnowledgeClient } from '@healthcare-ai/client-runtime';
+import { resilientFetch, createKnowledgeClient, createAnomalyClient } from '@healthcare-ai/client-runtime';
 
 export { API_ERROR_CODES };
 
@@ -110,6 +110,7 @@ export const createAgentClient = ({ baseUrl, platform = 'web', appVersion = '0.1
 
   return {
     knowledge: createKnowledgeClient(request, 'agent'),
+    anomalies: createAnomalyClient(request),
     get deviceId() { return deviceId; },
     get role() { return currentRole; },
     get identitySessionId() { return identitySessionId; },

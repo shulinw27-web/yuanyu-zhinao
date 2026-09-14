@@ -43,3 +43,4 @@ export {
   publishWorldModelDraft,
   validateWorldModelDraft
 } from '../../services/world-model-template-service.js';
+export { listAnomalyReports, changeAnomalyReport, extractAnomalyReport } from '../../services/anomaly-assistant-service.js';
