@@ -1,5 +1,7 @@
 # 当前项目状态
 
+2026-09-17 终端撤权增量：修复旧心跳缓存信任结果，补齐执行服务自身的沙箱准入及派发返回前复验；709次全量Node执行通过，新增5项包含两类派发竞争。已交付终端的动作不可由此撤回，生产P0仍未关闭。见[报告第16节](../development/MULTITENANT_VALIDATION.md#16-终端派发撤权复验2026-09-17)及[终端运行说明](../operations/DESKTOP_ENDPOINT_RUNTIME.md)。
+
 2026-09-17 沙箱运行准入增量：完成OIDC/钉钉映射清单预览与摘要确认、IAM/准入记录原子初始化、按租户每日配额和有限功能授权、门户停用/成员变化复验、会话代际失效与受控任务结果复验；客户中心申请/取消/检查状态已接入。真实SQLite多进程与独立浏览器回归完成。完整业务数据隔离、Token计量、全Worker撤权、自动部署和生产验收仍未完成。见[指南](../guides/TENANT_RUNTIME_CONTROL.md)和[报告第15节](../development/MULTITENANT_VALIDATION.md#15-沙箱初始化运行准入与门户申请界面2026-09-17)。以下为历史记录。
 
 2026-09-17 IAM隔离增量：人员、组织、策略和IAM审计按租户存储，OIDC/钉钉及HTTP授权使用可信租户上下文，同名账号不会借用其他企业权限；改权仅使本租户旧会话失效。全量683次通过，新增12项含真实HTTP验证。当时门户初始化/subject映射、商业权益和在途撤权仍未完成。见[升级注意事项](../guides/IDENTITY_PROVIDER_ADAPTERS.md)和[报告第14节](../development/MULTITENANT_VALIDATION.md#14-执行面iam租户隔离2026-09-17)。

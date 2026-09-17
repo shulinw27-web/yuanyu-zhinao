@@ -1,5 +1,7 @@
 # 项目文档中心
 
+2026-09-17 终端撤权：[实时信任与派发说明](operations/DESKTOP_ENDPOINT_RUNTIME.md) · [报告第16节](development/MULTITENANT_VALIDATION.md#16-终端派发撤权复验2026-09-17)。修复旧心跳信任缓存，执行入口与派发返回前复验；709次Node执行通过，生产门禁保持。
+
 协作约定：[GitHub提交与交付](development/GITHUB_DELIVERY.md)——每次上传使用简短中文说明，附验证范围，不提交私有配置与运行数据。
 
 2026-09-17 沙箱准入增量：[初始化与运行控制指南](guides/TENANT_RUNTIME_CONTROL.md) · [报告第15节](development/MULTITENANT_VALIDATION.md#15-沙箱初始化运行准入与门户申请界面2026-09-17)。补齐审核式人员初始化、有限功能配额、门户撤权复验及客户中心申请/取消界面；并非正式商业开通。以下为历史记录。

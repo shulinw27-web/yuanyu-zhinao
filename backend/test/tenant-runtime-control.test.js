@@ -8,6 +8,7 @@ import { runWithIAMStoreContext, getIAMUsers, getIAMOrganizations, getIAMRolePol
 import { createIdentitySessionService } from '../src/services/identity-session-service.js';
 import { runWithTenantExecution } from '../src/services/tenant-execution-context.js';
 import { dispatchAuthorizedRoutes } from '../src/http/authorized-route-dispatch.js';
+import { executePrivateAgentCommand, claimPrivateAgentLongTask, completePrivateAgentDesktopExecution } from '../src/services/private-agent-service.js';
 
 const timestamp = Date.parse('2026-09-17T00:00:00Z');
 function fixture(tenantId = 'enrolled-a', options = {}) {
@@ -29,6 +30,20 @@ function fixture(tenantId = 'enrolled-a', options = {}) {
 }
 test.beforeEach(() => { resetRuntimeState(['iam', 'tenant_runtime_control_v1', 'identity_sessions']); configureTenantRuntimeControl({}); });
 test.afterEach(() => configureTenantRuntimeControl({}));
+
+test('direct execution entry points cannot bypass enrolled sandbox feature boundaries', async () => {
+  const f = fixture(); f.install(); await f.approve();
+  const role = { id: 'executive' };
+  for (const operation of [
+    () => executePrivateAgentCommand('desktop_create_text_artifact', role, 'unused-run', 'unused-confirmation', f.identity),
+    () => executePrivateAgentCommand('launch_procurement', role, 'unused-run', 'unused-confirmation', f.identity),
+    () => claimPrivateAgentLongTask({ taskId: 'unused-task', role, identityScope: f.identity }),
+    () => completePrivateAgentDesktopExecution({ role, runId: 'unused-run', identityScope: f.identity })
+  ]) await assert.rejects(operation(), { code: 'RUNTIME_FEATURE_NOT_ENTITLED' });
+  assert.equal((await f.control.inspect(f.identity.tenantId)).usage.count, 0);
+  await f.control.revoke(f.identity.tenantId, 1);
+  await assert.rejects(claimPrivateAgentLongTask({ taskId: 'unused-task', role, identityScope: f.identity }), { code: 'RUNTIME_ENROLLMENT_REVOKED' });
+});
 
 test('review is read-only; explicit digest atomically initializes only approved tenant identities', async () => {
   const f = fixture(); const preview = await f.control.prepare(f.manifest);

@@ -123,7 +123,10 @@ export function getDesktopEndpointStatus(identityScope, nowAt = Date.now()) {
   const endpoint = readState(ENDPOINT_NAMESPACE, endpointKey(identity));
   if (!endpoint) return { connected: false, allowed: false, trustState: 'heartbeat_missing', reason: '当前设备尚未登记 Endpoint Runtime 心跳。', minimumVersion: minimumVersion() };
   if (new Date(endpoint.expiresAt).getTime() <= nowAt) return { ...structuredClone(endpoint), connected: false, allowed: false, trustState: 'heartbeat_stale', reason: '当前设备心跳已过期，请保持桌面端在线。' };
-  return { connected: true, ...structuredClone(endpoint) };
+  // Heartbeats prove liveness, not a lease on server trust policy. Recheck the
+  // current policy so key/manifest removal and version changes take effect now.
+  const trust = evaluateTrust(endpoint, endpoint.publicKeyFingerprint);
+  return { connected: true, ...structuredClone(endpoint), ...trust, minimumVersion: minimumVersion() };
 }
 
 export function authorizeDesktopEndpoint(identityScope, nowAt = Date.now()) {

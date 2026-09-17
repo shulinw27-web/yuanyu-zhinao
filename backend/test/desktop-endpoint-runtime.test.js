@@ -84,3 +84,45 @@ test('production accepts only packaged endpoints whose capability manifest is se
     if (previousKeys === undefined) delete process.env.ZHINAO_TRUSTED_ENDPOINT_KEYS; else process.env.ZHINAO_TRUSTED_ENDPOINT_KEYS = previousKeys;
   }
 });
+
+test('dispatch rechecks revoked keys, manifests and minimum versions before heartbeat expiry', () => {
+  const names = ['NODE_ENV', 'ZHINAO_TRUSTED_ENDPOINT_MANIFESTS', 'ZHINAO_TRUSTED_ENDPOINT_KEYS', 'ZHINAO_MIN_ENDPOINT_VERSION'];
+  const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
+  try {
+    process.env.NODE_ENV = 'production';
+    process.env.ZHINAO_TRUSTED_ENDPOINT_MANIFESTS = 'b'.repeat(64);
+    process.env.ZHINAO_TRUSTED_ENDPOINT_KEYS = publicKeyFingerprint;
+    process.env.ZHINAO_MIN_ENDPOINT_VERSION = '0.3.0';
+    const scope = identity('revocation');
+    const value = heartbeat({ packaged: true, trustClaim: 'packaged_unverified', keyProtection: 'os_user_bound', capabilityManifestHash: 'b'.repeat(64) }, 1_000);
+    assert.equal(registerDesktopEndpointHeartbeat({ identityScope: scope, heartbeat: value, nowAt: 1_000 }).allowed, true);
+    process.env.ZHINAO_TRUSTED_ENDPOINT_KEYS = '';
+    assert.equal(authorizeDesktopEndpoint(scope, 1_001).status.trustState, 'endpoint_key_untrusted');
+    process.env.ZHINAO_TRUSTED_ENDPOINT_KEYS = publicKeyFingerprint;
+    process.env.ZHINAO_TRUSTED_ENDPOINT_MANIFESTS = '';
+    assert.equal(authorizeDesktopEndpoint(scope, 1_002).status.trustState, 'manifest_untrusted');
+    process.env.ZHINAO_TRUSTED_ENDPOINT_MANIFESTS = 'b'.repeat(64);
+    process.env.ZHINAO_MIN_ENDPOINT_VERSION = '0.4.0';
+    const blocked = authorizeDesktopEndpoint(scope, 1_003);
+    assert.equal(blocked.allowed, false);
+    assert.equal(blocked.status.minimumVersion, '0.4.0');
+    assert.equal(blocked.status.trustState, 'version_blocked');
+    process.env.ZHINAO_MIN_ENDPOINT_VERSION = '0.3.0';
+    assert.equal(authorizeDesktopEndpoint(scope, 1_004).allowed, true);
+    assert.equal(authorizeDesktopEndpoint(scope, 76_001).allowed, false);
+  } finally {
+    for (const name of names) { if (previous[name] === undefined) delete process.env[name]; else process.env[name] = previous[name]; }
+  }
+});
+
+test('a development heartbeat cannot retain its cached allow decision after production mode starts', () => {
+  const previous = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = 'test';
+    const scope = identity('environment-change');
+    assert.equal(registerDesktopEndpointHeartbeat({ identityScope: scope, heartbeat: heartbeat({}, 1_000), nowAt: 1_000 }).allowed, true);
+    process.env.NODE_ENV = 'production';
+    assert.equal(authorizeDesktopEndpoint(scope, 1_001).allowed, false);
+    assert.equal(getDesktopEndpointStatus(scope, 1_001).trustState, 'development_rejected');
+  } finally { if (previous === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previous; }
+});

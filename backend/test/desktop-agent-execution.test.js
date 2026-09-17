@@ -6,6 +6,9 @@ import { claimPrivateAgentLongTask, completePrivateAgentDesktopExecution, execut
 import { buildDesktopArtifactCommand, buildDesktopCommandForInput, getDesktopToolCatalog, validateDesktopToolInvocation } from '../src/services/desktop-tool-registry.js';
 import { getAgentLearningProfile, updateAgentLearningProfile } from '../src/services/agent-learning-governance-service.js';
 import { registerDesktopEndpointHeartbeat } from '../src/services/desktop-endpoint-service.js';
+import { configureAgentLongTaskRepository } from '../src/services/agent-long-task-store.js';
+import { claimAgentLongTask, markAgentLongTaskDispatched, failAgentLongTask, getAgentLongTask } from '../src/services/agent-long-task-service.js';
+import { getAgentRun } from '../src/services/agent-run-store.js';
 
 test('negative desktop clauses never create confirmation cards or shadow an affirmative destination', () => {
   for (const input of ['分析库存，不要生成文件，也不要发起业务流程。', '不要打开 https://example.com', '不要读取工作区中的 test.txt', '不要复制到剪贴板', '不保存报告，只解释内容']) {
@@ -43,6 +46,39 @@ const connectEndpoint = (identityScope) => {
   heartbeat.signature = sign(null, Buffer.from(payload), endpointKeyPair.privateKey).toString('base64url');
   return registerDesktopEndpointHeartbeat({ identityScope, heartbeat });
 };
+
+for (const gate of ['endpoint', 'tenant']) test(`dispatch is withheld when ${gate} policy changes during queue persistence`, async () => {
+  const role = getRole('production_manager');
+  const scope = { ...identity, subjectId: `race-${gate}`, sessionId: `race-session-${gate}` };
+  const envName = gate === 'endpoint' ? 'ZHINAO_MIN_ENDPOINT_VERSION' : 'TENANT_RUNTIME_CONTROL_REQUIRED';
+  const previous = process.env[envName];
+  try {
+    assert.equal(connectEndpoint(scope).allowed, true);
+    const plan = await runPrivateAgent('请生成一份《撤权测试》文档并保存到工作区', role, scope);
+    const queued = await executePrivateAgentCommand(plan.command.id, role, plan.runId, plan.command.confirmationToken, scope);
+    // Exercise the asynchronous repository port while retaining the real local
+    // state transitions. This is fault injection, not PostgreSQL validation.
+    configureAgentLongTaskRepository({
+      enqueue: async () => { throw new Error('unused'); },
+      expireDueTasks: async () => [], recordHeartbeat: async () => {}, claimRunTransitions: async () => [],
+      claimTask: async input => claimAgentLongTask(input),
+      markDispatched: async (...args) => {
+        const result = markAgentLongTaskDispatched(...args);
+        process.env[envName] = gate === 'endpoint' ? '99.0.0' : 'true';
+        return result;
+      },
+      failTask: async (...args) => failAgentLongTask(...args)
+    });
+    await assert.rejects(claimPrivateAgentLongTask({ taskId: queued.runtimeTask.id, role, identityScope: scope }), {
+      code: gate === 'endpoint' ? 'DESKTOP_ENDPOINT_VERSION_BLOCKED' : 'RUNTIME_ENROLLMENT_REQUIRED'
+    });
+    assert.equal(getAgentLongTask(queued.runtimeTask.id).status, 'failed');
+    assert.equal((await getAgentRun(plan.runId)).status, 'execution_failed');
+  } finally {
+    configureAgentLongTaskRepository();
+    if (previous === undefined) delete process.env[envName]; else process.env[envName] = previous;
+  }
+});
 
 test('desktop tool catalog fails closed for destructive and external actions', () => {
   const catalog = getDesktopToolCatalog();

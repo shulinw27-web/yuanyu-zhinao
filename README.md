@@ -6,6 +6,8 @@
 
 ### 以语义层连接企业数据，以 Agent 承接业务与工作
 
+2026-09-17 终端撤权补充：设备信任实时复验、执行服务租户准入、派发返回前拒绝过期权限；709次全量Node执行通过。不承诺撤回已下发动作，完整生产多租户仍在建设。[验证与边界](docs/development/MULTITENANT_VALIDATION.md#16-终端派发撤权复验2026-09-17)。
+
 2026-09-17 沙箱准入：已加入审核式OIDC/钉钉人员初始化、有限功能与配额、门户撤权复验，以及客户中心申请/取消界面。704次全量执行、真实语义进程16个计数与Python32项通过；不是生产开通。[操作指南](docs/guides/TENANT_RUNTIME_CONTROL.md) · [本轮报告](docs/development/MULTITENANT_VALIDATION.md#15-沙箱初始化运行准入与门户申请界面2026-09-17) · [中文提交约定](docs/development/GITHUB_DELIVERY.md)。下方保留历史阶段记录。
 
 2026-09-17 权限隔离增量：企业IAM人员、组织、策略和审计按租户保存，认证及会话版本验证绑定可信租户；683次全量自动化执行通过。门户自动初始化身份、权益计量和在途撤权仍未交付，不代表生产多租户就绪。[身份与升级边界](docs/guides/IDENTITY_PROVIDER_ADAPTERS.md) · [测试报告](docs/development/MULTITENANT_VALIDATION.md#14-执行面iam租户隔离2026-09-17)。

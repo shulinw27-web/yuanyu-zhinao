@@ -28,6 +28,7 @@ import { buildDesktopCommandForInput, createDesktopExecutionDispatch, validateDe
 import { recordApprovedWorkflowSignal } from './agent-learning-governance-service.js';
 import { assessAgentAnswer } from './agent-answer-governance-service.js';
 import { authorizeDesktopEndpoint } from './desktop-endpoint-service.js';
+import { authorizeTenantRuntime } from './tenant-runtime-control-service.js';
 import { claimAgentLongTask, completeAgentLongTaskByRun, enqueueAgentLongTask, failAgentLongTask, markAgentLongTaskDispatched } from './agent-long-task-store.js';
 import {
   guidanceForAttachmentRejected,
@@ -897,6 +898,8 @@ export async function executePrivateAgentCommand(commandId, role, runId, confirm
     tenantId: identityScope?.tenantId || 'demo-enterprise',
     subjectId: identityScope?.subjectId || `role:${role.id}`
   };
+  // Service callers (including workers) must not depend on the HTTP gate alone.
+  await authorizeTenantRuntime(traceIdentity, { feature: String(commandId || '').startsWith('desktop_') ? 'desktop-execution' : 'business-execution' });
   const existingTrace = await getAgentEvidenceTraceByRunId(runId, [role.id], traceIdentity);
   const traceId = existingTrace?.id || null;
   if (traceId) appendAgentEvidenceEvent(traceId, {
@@ -1013,6 +1016,7 @@ export async function executePrivateAgentCommand(commandId, role, runId, confirm
 }
 
 export async function claimPrivateAgentLongTask({ taskId, role, identityScope }) {
+  await authorizeTenantRuntime(identityScope, { feature: 'desktop-execution' });
   const endpointAuthorization = authorizeDesktopEndpoint(identityScope);
   if (!endpointAuthorization.allowed) return { error: endpointAuthorization.error, code: endpointAuthorization.code, endpoint: endpointAuthorization.status };
   const claimed = await claimAgentLongTask({ taskId, roleId: role.id, identityScope });
@@ -1051,18 +1055,32 @@ export async function claimPrivateAgentLongTask({ taskId, role, identityScope })
       });
       setAgentEvidenceTraceStatus(traceId, 'endpoint_execution_pending');
     }
+    const dispatchEvidence = traceId ? await getAgentEvidenceTrace(traceId, [role.id], traceIdentity) : null;
+    // Storage awaits above may overlap a tenant/endpoint policy change. Never
+    // release the executable dispatch if that authority is no longer current.
+    try {
+      await authorizeTenantRuntime(identityScope, { feature: 'desktop-execution' });
+      const currentEndpoint = authorizeDesktopEndpoint(identityScope);
+      if (!currentEndpoint.allowed) throw Object.assign(new Error(currentEndpoint.error), { code: currentEndpoint.code, status: 403 });
+    } catch (error) {
+      await failAgentLongTask(task.id, '派发返回前权限复验未通过，未向终端交付指令。');
+      await recordAgentExecutionFailure(task.runId, '派发返回前权限复验未通过。');
+      if (traceId) setAgentEvidenceTraceStatus(traceId, 'execution_failed', { completed: true });
+      throw error;
+    }
     return {
       text: '本地文档创建已授权，正在等待当前桌面端执行并返回文件哈希。',
       desktopExecution: dispatch,
       runtimeTask: runtimeTask.task,
       runId: task.runId,
       traceId,
-      evidenceTrace: traceId ? await getAgentEvidenceTrace(traceId, [role.id], traceIdentity) : null,
+      evidenceTrace: dispatchEvidence,
       lifecycle: lifecycle('endpoint_execution_pending', '已授权，等待桌面端回执', { businessWrite: 'local_artifact_pending' })
     };
 }
 
 export async function completePrivateAgentDesktopExecution({ role, runId, commandId, dispatchId, receipt, identityScope }) {
+  await authorizeTenantRuntime(identityScope, { feature: 'desktop-execution' });
   const validation = validateDesktopExecutionReceipt(receipt);
   if (!validation.valid) return { error: validation.error, code: validation.code };
   const traceIdentity = {
