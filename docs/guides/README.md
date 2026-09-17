@@ -1,5 +1,15 @@
 # 使用指南
 
+- [企业沙箱初始化与运行准入](TENANT_RUNTIME_CONTROL.md)：OIDC/钉钉映射审核、原子初始化、请求额度、撤权复验及门户申请界面。
+
+- [企业身份源与租户权限边界](IDENTITY_PROVIDER_ADAPTERS.md)：IAM工作区隔离、可信企业绑定、改权失效，以及旧会话重新登录和账号初始化限制。
+
+- [门户开通申请与运行环境预检](PORTAL_RUNTIME_PROVISIONING.md)：申请/取消API、运维检查、失效和幂等规则；尚未激活企业运行环境。
+
+- [Semantica 独立租户实例接入](SEMANTIC_TENANT_INSTANCES.md)：私有配置、服务身份、启动与轮换、SQLite持久化、停机备份/新库恢复及真实双实例测试。
+
+- [产品官网与客户中心](PRODUCT_PORTAL.md)：本机启动、管理员授权、租户成员、会员、测试余额、优惠券与正式上线边界。
+
 - [异常助手：现场汇报与结构化记录](ANOMALY_ASSISTANT.md)：操作、接口、模型开关、测试结果与真实群接入边界。
 
 - [知识资料、理解草稿与记忆校对](KNOWLEDGE_WORKSPACE_GUIDE.md)：双端入口、来源复验、私有 WeKnora 配置及未启用边界。

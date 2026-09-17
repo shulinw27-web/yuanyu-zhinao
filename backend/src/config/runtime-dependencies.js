@@ -8,6 +8,7 @@ import { configureAgentConversationRepository } from '../services/agent-conversa
 import { configureAgentLearningRepository } from '../services/agent-learning-governance-service.js';
 import { configureAgentOrchestrationRepository } from '../services/agent-orchestration-service.js';
 import { configureIAMRepository } from '../services/iam-store.js';
+import { configureTenantRuntimeControl } from '../services/tenant-runtime-control-service.js';
 import { configureRiskProcurementRepository } from '../services/risk-procurement-store.js';
 import { configureDomainEventRepository } from '../domains/events/domain-event-outbox.js';
 import { configureDomainEventConsumerRepository } from '../workers/domain-event-worker.js';
@@ -24,7 +25,11 @@ export async function configureRuntimeDependencies(configuration) {
     return repository;
   };
   if (configuration.identitySessionStoreDriver === 'postgres') configureIdentitySessionRepository(await runtimeRepository());
-  if (configuration.iamStoreDriver === 'postgres') configureIAMRepository(await runtimeRepository());
+  if (configuration.iamStoreDriver === 'postgres') {
+    const repository = await runtimeRepository();
+    configureIAMRepository(repository);
+    configureTenantRuntimeControl({ repository });
+  }
   if (configuration.riskProcurementStoreDriver === 'postgres') configureRiskProcurementRepository(await runtimeRepository());
   if (configuration.alertingStoreDriver === 'postgres') configureAlertingRepository(await runtimeRepository());
   if (configuration.simulationStoreDriver === 'postgres') configureSimulationRepository(await runtimeRepository());

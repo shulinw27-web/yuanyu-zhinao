@@ -1,7 +1,11 @@
 import { getRuntimeStoreInfo, mutateState, mutateStates, readState } from '../repositories/runtime-state-repository.js';
 import { appendDomainEventToWorkspace, DOMAIN_EVENT_NAMESPACE, DOMAIN_EVENT_WORKSPACE_KEY, initialDomainEventWorkspace, mutateWithDomainEvent } from '../domains/events/domain-event-outbox.js';
+import { semanticTenantStateKey } from './semantic-tenant-context.js';
 
 let postgresRepository = null;
+const tenantWorkspaceNamespaces = new Set(['oa_meta_model_runtime', 'ontology_publication']);
+const scopedKey = (namespace, key) => tenantWorkspaceNamespaces.has(namespace) ? semanticTenantStateKey(key) : key;
+const scopedEntry = entry => ({ ...entry, key: scopedKey(entry.namespace, entry.key) });
 
 export function configureSemanticGovernanceRepository(repository = null) {
   if (repository && typeof repository.mutateState !== 'function') throw new TypeError('Semantic governance repository does not implement the asynchronous runtime-state port.');
@@ -10,11 +14,12 @@ export function configureSemanticGovernanceRepository(repository = null) {
 
 export const getSemanticGovernanceStoreInfo = () => postgresRepository?.getInfo?.() || getRuntimeStoreInfo();
 export const probeSemanticGovernanceStore = () => postgresRepository ? postgresRepository.probe() : Promise.resolve({ ready: true });
-export const readSemanticGovernanceState = (namespace, key, initialValue) => postgresRepository ? postgresRepository.readState(namespace, key, initialValue) : readState(namespace, key, initialValue);
-export const mutateSemanticGovernanceState = (namespace, key, initialValue, callback) => postgresRepository ? postgresRepository.mutateState(namespace, key, initialValue, callback) : mutateState(namespace, key, initialValue, callback);
-export const mutateSemanticGovernanceStates = (entries, callback) => postgresRepository ? postgresRepository.mutateStates(entries, callback) : mutateStates(entries, callback);
+export const readSemanticGovernanceState = (namespace, key, initialValue) => postgresRepository ? postgresRepository.readState(namespace, scopedKey(namespace, key), initialValue) : readState(namespace, scopedKey(namespace, key), initialValue);
+export const mutateSemanticGovernanceState = (namespace, key, initialValue, callback) => postgresRepository ? postgresRepository.mutateState(namespace, scopedKey(namespace, key), initialValue, callback) : mutateState(namespace, scopedKey(namespace, key), initialValue, callback);
+export const mutateSemanticGovernanceStates = (entries, callback) => postgresRepository ? postgresRepository.mutateStates(entries.map(scopedEntry), callback) : mutateStates(entries.map(scopedEntry), callback);
 
 export function mutateSemanticGovernanceWithEvent({ namespace, key, initialValue, mutation }) {
+  key = scopedKey(namespace, key);
   if (!postgresRepository) return mutateWithDomainEvent({ namespace, key, initialValue, mutation });
   return postgresRepository.mutateStates([
     { name: 'aggregate', namespace, key, initialValue },

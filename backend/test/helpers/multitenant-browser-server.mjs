@@ -1,0 +1,21 @@
+import { multitenantFixture, isolatedPortal } from './multitenant-fixture.js';
+
+const f = multitenantFixture();
+const password = 'Synthetic-MultiTenant-Only-2026!';
+const email = 'browser-owner@example.test';
+await f.service.register({ email, name: '合成浏览器用户', password, acceptedTerms: true });
+const login = await f.service.login({ email, password });
+const act = (action, body) => f.service.perform(login.sessionToken, login.csrfToken, action, body);
+const a = act('tenant.create', { name: '合成甲公司-所有者', slug: 'browser-company-a', requestId: 'browser-a' }).tenantId;
+const b = f.tenant('bob', 'browser-company-b');
+const invitation = f.act('bob', 'tenant.invite', { tenantId: b, email, role: 'member' });
+act('invite.accept', { token: invitation.invitationToken });
+const pending = act('order.create', { tenantId: a, kind: 'recharge', amountCents: 20000, requestId: 'browser-credit' }).order;
+act('order.pay', { orderId: pending.id, method: 'sandbox', confirmed: true });
+f.pay('bob', f.order('bob', b, { amountCents: 50000 }).id);
+const otherEmail = 'browser-other@example.test';
+await f.service.register({ email: otherEmail, name: '合成独立用户', password, acceptedTerms: true });
+const other = await f.service.login({ email: otherEmail, password });
+f.service.perform(other.sessionToken, other.csrfToken, 'tenant.create', { name: '合成丙公司-独立账号', slug: 'browser-company-c', requestId: 'browser-c' });
+const server = await isolatedPortal(f);
+console.log(JSON.stringify({ url: server.url, email, otherEmail, tenantA: a, tenantB: b, note: 'Memory only. Password is a public synthetic fixture, never reuse it.' }));

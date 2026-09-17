@@ -9,6 +9,14 @@
     "apps/*"
   ],
   "scripts": {
+    "dev:portal": "npm run dev -w @healthcare-ai/product-portal",
+    "start:portal-api": "node scripts/product-portal-runtime.mjs --sandbox-payments",
+    "portal:admin": "node scripts/product-portal-runtime.mjs --admin-email",
+    "build:portal": "npm run build -w @healthcare-ai/product-portal",
+    "test:portal": "node --test backend/test/product-portal.test.js backend/test/portal-provisioning.test.js",
+    "test:multitenant": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/multitenant-validation.test.js backend/test/semantic-tenant-isolation.test.js backend/test/semantic-instance-transport.test.js backend/test/iam-tenant-isolation.test.js backend/test/iam-tenant-http.test.js backend/test/tenant-runtime-control.test.js backend/test/tenant-runtime-sqlite.test.js",
+    "test:semantic-instances": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/semantic-instance-process.test.js",
+    "evaluate:multitenant-readiness": "node scripts/probe-multitenant-readiness.mjs",
     "test:anomaly": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/anomaly-assistant.test.js",
     "evaluate:anomaly": "node scripts/evaluate-anomaly-assistant.mjs",
     "docs:check": "node scripts/check-docs.mjs",
@@ -25,7 +33,7 @@
     "test:semantic-workbench-fixture": "node --test backend/test/semantic-workbench-fixture.test.js",
     "lint": "eslint .",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
-    "quality": "npm run lint && npm run typecheck && npm run test:all && npm run test:anomaly",
+    "quality": "npm run lint && npm run typecheck && npm run test:all && npm run test:anomaly && npm run test:portal && npm run test:multitenant",
     "security:source-scan": "node scripts/security-source-scan.mjs",
     "security:licenses": "node scripts/generate-license-inventory.mjs",
     "security:sbom": "npm sbom --sbom-format cyclonedx > output/sbom.cdx.json",

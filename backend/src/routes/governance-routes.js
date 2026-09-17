@@ -1,4 +1,5 @@
 import {
+  runWithSemanticTenant,
   runOntologyReadReplay,
   archiveSemanticOperationsTask,
   createWorldModelDraft,
@@ -48,7 +49,13 @@ import {
   validateWorldModelDraft
 } from '../domains/governance/public-api.js';
 
-export async function handleGovernanceRoutes({ req, res, url, role, agentIdentity, effectiveAccess, selectActionRole, denyButton, readBody, send }) {
+export function handleGovernanceRoutes(context) {
+  // Unrelated public routes may have no authenticated identity.
+  if (!/^\/api\/(?:meta-models|meta-objects|world-model|semantic|knowledge|agent\/knowledge)/u.test(context.url.pathname)) return false;
+  return runWithSemanticTenant(context.agentIdentity, () => handleTenantGovernanceRoutes(context));
+}
+
+async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity, effectiveAccess, selectActionRole, denyButton, readBody, send }) {
   if (req.method === 'POST' && url.pathname === '/api/meta-models/oa-governance/read-plan-replay') {
     const actionRole = selectActionRole('meta_model.publish');
     if (!actionRole) { denyButton('meta_model.publish'); return true; }

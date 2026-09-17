@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mutateSemanticGovernanceState, readSemanticGovernanceState } from './semantic-governance-store.js';
 import { semanticOperationsOwnerMatches, semanticOperationsPrincipalKey } from './semantic-operations-identity.js';
 import { createSemanticOperationsNotification } from './semantic-operations-notification-service.js';
+import { runWithSemanticTenant } from './semantic-tenant-context.js';
 
 const NAMESPACE = 'semantic_inspection_schedules';
 const KEY = 'index';
@@ -68,7 +69,7 @@ export async function runSemanticInspectionCycle({ workerId = `semantic-worker-$
   while (count < maxRuns) {
     const schedule = await claimDueSemanticInspection({ workerId });
     if (!schedule) break;
-    try { await completeSemanticInspection({ id: schedule.id, workerId, result: await executeInspection(schedule) }); }
+    try { await completeSemanticInspection({ id: schedule.id, workerId, result: await runWithSemanticTenant(schedule.identityScope, () => executeInspection(schedule)) }); }
     catch (error) { await completeSemanticInspection({ id: schedule.id, workerId, error: error.message }); }
     count += 1;
   }

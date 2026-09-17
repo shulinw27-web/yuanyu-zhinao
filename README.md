@@ -2,7 +2,13 @@
 
 # 元域智脑 · Yuanyu Zhinao
 
+产品化新增：[元域官网与客户中心](docs/guides/PRODUCT_PORTAL.md) · [开发范围与验收](docs/development/PRODUCT_PORTAL_ACCEPTANCE.md)。官网、公开技术文档、注册、租户、成员、会员、测试余额与优惠券已提供本地入口；独立商业控制面尚未连接真实收款或生产租户实例。
+
 ### 以语义层连接企业数据，以 Agent 承接业务与工作
+
+2026-09-17 沙箱准入：已加入审核式OIDC/钉钉人员初始化、有限功能与配额、门户撤权复验，以及客户中心申请/取消界面。704次全量执行、真实语义进程16个计数与Python32项通过；不是生产开通。[操作指南](docs/guides/TENANT_RUNTIME_CONTROL.md) · [本轮报告](docs/development/MULTITENANT_VALIDATION.md#15-沙箱初始化运行准入与门户申请界面2026-09-17) · [中文提交约定](docs/development/GITHUB_DELIVERY.md)。下方保留历史阶段记录。
+
+2026-09-17 权限隔离增量：企业IAM人员、组织、策略和审计按租户保存，认证及会话版本验证绑定可信租户；683次全量自动化执行通过。门户自动初始化身份、权益计量和在途撤权仍未交付，不代表生产多租户就绪。[身份与升级边界](docs/guides/IDENTITY_PROVIDER_ADAPTERS.md) · [测试报告](docs/development/MULTITENANT_VALIDATION.md#14-执行面iam租户隔离2026-09-17)。
 
 第七批增量：语义运营可导入并逐项回放最多三个读取方案，业务知识页展示发布目录、根对象与输出口径，选定一个后只读联合核验；模型变更拒绝旧选择，事实与原文分列。不执行处置、不调用额外模型，自动联合规划仍待开发。[使用指南](docs/guides/KNOWLEDGE_WORKSPACE_GUIDE.md) · [最新验收](docs/development/WEKNORA_UPGRADE_ACCEPTANCE.md)。
 

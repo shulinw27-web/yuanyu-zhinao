@@ -44,3 +44,4 @@ export {
   validateWorldModelDraft
 } from '../../services/world-model-template-service.js';
 export { listAnomalyReports, changeAnomalyReport, extractAnomalyReport } from '../../services/anomaly-assistant-service.js';
+export { runWithSemanticTenant } from '../../services/semantic-tenant-context.js';

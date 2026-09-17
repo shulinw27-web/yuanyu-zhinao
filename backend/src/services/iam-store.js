@@ -6,17 +6,26 @@ import { createAsyncIAMStore } from './async-iam-store.js';
 import {
   CURRENT_IAM_SCHEMA_VERSION,
   IAM_NAMESPACE,
-  IAM_WORKSPACE_KEY,
-  createInitialIAMWorkspace,
+  iamWorkspaceKey,
+  createTenantIAMWorkspace,
   migrateIAMWorkspace,
   normalizeIAMAccount
 } from './iam-workspace-model.js';
 
 const clone = (value) => structuredClone(value);
-const initialWorkspace = createInitialIAMWorkspace;
+const initialWorkspace = () => createTenantIAMWorkspace(currentIAMTenant());
 const requestContext = new AsyncLocalStorage();
 let asyncStore = null;
 let asyncRepository = null;
+
+export const currentIAMTenant = () => requestContext.getStore()?.tenantId || 'demo-enterprise';
+const workspaceKey = () => iamWorkspaceKey(currentIAMTenant());
+const activeAsyncStore = () => requestContext.getStore()?.store || asyncStore;
+export function assertIAMTenant(identity) {
+  if (identity?.tenantId && identity.tenantId !== currentIAMTenant()) {
+    throw Object.assign(new Error('身份与当前权限工作区的租户不一致。'), { code: 'IAM_TENANT_MISMATCH', status: 403 });
+  }
+}
 
 const workspaceFromSnapshot = (snapshot) => ({
   schemaVersion: CURRENT_IAM_SCHEMA_VERSION,
@@ -35,15 +44,20 @@ export function configureIAMRepository(repository) {
 export const getIAMStoreInfo = () => asyncRepository?.getInfo?.() || getRuntimeStoreInfo();
 export const probeIAMStore = async () => asyncRepository?.probe ? asyncRepository.probe() : { ready: true };
 
-export async function runWithIAMStoreContext(operation) {
-  if (!asyncStore) return operation();
-  const snapshot = await asyncStore.getSnapshot();
-  return requestContext.run({ workspace: workspaceFromSnapshot(snapshot) }, operation);
+export async function runWithIAMStoreContext(operation, tenantId = requestContext.getStore()?.tenantId) {
+  const parent = requestContext.getStore();
+  if (parent?.tenantId && tenantId !== parent.tenantId) assertIAMTenant({ tenantId });
+  const resolvedTenant = tenantId ?? 'demo-enterprise';
+  iamWorkspaceKey(resolvedTenant);
+  const store = asyncRepository ? createAsyncIAMStore({ repository: asyncRepository, tenantId: resolvedTenant }) : null;
+  const snapshot = store ? await store.getSnapshot() : null;
+  // Undefined tenant is an authentication bootstrap, never an authenticated tenant.
+  return requestContext.run({ tenantId, store, workspace: snapshot ? workspaceFromSnapshot(snapshot) : null }, operation);
 }
 
 const refreshRequestWorkspace = async () => {
   const context = requestContext.getStore();
-  if (asyncStore && context) context.workspace = workspaceFromSnapshot(await asyncStore.getSnapshot());
+  if (activeAsyncStore() && context) context.workspace = workspaceFromSnapshot(await activeAsyncStore().getSnapshot());
 };
 
 const workspace = () => {
@@ -56,9 +70,9 @@ const workspace = () => {
     }
     return context.workspace;
   }
-  const current = readState(IAM_NAMESPACE, IAM_WORKSPACE_KEY, initialWorkspace);
+  const current = readState(IAM_NAMESPACE, workspaceKey(), initialWorkspace);
   if (Number(current.schemaVersion || 1) >= CURRENT_IAM_SCHEMA_VERSION) return current;
-  return mutateState(IAM_NAMESPACE, IAM_WORKSPACE_KEY, initialWorkspace, (state) => {
+  return mutateState(IAM_NAMESPACE, workspaceKey(), initialWorkspace, (state) => {
     migrateIAMWorkspace(state);
     return { value: state, result: clone(state) };
   });
@@ -98,8 +112,12 @@ export function getIAMRolePolicy(roleId) {
 }
 
 export async function updateIAMUser(userId, nextValue, expectedVersion, domainEvent) {
+  if (domainEvent) {
+    const original = domainEvent;
+    domainEvent = (result) => ({ ...(typeof original === 'function' ? original(result) : original), tenantId: currentIAMTenant() });
+  }
   if (asyncStore) {
-    const result = await asyncStore.updateUser(userId, nextValue, expectedVersion, domainEvent);
+    const result = await activeAsyncStore().updateUser(userId, nextValue, expectedVersion, domainEvent);
     if (!result?.error) await refreshRequestWorkspace();
     return result;
   }
@@ -122,13 +140,17 @@ export async function updateIAMUser(userId, nextValue, expectedVersion, domainEv
     return { value: state, result, ...(domainEvent ? { event: typeof domainEvent === 'function' ? domainEvent(result) : domainEvent } : {}) };
   };
   return domainEvent
-    ? mutateWithDomainEvent({ namespace: IAM_NAMESPACE, key: IAM_WORKSPACE_KEY, initialValue: initialWorkspace, mutation })
-    : mutateState(IAM_NAMESPACE, IAM_WORKSPACE_KEY, initialWorkspace, mutation);
+    ? mutateWithDomainEvent({ namespace: IAM_NAMESPACE, key: workspaceKey(), initialValue: initialWorkspace, mutation })
+    : mutateState(IAM_NAMESPACE, workspaceKey(), initialWorkspace, mutation);
 }
 
 export async function updateIAMRolePolicy(roleId, nextValue, expectedVersion, domainEvent) {
+  if (domainEvent) {
+    const original = domainEvent;
+    domainEvent = (result) => ({ ...(typeof original === 'function' ? original(result) : original), tenantId: currentIAMTenant() });
+  }
   if (asyncStore) {
-    const result = await asyncStore.updateRolePolicy(roleId, nextValue, expectedVersion, domainEvent);
+    const result = await activeAsyncStore().updateRolePolicy(roleId, nextValue, expectedVersion, domainEvent);
     if (!result?.error) await refreshRequestWorkspace();
     return result;
   }
@@ -146,17 +168,17 @@ export async function updateIAMRolePolicy(roleId, nextValue, expectedVersion, do
     return { value: state, result, ...(domainEvent ? { event: typeof domainEvent === 'function' ? domainEvent(result) : domainEvent } : {}) };
   };
   return domainEvent
-    ? mutateWithDomainEvent({ namespace: IAM_NAMESPACE, key: IAM_WORKSPACE_KEY, initialValue: initialWorkspace, mutation })
-    : mutateState(IAM_NAMESPACE, IAM_WORKSPACE_KEY, initialWorkspace, mutation);
+    ? mutateWithDomainEvent({ namespace: IAM_NAMESPACE, key: workspaceKey(), initialValue: initialWorkspace, mutation })
+    : mutateState(IAM_NAMESPACE, workspaceKey(), initialWorkspace, mutation);
 }
 
 export async function appendIAMAudit(event) {
   if (asyncStore) {
-    const result = await asyncStore.appendAudit(event);
+    const result = await activeAsyncStore().appendAudit(event);
     await refreshRequestWorkspace();
     return result;
   }
-  return mutateState(IAM_NAMESPACE, IAM_WORKSPACE_KEY, initialWorkspace, (state) => {
+  return mutateState(IAM_NAMESPACE, workspaceKey(), initialWorkspace, (state) => {
     const audit = {
       id: event.id || `iam-audit-${randomUUID()}`,
       action: event.action,

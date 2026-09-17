@@ -1,5 +1,5 @@
 import { permissionCatalog } from '../data/iam-seed.js';
-import { findActiveIAMUserForRole, findIAMUserBySubject, getIAMOrganizations, getIAMRolePolicy } from './iam-store.js';
+import { assertIAMTenant, currentIAMTenant, findActiveIAMUserForRole, findIAMUserBySubject, getIAMOrganizations, getIAMRolePolicy } from './iam-store.js';
 import { getRoleDefinition, isKnownRole } from './role-catalog-service.js';
 
 export const EXECUTIVE_REQUIRED_PERMISSIONS = ['permission.user.assign', 'permission.policy.save'];
@@ -19,7 +19,7 @@ const resolvePrincipal = (roleId, identityContext) => {
   const trustedDemoIdentity = source === 'demo_header'
     && typeof subjectId === 'string'
     && demoSubjectPattern.test(subjectId);
-  const allowDemoRoleFallback = demoRoleFallbackEnabled() && isKnownRole(roleId) && trustedDemoIdentity;
+  const allowDemoRoleFallback = currentIAMTenant() === 'demo-enterprise' && demoRoleFallbackEnabled() && isKnownRole(roleId) && trustedDemoIdentity;
   if (subjectId && !trustedDemoIdentity) {
     return { subjectId, user: findIAMUserBySubject(subjectId), allowDemoRoleFallback: false, source: source || 'subject' };
   }
@@ -68,6 +68,7 @@ export function hasEffectiveButtonPermission(roleId, code, subjectId) {
 }
 
 export function getEffectiveAccess(roleId, subjectId) {
+  assertIAMTenant(subjectId);
   const principal = resolvePrincipal(roleId, subjectId);
   const user = principal.user;
   const roleIds = user

@@ -1,4 +1,5 @@
 import { claimDueAgentOrchestrations, finalizeAgentOrchestrationRun, recordAgentOrchestrationCheckpoint } from '../services/agent-orchestration-service.js';
+import { runWithTenantExecution } from '../services/tenant-execution-context.js';
 
 const successfulDependency = (task, step) => step.dependsOn.every((id) => task.checkpoints[id]?.status === 'succeeded');
 
@@ -28,7 +29,7 @@ export async function executeClaimedAgentOrchestration({ task, workerId, execute
       if (started.error) { failed = true; break; }
       task.checkpoints[step.id] = started.checkpoints[step.id];
       try {
-        const result = await executeStep({ task, step, identityScope });
+        const result = await runWithTenantExecution({ identity: identityScope, roleId: task.roleId, feature: 'background-agent', permission: 'page.agent.view' }, () => executeStep({ task, step, identityScope }));
         // A returned message is not a completion receipt. Clarification,
         // refusal and partial analyses must stop the dependent DAG steps.
         if (!result?.traceId || !['succeeded', 'waiting_confirmation'].includes(result.outcome) || (step.mode === 'proposal' && result.outcome !== 'waiting_confirmation')) {

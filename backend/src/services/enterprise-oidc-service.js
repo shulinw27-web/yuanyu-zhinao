@@ -1,5 +1,5 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
-import { findIAMUserByAccount } from './iam-store.js';
+import { findIAMUserByAccount, runWithIAMStoreContext } from './iam-store.js';
 
 const jwksCache = new Map();
 const allowedAccountClaims = new Set(['email', 'preferred_username', 'upn']);
@@ -36,7 +36,7 @@ export async function verifyEnterpriseAccessToken(token, { env = process.env, jw
       ? subjectBindings.find((item) => item.subject === payload.sub)?.account
       : String(payload[config.accountClaim] || '').trim().toLowerCase();
     if (!account) return { error: '企业身份未绑定平台账号。', code: 'OIDC_IAM_USER_NOT_FOUND' };
-    const user = findIAMUserByAccount(account);
+    const user = await runWithIAMStoreContext(() => findIAMUserByAccount(account), config.tenantId || 'demo-enterprise');
     if (!user || user.status !== 'active' || !user.roleIds.includes(user.primaryRoleId)) return { error: '企业身份未映射到已启用的平台账号。', code: 'OIDC_IAM_USER_NOT_FOUND' };
     return {
       role: user.primaryRoleId,

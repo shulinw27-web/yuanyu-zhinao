@@ -56,10 +56,10 @@ paths:
     post:
       tags: [Agent]
       operationId: changeAnomalyReport
-      description: 需page.agent.view及agent.prompt.run。所有动作必须提供当前expectedRevision。extract还需精确模型consent；edit/retract需reason；confirm需confirmed=true。补充、更正或AI提取退回草稿。确认只是汇报登记，不是业务审批或执行。
+      description: 需page.agent.view及agent.prompt.run。所有动作必须提供当前expectedRevision。extract还需精确模型consent，输出字段、带引文的AI理解/分析和问题；edit/retract需reason；ask生成本站提报人确认请求及未发送的@预览；reply需reviewId/text，仅本站原提报人可回复；confirm需reviewId及confirmed=true。reply、补充、更正或AI解读使旧确认失效；回复后必须重新整理再ask。没有真实群发送或下游执行。
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, maxLength: 100 } }
-        - { name: action, in: path, required: true, schema: { type: string, enum: [append, edit, extract, confirm, retract] } }
+        - { name: action, in: path, required: true, schema: { type: string, enum: [append, edit, extract, ask, reply, confirm, retract] } }
       requestBody:
         required: true
         content:
@@ -83,6 +83,8 @@ paths:
                     occurredAt: { type: [string, 'null'], maxLength: 300 }
                     reportedAction: { type: [string, 'null'], maxLength: 300 }
                 reason: { type: string, minLength: 1, maxLength: 500 }
+                reviewId: { type: string, minLength: 1, maxLength: 100 }
+                text: { type: string, minLength: 1, maxLength: 3000 }
                 confirmed: { type: boolean, const: true }
                 consent:
                   type: object

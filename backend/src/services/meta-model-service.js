@@ -3,6 +3,7 @@ import { semanticRecordContract } from './semantic-record-contract-service.js';
 import { buildOntologyImpact, inferObjectGranularity, modelingProfiles, objectGranularities, replayOntologyDecisions, validateOntologyContract } from './ontology-contract-service.js';
 import { getBusinessDecisionCatalog } from './business-decision-service.js';
 import { semanticFingerprint } from './semantic-model-fingerprint.js';
+import { assertSemanticTenant, currentSemanticTenant } from './semantic-tenant-context.js';
 
 const now = () => new Date().toISOString();
 
@@ -360,6 +361,8 @@ export const simulateBuildOAMetaModel = (role) => {
 };
 
 export const publishOAMetaModel = (role, { version, expectedFingerprint, tenantId } = {}) => {
+  if (tenantId) assertSemanticTenant({ tenantId });
+  const publishingTenant = tenantId || currentSemanticTenant();
   if (!canPublish(role)) return { error: '仅管理层可发布 OA 元模型版本。' };
   return mutateSemanticGovernanceWithEvent({ namespace: OA_NAMESPACE, key: OA_KEY, initialValue: initialOARuntime, mutation: (runtime) => {
     if (expectedFingerprint && semanticFingerprint(currentMetaModel(runtime)) !== expectedFingerprint) return { commit: false, result: { error: '草稿在发布期间发生变化，未将新草稿误登记为旧版本；需要核对独立服务部署。', code: 'ONTOLOGY_PUBLICATION_STALE' } };
@@ -368,10 +371,10 @@ export const publishOAMetaModel = (role, { version, expectedFingerprint, tenantI
     runtime.oaSimulation.status = 'published';
     runtime.oaSimulation.version = version || `mm-oa-${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 17)}`;
     runtime.oaSimulation.publishedAt = now();
-    runtime.publishedModel = { tenantId: tenantId || null, version: runtime.oaSimulation.version, publishedAt: runtime.oaSimulation.publishedAt,
+    runtime.publishedModel = { tenantId: publishingTenant, version: runtime.oaSimulation.version, publishedAt: runtime.oaSimulation.publishedAt,
       fingerprint: semanticFingerprint(runtime.oaDraft), draft: clone(runtime.oaDraft) };
     runtime.oaSimulation.audit.unshift({ time: now(), actor: role.name, action: '发布 OA 元模型', detail: `${runtime.oaSimulation.version} 已进入受控生效状态；Demo 未写入真实 OA。` });
     const result = { metaModel: summary(runtime), simulation: clone(runtime.oaSimulation) };
-    return { value: runtime, result, event: { type: 'governance.meta_model.published', aggregateType: 'MetaModel', aggregateId: oaMetaModel.id, actor: { type: 'role', id: role.id }, payload: { version: runtime.oaSimulation.version, validationStatus: runtime.oaSimulation.validation.status } } };
+    return { value: runtime, result, event: { type: 'governance.meta_model.published', tenantId: publishingTenant, aggregateType: 'MetaModel', aggregateId: oaMetaModel.id, actor: { type: 'role', id: role.id }, payload: { version: runtime.oaSimulation.version, validationStatus: runtime.oaSimulation.validation.status } } };
   } });
 };

@@ -6,8 +6,13 @@ import { getMetaModel, getOAMetaModelDraft } from '../../backend/src/services/me
 import { getSemanticaModelDeployment } from '../../backend/src/services/semantica-demo-bridge-service.js';
 import { discoverSemanticSources } from '../../backend/src/services/semantic-source-discovery-service.js';
 import { runSemanticInspectionCycle } from '../../backend/src/services/semantic-inspection-schedule-service.js';
+import { runWithTenantExecution } from '../../backend/src/services/tenant-execution-context.js';
 
 export async function inspectSemanticReadOnly(schedule) {
+  return runWithTenantExecution({ identity: schedule.identityScope, roleId: schedule.roleId, feature: 'semantic', permission: 'page.world.view' }, () => inspectTenantSemanticReadOnly(schedule));
+}
+
+async function inspectTenantSemanticReadOnly(schedule) {
   const role = getRole(schedule.roleId);
   const findings = [];
   for (const check of schedule.checks) {

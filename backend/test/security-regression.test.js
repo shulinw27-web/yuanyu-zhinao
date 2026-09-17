@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
 import JSZip from 'jszip';
+import { seedTenantIAM } from './helpers/tenant-iam-fixture.js';
 import { getOAConnectionStatus, loginWithOA } from '../src/services/oa-auth-service.js';
 import { getCoreMetaObjectLayer, getDemoCoreBindingsForAction, validateCoreObjectBindings } from '../src/services/core-meta-object-service.js';
 import { getMockSimulationOverview, resetMockSimulation, setMockConnectorFault } from '../src/services/mock-scenario-service.js';
@@ -124,6 +125,7 @@ test('an identity session cannot be elevated with a Demo role header', async () 
 });
 
 test('OIDC bearer verifies JWKS claims and derives roles only from platform IAM', async () => {
+  seedTenantIAM('tenant-enterprise');
   const { publicKey, privateKey } = await generateKeyPair('RS256');
   const publicJwk = await exportJWK(publicKey);
   publicJwk.kid = 'enterprise-key-1'; publicJwk.alg = 'RS256'; publicJwk.use = 'sig';

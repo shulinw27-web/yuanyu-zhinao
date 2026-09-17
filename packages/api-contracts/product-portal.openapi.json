@@ -1,0 +1,1496 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "元域产品门户控制面 API",
+    "version": "0.1.0",
+    "description": "本地沙箱，仅测试资金。与企业业务IAM隔离，runtimeConnected=false。正式生产启动被阻止。"
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:15196/api/portal"
+    }
+  ],
+  "security": [
+    {
+      "portalSession": []
+    }
+  ],
+  "paths": {
+    "/tenant/provision": {
+      "post": {
+        "operationId": "requestTenantRuntimePreflight",
+        "description": "仅已通过sandbox_ready审核的租户owner/admin可显式申请。仅创建预检记录，不授予执行面身份、权益或数据权限，runtimeConnected始终为false。",
+        "parameters": [
+          { "name": "Origin", "in": "header", "required": true, "schema": { "type": "string" } },
+          { "name": "X-Portal-Client", "in": "header", "required": true, "schema": { "type": "string", "const": "web" } },
+          { "name": "X-CSRF-Token", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "additionalProperties": false, "required": ["tenantId", "requestId", "expectedVersion", "confirmed"],
+          "properties": { "tenantId": { "type": "string" }, "requestId": { "type": "string", "minLength": 1, "maxLength": 100 }, "expectedVersion": { "type": "integer", "minimum": 1 }, "confirmed": { "const": true } }
+        } } } },
+        "responses": { "200": { "description": "预检申请或同一幂等申请；provisioning状态可为requested/checking/blocked/preflight_ready/cancelled/superseded，不代表已开通。" }, "400": { "description": "未确认或字段无效" }, "401": { "description": "未登录" }, "403": { "description": "权限、来源或CSRF拒绝" }, "404": { "description": "租户不存在或无成员关系" }, "409": { "description": "版本、审核、幂等或活动申请冲突" } }
+      }
+    },
+    "/tenant/provision-cancel": {
+      "post": {
+        "operationId": "cancelTenantRuntimePreflight",
+        "description": "租户owner/admin取消自己的租户预检申请。取消后迟到的检查结果被丢弃；不删除实例或业务数据。",
+        "parameters": [
+          { "name": "Origin", "in": "header", "required": true, "schema": { "type": "string" } },
+          { "name": "X-Portal-Client", "in": "header", "required": true, "schema": { "type": "string", "const": "web" } },
+          { "name": "X-CSRF-Token", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "additionalProperties": false, "required": ["tenantId", "provisioningId"],
+          "properties": { "tenantId": { "type": "string" }, "provisioningId": { "type": "string", "minLength": 1, "maxLength": 100 } }
+        } } } },
+        "responses": { "200": { "description": "返回取消或已失效申请，不开放运行权限" }, "400": { "description": "字段错误" }, "401": { "description": "未登录" }, "403": { "description": "权限、来源、CSRF或暂停状态拒绝" }, "404": { "description": "租户或申请不可见" } }
+      }
+    },
+    "/register": {
+      "post": {
+        "operationId": "registerPortalAccount",
+        "description": "所有写操作受当前身份与租户权限约束；金额为整数分；仅测试环境。",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "成功；支付回执只可能为沙箱记录，不是第三方收款回执。"
+          },
+          "201": {
+            "description": "注册成功，无平台管理员权限，邮箱未验证"
+          },
+          "400": {
+            "description": "字段/金额/结构错误"
+          },
+          "401": {
+            "description": "会话缺失、过期或账号停用"
+          },
+          "403": {
+            "description": "权限、Origin或CSRF校验失败"
+          },
+          "409": {
+            "description": "状态、幂等、优惠券、余额或版本冲突"
+          },
+          "413": {
+            "description": "正文或存储容量超限"
+          },
+          "429": {
+            "description": "请求或认证并发过多"
+          },
+          "503": {
+            "description": "未配置支付或服务不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Portal-Client",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "web"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Registration"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/login": {
+      "post": {
+        "operationId": "loginPortalAccount",
+        "description": "所有写操作受当前身份与租户权限约束；金额为整数分；仅测试环境。",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "成功；支付回执只可能为沙箱记录，不是第三方收款回执。"
+          },
+          "400": {
+            "description": "字段/金额/结构错误"
+          },
+          "401": {
+            "description": "会话缺失、过期或账号停用"
+          },
+          "403": {
+            "description": "权限、Origin或CSRF校验失败"
+          },
+          "409": {
+            "description": "状态、幂等、优惠券、余额或版本冲突"
+          },
+          "413": {
+            "description": "正文或存储容量超限"
+          },
+          "429": {
+            "description": "请求或认证并发过多"
+          },
+          "503": {
+            "description": "未配置支付或服务不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Portal-Client",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "web"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Login"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog": {
+      "get": {
+        "operationId": "getPortalCatalog",
+        "description": "所有写操作受当前身份与租户权限约束；金额为整数分；仅测试环境。",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "成功；支付回执只可能为沙箱记录，不是第三方收款回执。"
+          },
+          "400": {
+            "description": "字段/金额/结构错误"
+          },
+          "401": {
+            "description": "会话缺失、过期或账号停用"
+          },
+          "403": {
+            "description": "权限、Origin或CSRF校验失败"
+          },
+          "409": {
+            "description": "状态、幂等、优惠券、余额或版本冲突"
+          },
+          "413": {
+            "description": "正文或存储容量超限"
+          },
+          "429": {
+            "description": "请求或认证并发过多"
+          },
+          "503": {
+            "description": "未配置支付或服务不可用"
+          }
+        }
+      }
+    },
+    "/me": {
+      "get": {
+        "operationId": "getPortalWorkspace",
+        "description": "所有写操作受当前身份与租户权限约束；金额为整数分；仅测试环境。",
+        "responses": {
+          "200": {
+            "description": "成功；支付回执只可能为沙箱记录，不是第三方收款回执。"
+          },
+          "400": {
+            "description": "字段/金额/结构错误"
+          },
+          "401": {
+            "description": "会话缺失、过期或账号停用"
+          },
+          "403": {
+            "description": "权限、Origin或CSRF校验失败"
+          },
+          "409": {
+            "description": "状态、幂等、优惠券、余额或版本冲突"
+          },
+          "413": {
+            "description": "正文或存储容量超限"
+          },
+          "429": {
+            "description": "请求或认证并发过多"
+          },
+          "503": {
+            "description": "未配置支付或服务不可用"
+          }
+        }
+      }
+    },
+    "/admin": {
+      "get": {
+        "operationId": "getPortalAdminWorkspace",
+        "description": "仅平台管理员；不得授予企业业务权限。",
+        "responses": {
+          "200": {
+            "description": "成功；支付回执只可能为沙箱记录，不是第三方收款回执。"
+          },
+          "400": {
+            "description": "字段/金额/结构错误"
+          },
+          "401": {
+            "description": "会话缺失、过期或账号停用"
+          },
+          "403": {
+            "description": "权限、Origin或CSRF校验失败"
+          },
+          "409": {
+            "description": "状态、幂等、优惠券、余额或版本冲突"
+          },
+          "413": {
+            "description": "正文或存储容量超限"
+          },
+          "429": {
+            "description": "请求或认证并发过多"
+          },
+          "503": {
+            "description": "未配置支付或服务不可用"
+          }
+        }
+      }
+    },
+    "/logout": {
+      "post": {
+        "operationId": "logoutPortalAccount",
+        "description": "所有写操作受当前身份与租户权限约束；金额为整数分；仅测试环境。",
+        "responses": {
+          "200": {
+            "description": "成功；支付回执只可能为沙箱记录，不是第三方收款回执。"
+          },
+          "400": {
+            "description": "字段/金额/结构错误"
+          },
+          "401": {
+            "description": "会话缺失、过期或账号停用"
+          },
+          "403": {
+            "description": "权限、Origin或CSRF校验失败"
+          },
+          "409": {
+            "description": "状态、幂等、优惠券、余额或版本冲突"
+          },
+          "413": {
+            "description": "正文或存储容量超限"
+          },
+          "429": {
+            "description": "请求或认证并发过多"
+          },
+          "503": {
+            "description": "未配置支付或服务不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Portal-Client",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "web"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [],
+                "properties": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tenant/create": {
+      "post": {
+        "operationId": "createPortalTenant",
+        "description": "所有写操作受当前身份与租户权限约束；金额为整数分；仅测试环境。",
+        "responses": {
+          "200": {
+            "description": "成功；支付回执只可能为沙箱记录，不是第三方收款回执。"
+          },
+          "400": {
+            "description": "字段/金额/结构错误"
+          },
+          "401": {
+            "description": "会话缺失、过期或账号停用"
+          },
+          "403": {
+            "description": "权限、Origin或CSRF校验失败"
+          },
+          "409": {
+            "description": "状态、幂等、优惠券、余额或版本冲突"
+          },
+          "413": {
+            "description": "正文或存储容量超限"
+          },
+          "429": {
+            "description": "请求或认证并发过多"
+          },
+          "503": {
+            "description": "未配置支付或服务不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Portal-Client",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "web"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "slug",
+                  "requestId"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 80
+                  },
+                  "slug": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{2,39}$"
+                  },
+                  "requestId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tenant/invite": {
+      "post": {
+        "operationId": "invitePortalTenantMember",
+        "description": "所有写操作受当前身份与租户权限约束；金额为整数分；仅测试环境。",
+        "responses": {
+          "200": {
+            "description": "成功；支付回执只可能为沙箱记录，不是第三方收款回执。"
+          },
+          "400": {
+            "description": "字段/金额/结构错误"
+          },
+          "401": {
+            "description": "会话缺失、过期或账号停用"
+          },
+          "403": {
+            "description": "权限、Origin或CSRF校验失败"
+          },
+          "409": {
+            "description": "状态、幂等、优惠券、余额或版本冲突"
+          },
+          "413": {
+            "description": "正文或存储容量超限"
+          },
+          "429": {
+            "description": "请求或认证并发过多"
+          },
+          "503": {
+            "description": "未配置支付或服务不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Portal-Client",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "web"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "tenantId",
+                  "email",
+                  "role"
+                ],
+                "properties": {
+                  "tenantId": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "role": {
+                    "enum": [
+                      "admin",
+                      "member"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/invite/accept": {
+      "post": {
+        "operationId": "acceptPortalInvitation",
+        "description": "所有写操作受当前身份与租户权限约束；金额为整数分；仅测试环境。",
+        "responses": {
+          "200": {
+            "description": "成功；支付回执只可能为沙箱记录，不是第三方收款回执。"
+          },
+          "400": {
+            "description": "字段/金额/结构错误"
+          },
+          "401": {
+            "description": "会话缺失、过期或账号停用"
+          },
+          "403": {
+            "description": "权限、Origin或CSRF校验失败"
+          },
+          "409": {
+            "description": "状态、幂等、优惠券、余额或版本冲突"
+          },
+          "413": {
+            "description": "正文或存储容量超限"
+          },
+          "429": {
+            "description": "请求或认证并发过多"
+          },
+          "503": {
+            "description": "未配置支付或服务不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Portal-Client",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "web"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "writeOnly": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tenant/member": {
+      "post": {
+        "operationId": "changePortalMember",
+        "description": "所有写操作受当前身份与租户权限约束；金额为整数分；仅测试环境。",
+        "responses": {
+          "200": {
+            "description": "成功；支付回执只可能为沙箱记录，不是第三方收款回执。"
+          },
+          "400": {
+            "description": "字段/金额/结构错误"
+          },
+          "401": {
+            "description": "会话缺失、过期或账号停用"
+          },
+          "403": {
+            "description": "权限、Origin或CSRF校验失败"
+          },
+          "409": {
+            "description": "状态、幂等、优惠券、余额或版本冲突"
+          },
+          "413": {
+            "description": "正文或存储容量超限"
+          },
+          "429": {
+            "description": "请求或认证并发过多"
+          },
+          "503": {
+            "description": "未配置支付或服务不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Portal-Client",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "web"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "tenantId",
+                  "userId",
+                  "role",
+                  "status",
+                  "expectedVersion"
+                ],
+                "properties": {
+                  "tenantId": {
+                    "type": "string"
+                  },
+                  "userId": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "enum": [
+                      "admin",
+                      "member"
+                    ]
+                  },
+                  "status": {
+                    "enum": [
+                      "active",
+                      "removed"
+                    ]
+                  },
+                  "expectedVersion": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/order/quote": {
+      "post": {
+        "operationId": "quotePortalOrder",
+        "description": "所有写操作受当前身份与租户权限约束；金额为整数分；仅测试环境。",
+        "responses": {
+          "200": {
+            "description": "成功；支付回执只可能为沙箱记录，不是第三方收款回执。"
+          },
+          "400": {
+            "description": "字段/金额/结构错误"
+          },
+          "401": {
+            "description": "会话缺失、过期或账号停用"
+          },
+          "403": {
+            "description": "权限、Origin或CSRF校验失败"
+          },
+          "409": {
+            "description": "状态、幂等、优惠券、余额或版本冲突"
+          },
+          "413": {
+            "description": "正文或存储容量超限"
+          },
+          "429": {
+            "description": "请求或认证并发过多"
+          },
+          "503": {
+            "description": "未配置支付或服务不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Portal-Client",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "web"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "tenantId",
+                  "kind"
+                ],
+                "properties": {
+                  "tenantId": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "subscription",
+                      "recharge"
+                    ]
+                  },
+                  "planId": {
+                    "enum": [
+                      "professional",
+                      "business"
+                    ]
+                  },
+                  "amountCents": {
+                    "type": "integer",
+                    "minimum": 100,
+                    "maximum": 10000000
+                  },
+                  "couponCode": {
+                    "type": "string",
+                    "maxLength": 32
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/order/create": {
+      "post": {
+        "operationId": "createPortalOrder",
+        "description": "所有写操作受当前身份与租户权限约束；金额为整数分；仅测试环境。",
+        "responses": {
+          "200": {
+            "description": "成功；支付回执只可能为沙箱记录，不是第三方收款回执。"
+          },
+          "400": {
+            "description": "字段/金额/结构错误"
+          },
+          "401": {
+            "description": "会话缺失、过期或账号停用"
+          },
+          "403": {
+            "description": "权限、Origin或CSRF校验失败"
+          },
+          "409": {
+            "description": "状态、幂等、优惠券、余额或版本冲突"
+          },
+          "413": {
+            "description": "正文或存储容量超限"
+          },
+          "429": {
+            "description": "请求或认证并发过多"
+          },
+          "503": {
+            "description": "未配置支付或服务不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Portal-Client",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "web"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "tenantId",
+                  "kind",
+                  "requestId"
+                ],
+                "properties": {
+                  "tenantId": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "subscription",
+                      "recharge"
+                    ]
+                  },
+                  "planId": {
+                    "enum": [
+                      "professional",
+                      "business"
+                    ]
+                  },
+                  "amountCents": {
+                    "type": "integer",
+                    "minimum": 100,
+                    "maximum": 10000000
+                  },
+                  "couponCode": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "requestId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/order/pay": {
+      "post": {
+        "operationId": "payPortalSandboxOrder",
+        "description": "所有写操作受当前身份与租户权限约束；金额为整数分；仅测试环境。",
+        "responses": {
+          "200": {
+            "description": "成功；支付回执只可能为沙箱记录，不是第三方收款回执。"
+          },
+          "400": {
+            "description": "字段/金额/结构错误"
+          },
+          "401": {
+            "description": "会话缺失、过期或账号停用"
+          },
+          "403": {
+            "description": "权限、Origin或CSRF校验失败"
+          },
+          "409": {
+            "description": "状态、幂等、优惠券、余额或版本冲突"
+          },
+          "413": {
+            "description": "正文或存储容量超限"
+          },
+          "429": {
+            "description": "请求或认证并发过多"
+          },
+          "503": {
+            "description": "未配置支付或服务不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Portal-Client",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "web"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "orderId",
+                  "method",
+                  "confirmed"
+                ],
+                "properties": {
+                  "orderId": {
+                    "type": "string"
+                  },
+                  "method": {
+                    "enum": [
+                      "sandbox",
+                      "wallet"
+                    ]
+                  },
+                  "confirmed": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/order/cancel": {
+      "post": {
+        "operationId": "cancelPortalOrder",
+        "description": "所有写操作受当前身份与租户权限约束；金额为整数分；仅测试环境。",
+        "responses": {
+          "200": {
+            "description": "成功；支付回执只可能为沙箱记录，不是第三方收款回执。"
+          },
+          "400": {
+            "description": "字段/金额/结构错误"
+          },
+          "401": {
+            "description": "会话缺失、过期或账号停用"
+          },
+          "403": {
+            "description": "权限、Origin或CSRF校验失败"
+          },
+          "409": {
+            "description": "状态、幂等、优惠券、余额或版本冲突"
+          },
+          "413": {
+            "description": "正文或存储容量超限"
+          },
+          "429": {
+            "description": "请求或认证并发过多"
+          },
+          "503": {
+            "description": "未配置支付或服务不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Portal-Client",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "web"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "orderId"
+                ],
+                "properties": {
+                  "orderId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/user": {
+      "post": {
+        "operationId": "setPortalUserStatus",
+        "description": "仅平台管理员；不得授予企业业务权限。",
+        "responses": {
+          "200": {
+            "description": "成功；支付回执只可能为沙箱记录，不是第三方收款回执。"
+          },
+          "400": {
+            "description": "字段/金额/结构错误"
+          },
+          "401": {
+            "description": "会话缺失、过期或账号停用"
+          },
+          "403": {
+            "description": "权限、Origin或CSRF校验失败"
+          },
+          "409": {
+            "description": "状态、幂等、优惠券、余额或版本冲突"
+          },
+          "413": {
+            "description": "正文或存储容量超限"
+          },
+          "429": {
+            "description": "请求或认证并发过多"
+          },
+          "503": {
+            "description": "未配置支付或服务不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Portal-Client",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "web"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "userId",
+                  "status"
+                ],
+                "properties": {
+                  "userId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "active",
+                      "suspended"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/tenant": {
+      "post": {
+        "operationId": "setPortalTenantStatus",
+        "description": "仅平台管理员；不得授予企业业务权限。",
+        "responses": {
+          "200": {
+            "description": "成功；支付回执只可能为沙箱记录，不是第三方收款回执。"
+          },
+          "400": {
+            "description": "字段/金额/结构错误"
+          },
+          "401": {
+            "description": "会话缺失、过期或账号停用"
+          },
+          "403": {
+            "description": "权限、Origin或CSRF校验失败"
+          },
+          "409": {
+            "description": "状态、幂等、优惠券、余额或版本冲突"
+          },
+          "413": {
+            "description": "正文或存储容量超限"
+          },
+          "429": {
+            "description": "请求或认证并发过多"
+          },
+          "503": {
+            "description": "未配置支付或服务不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Portal-Client",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "web"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "tenantId",
+                  "status",
+                  "expectedVersion"
+                ],
+                "properties": {
+                  "tenantId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "sandbox_ready",
+                      "suspended"
+                    ]
+                  },
+                  "expectedVersion": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/coupon": {
+      "post": {
+        "operationId": "createPortalCoupon",
+        "description": "仅平台管理员；不得授予企业业务权限。",
+        "responses": {
+          "200": {
+            "description": "成功；支付回执只可能为沙箱记录，不是第三方收款回执。"
+          },
+          "400": {
+            "description": "字段/金额/结构错误"
+          },
+          "401": {
+            "description": "会话缺失、过期或账号停用"
+          },
+          "403": {
+            "description": "权限、Origin或CSRF校验失败"
+          },
+          "409": {
+            "description": "状态、幂等、优惠券、余额或版本冲突"
+          },
+          "413": {
+            "description": "正文或存储容量超限"
+          },
+          "429": {
+            "description": "请求或认证并发过多"
+          },
+          "503": {
+            "description": "未配置支付或服务不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Portal-Client",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "web"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "code",
+                  "type",
+                  "value",
+                  "minCents",
+                  "maxUses",
+                  "startsAt",
+                  "expiresAt"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{3,32}$"
+                  },
+                  "type": {
+                    "enum": [
+                      "fixed",
+                      "percent"
+                    ]
+                  },
+                  "value": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "minCents": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "maxUses": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10000
+                  },
+                  "startsAt": {
+                    "type": "integer"
+                  },
+                  "expiresAt": {
+                    "type": "integer"
+                  },
+                  "planId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "professional",
+                      "business",
+                      null
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/coupon-disable": {
+      "post": {
+        "operationId": "disablePortalCoupon",
+        "description": "仅平台管理员；不得授予企业业务权限。",
+        "responses": {
+          "200": {
+            "description": "成功；支付回执只可能为沙箱记录，不是第三方收款回执。"
+          },
+          "400": {
+            "description": "字段/金额/结构错误"
+          },
+          "401": {
+            "description": "会话缺失、过期或账号停用"
+          },
+          "403": {
+            "description": "权限、Origin或CSRF校验失败"
+          },
+          "409": {
+            "description": "状态、幂等、优惠券、余额或版本冲突"
+          },
+          "413": {
+            "description": "正文或存储容量超限"
+          },
+          "429": {
+            "description": "请求或认证并发过多"
+          },
+          "503": {
+            "description": "未配置支付或服务不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Portal-Client",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "web"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "couponId"
+                ],
+                "properties": {
+                  "couponId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "portalSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "yy_portal"
+      }
+    },
+    "schemas": {
+      "Registration": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "email",
+          "name",
+          "password",
+          "acceptedTerms"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 254
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "password": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 128,
+            "writeOnly": true
+          },
+          "acceptedTerms": {
+            "const": true
+          }
+        }
+      },
+      "Login": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 128,
+            "writeOnly": true
+          }
+        }
+      }
+    }
+  }
+}

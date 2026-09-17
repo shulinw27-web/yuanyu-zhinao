@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { seedTenantIAM } from './helpers/tenant-iam-fixture.js';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,6 +25,7 @@ const key = await exportJWK(publicKey); key.kid = 'test-key'; key.alg = 'RS256';
 const jwks = createLocalJWKSet({ keys: [key] });
 const token = (issuer = provider().issuer, claims = {}, audience = 'zhinao-api', subject = 'employee-1') => new SignJWT({ email: 'executive@demo.local', roles: ['executive'], ...claims }).setProtectedHeader({ alg: 'RS256', kid: 'test-key' }).setIssuer(issuer).setAudience(audience).setSubject(subject).setIssuedAt().setExpirationTime('5m').sign(privateKey);
 const service = (getConfiguration = configuration) => createIdentityProviderService({ env: {}, getConfiguration, oidcVerifier: (value, options) => verifyEnterpriseAccessToken(value, { ...options, jwks }) });
+test.beforeEach(() => seedTenantIAM('company'));
 
 test('标准 OIDC 无 tid 也可接入；使用 sub 映射且忽略外部邮箱和管理员角色', async () => {
   const result = await service().verifyBearer(await token());

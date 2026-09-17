@@ -1,6 +1,6 @@
 import { identityProviders } from './identity-provider-service.js';
 import { createHash, randomBytes } from 'node:crypto';
-import { findIAMUserByAccount } from './iam-store.js';
+import { findIAMUserByAccount, runWithIAMStoreContext } from './iam-store.js';
 import { getRole } from './authorization-service.js';
 import { issueIdentitySession } from './identity-session-service.js';
 
@@ -66,7 +66,7 @@ export function createDingTalkAuthService({ getConfig = () => identityProviders.
       const result = await post(`https://oapi.dingtalk.com/topapi/v2/user/getuserinfo?access_token=${encodeURIComponent(tokenCache.token)}`, { code });
       if (result.errcode !== 0 || !shortString(result.result?.userid)) throw new Error('invalid_identity');
       const binding = config.userBindings.find((item) => item.userId === result.result.userid);
-      const user = binding ? findUser(binding.account) : null;
+      const user = binding ? await runWithIAMStoreContext(() => findUser(binding.account), config.tenantId) : null;
       if (!user || user.status !== 'active' || !user.roleIds?.includes(user.primaryRoleId)) return fail('DINGTALK_IAM_UNMAPPED', '当前钉钉成员尚未绑定已启用的平台账号，请联系管理员。', 403);
       const role = getRole(user.primaryRoleId);
       if (role.id !== user.primaryRoleId) return fail('DINGTALK_ROLE_INVALID', '平台账号角色配置无效。', 403);

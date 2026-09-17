@@ -1,6 +1,7 @@
 import { connectedSystems } from '../data/seed.js';
 import { mutateState, readState } from '../repositories/runtime-state-repository.js';
 import { mutateWithDomainEvent } from '../domains/events/domain-event-outbox.js';
+import { semanticTenantStateKey, currentSemanticTenant } from './semantic-tenant-context.js';
 
 const templates = [
   {
@@ -103,7 +104,7 @@ const connectionTargets = [
 const WORLD_NAMESPACE = 'world_model_runtime';
 const WORLD_KEY = 'drafts';
 const initialWorldDrafts = () => [];
-const getDraftState = () => readState(WORLD_NAMESPACE, WORLD_KEY, initialWorldDrafts);
+const getDraftState = () => readState(WORLD_NAMESPACE, semanticTenantStateKey(WORLD_KEY), initialWorldDrafts);
 const now = () => new Date().toISOString();
 const canConfigure = (role) => ['executive', 'quality_manager'].includes(role?.id);
 const canPublish = (role) => role?.id === 'executive';
@@ -137,7 +138,7 @@ export const createWorldModelDraft = ({ templateId, targetId }, role) => {
   const template = templateById(templateId);
   const target = connectionTargets.find((item) => item.id === targetId);
   if (!template || !target) return { error: '模板或目标系统不存在。' };
-  return mutateState(WORLD_NAMESPACE, WORLD_KEY, initialWorldDrafts, (drafts) => {
+  return mutateState(WORLD_NAMESPACE, semanticTenantStateKey(WORLD_KEY), initialWorldDrafts, (drafts) => {
     const existing = drafts.find((item) => item.templateId === templateId && item.targetId === targetId && item.status !== 'published');
     if (existing) return { commit: false, result: { draft: existing, reused: true } };
     const draft = buildDraft(template, target, role);
@@ -148,7 +149,7 @@ export const createWorldModelDraft = ({ templateId, targetId }, role) => {
 
 export const validateWorldModelDraft = (id, role) => {
   if (!canConfigure(role)) return { error: '当前角色无权校验世界模型配置草稿。' };
-  return mutateState(WORLD_NAMESPACE, WORLD_KEY, initialWorldDrafts, (drafts) => {
+  return mutateState(WORLD_NAMESPACE, semanticTenantStateKey(WORLD_KEY), initialWorldDrafts, (drafts) => {
   const draft = drafts.find((item) => item.id === id);
   if (!draft) return { commit: false, result: { error: '未找到世界模型草稿。' } };
   const checks = [
@@ -167,7 +168,7 @@ export const validateWorldModelDraft = (id, role) => {
 
 export const publishWorldModelDraft = (id, role) => {
   if (!canPublish(role)) return { error: '仅管理层可发布世界模型配置版本。' };
-  return mutateWithDomainEvent({ namespace: WORLD_NAMESPACE, key: WORLD_KEY, initialValue: initialWorldDrafts, mutation: (drafts) => {
+  return mutateWithDomainEvent({ namespace: WORLD_NAMESPACE, key: semanticTenantStateKey(WORLD_KEY), initialValue: initialWorldDrafts, mutation: (drafts) => {
   const draft = drafts.find((item) => item.id === id);
   if (!draft) return { commit: false, result: { error: '未找到世界模型草稿。' } };
   if (draft.validation?.status !== 'passed') return { commit: false, result: { error: '请先完成并通过映射校验，再提交发布。' } };
@@ -175,6 +176,6 @@ export const publishWorldModelDraft = (id, role) => {
   draft.version = `wm-${draft.templateId}-${new Date().toISOString().slice(0, 10).replaceAll('-', '.')}`;
   draft.updatedAt = now();
   draft.audit.unshift({ time: now(), actor: role.name, action: '发布世界模型版本（Demo 模拟）', detail: `${draft.version} 已进入受控生效状态；生产环境仍需审批中心签核。` });
-  return { value: drafts, result: { draft }, event: { type: 'governance.world_model.published', aggregateType: 'WorldModel', aggregateId: draft.id, actor: { type: 'role', id: role.id }, payload: { version: draft.version, templateId: draft.templateId, targetId: draft.targetId, validationStatus: draft.validation.status } } };
+  return { value: drafts, result: { draft }, event: { type: 'governance.world_model.published', tenantId: currentSemanticTenant(), aggregateType: 'WorldModel', aggregateId: draft.id, actor: { type: 'role', id: role.id }, payload: { version: draft.version, templateId: draft.templateId, targetId: draft.targetId, validationStatus: draft.validation.status } } };
   } });
 };

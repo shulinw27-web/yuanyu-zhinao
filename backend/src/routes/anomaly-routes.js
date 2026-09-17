@@ -15,7 +15,7 @@ export async function handleAnomalyRoutes({ req, res, url, role, agentIdentity, 
   if (!selectActionRole('agent.prompt.run')) { denyButton('agent.prompt.run'); return true; }
   const options = { context, body: await readBody(req), canRead: () => allowed(true) };
   if (url.pathname === base) return reply(await changeAnomalyReport({ ...options, action: 'create' }));
-  const match = url.pathname.slice(base.length).match(/^\/([A-Za-z0-9-]{1,100})\/(append|edit|extract|confirm|retract)$/);
+  const match = url.pathname.slice(base.length).match(/^\/([A-Za-z0-9-]{1,100})\/(append|edit|extract|ask|reply|confirm|retract)$/);
   if (!match) return reply({ error: 'ANOMALY_ROUTE_NOT_FOUND', status: 404 });
   return reply(await (match[2] === 'extract' ? extractAnomalyReport : changeAnomalyReport)({ ...options, id: match[1], action: match[2] }));
 }

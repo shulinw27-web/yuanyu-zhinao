@@ -5,6 +5,22 @@ export const IAM_NAMESPACE = 'iam';
 export const IAM_WORKSPACE_KEY = 'workspace';
 export const CURRENT_IAM_SCHEMA_VERSION = 3;
 
+export function iamWorkspaceKey(tenantId = 'demo-enterprise') {
+  if (typeof tenantId !== 'string' || !tenantId.trim() || tenantId !== tenantId.trim() || tenantId.length > 120 || /[\x00-\x1f\x7f]/.test(tenantId)) {
+    throw Object.assign(new Error('Invalid IAM tenant.'), { code: 'IAM_TENANT_INVALID', status: 403 });
+  }
+  return tenantId === 'demo-enterprise' ? IAM_WORKSPACE_KEY : JSON.stringify(['iam-tenant-v1', tenantId, IAM_WORKSPACE_KEY]);
+}
+
+export function createTenantIAMWorkspace(tenantId = 'demo-enterprise') {
+  iamWorkspaceKey(tenantId);
+  // A new company must never inherit demo staff or administrator grants.
+  return tenantId === 'demo-enterprise' ? createInitialIAMWorkspace() : {
+    schemaVersion: CURRENT_IAM_SCHEMA_VERSION, configurationVersion: 1,
+    organizations: [], users: [], rolePolicies: {}, audits: []
+  };
+}
+
 const ALERTING_PERMISSION_MIGRATION = ['notification.delivery.retry', 'notification.policy.publish', 'notification.route.simulate', 'notification.voice.test', 'oncall.schedule.manage', 'notification.audit.view'];
 const EVENT_OUTBOX_PERMISSION_MIGRATION = ['event.outbox.view'];
 const clone = (value) => structuredClone(value);
@@ -47,4 +63,3 @@ export function migrateIAMWorkspace(state, { createId = randomUUID, clock = () =
 }
 
 export const normalizeIAMAccount = (value) => String(value || '').trim().toLowerCase();
-

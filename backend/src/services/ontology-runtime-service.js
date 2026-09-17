@@ -95,7 +95,7 @@ export async function publishGovernedOntology({ role, identityScope, deploy = pu
       else return finalize('reconciliation_required', { error: '独立服务未确认相同模型指纹；保留不确定状态，不自动重复写入。', code: 'PUBLICATION_RECONCILIATION_REQUIRED' });
     } else semanticDeployment = await deploy(candidate, operation.version);
     if (!operation.retry && semanticDeployment?.requestAttempted === false && semanticDeployment.status === 'unavailable'
-      && ['bridge_disabled', 'unsafe_endpoint'].includes(semanticDeployment.reason)) {
+      && ['bridge_disabled', 'unsafe_endpoint', 'tenant_endpoint_required', 'tenant_config_invalid', 'instance_identity_unverified', 'service_unavailable'].includes(semanticDeployment.reason)) {
       return finalize('not_attempted', { error: '独立服务未配置或地址不被允许，尚未发送发布请求；配置完成后可重新发布。', code: 'PUBLICATION_NOT_ATTEMPTED' });
     }
     if (semanticDeployment?.status !== 'published' || semanticDeployment.deployment?.sourceFingerprint !== fingerprint || semanticDeployment.deployment?.version !== operation.version) return finalize('reconciliation_required', { error: '尚未取得匹配模型指纹和版本的独立服务回执。', code: 'PUBLICATION_RECEIPT_UNCONFIRMED' });

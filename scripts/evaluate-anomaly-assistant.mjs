@@ -23,8 +23,8 @@ if (!process.argv.includes('--live-synthetic')) {
       const created = await changeAnomalyReport({ context, canRead, action: 'create', body: { requestId: item.name, expectedRevision: 0, source: { kind: 'mock_group', text: item.text } } });
       if (!created.report) throw new Error('SYNTHETIC_CREATE_FAILED');
       const result = await extractAnomalyReport({ context, canRead, id: created.report.id, body: { expectedRevision: 1, consent: { confirmed: true, provider: active.provider, model: active.model } } });
-      const row = { name: item.name, passed: !!result.report && !!item.check(result.report), milliseconds: Math.round(performance.now() - start),
-        code: result.error || null, diagnostics: result.diagnostics, fields: result.report?.fields || null, status: result.report?.status || null, execution: result.execution || 'none' };
+      const row = { name: item.name, passed: !!result.report && !!item.check(result.report) && result.report.understanding?.stale === false && result.report.understanding.insights.some(i => i.kind === 'understanding'), milliseconds: Math.round(performance.now() - start),
+        code: result.error || null, diagnostics: result.diagnostics, fields: result.report?.fields || null, understanding: result.report?.understanding || null, status: result.report?.status || null, execution: result.execution || 'none' };
       checks.push(row); console.log(JSON.stringify({ name: row.name, passed: row.passed, code: row.code, milliseconds: row.milliseconds }));
     }
   } catch { checks.push({ name: 'configuration_or_transport', passed: false }); }

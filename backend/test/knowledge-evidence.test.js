@@ -10,6 +10,7 @@ import { saveLibraryDocument, retractLibraryDocument } from '../src/services/kno
 import { createLocalKnowledgeProvider, buildKnowledgeBrief } from '../src/services/knowledge-evidence-service.js';
 import { createWeKnoraKnowledgeProvider, knowledgePrincipalKey } from '../src/services/weknora-knowledge-provider.js';
 import { handleKnowledgeRoutes } from '../src/routes/knowledge-routes.js';
+import { runWithIAMStoreContext } from '../src/services/iam-store.js';
 
 const context = { identityScope: { tenantId: 'evidence-test', subjectId: 'alice' }, roleId: 'executive' };
 const body = { expectedRevision: 0, title: '供应商资质核验', source: '合成制度', sourceVersion: 'v1', kind: 'policy', text: '采购前核验供应商资质和质量认证，过期应重新审核。' };
@@ -98,10 +99,10 @@ test('WK evidence: search text is ignored and malicious authoritative source is 
 test('WK evidence: both route surfaces require their own page and write grants; client ACL fields rejected', async () => {
   async function call(base, suffix, { method = 'GET', payload, pages = [], grant = false } = {}) {
     let output; let permission;
-    await handleKnowledgeRoutes({ req: { method }, res: {}, url: new URL(`http://localhost${base}${suffix}`), role: context.roleId,
+    await runWithIAMStoreContext(() => handleKnowledgeRoutes({ req: { method }, res: {}, url: new URL(`http://localhost${base}${suffix}`), role: context.roleId,
       agentIdentity: context.identityScope, effectiveAccess: { pagePermissionIds: pages }, readBody: async () => payload,
       selectActionRole: code => { permission = code; return grant; }, denyButton: () => { output = { status: 403 }; },
-      send: (_res, status, data) => { output = { status, data }; } });
+      send: (_res, status, data) => { output = { status, data }; } }), context.identityScope.tenantId);
     return { ...output, permission };
   }
   const agent = '/api/agent/knowledge-library'; const semantic = '/api/semantic-operations/knowledge-library';

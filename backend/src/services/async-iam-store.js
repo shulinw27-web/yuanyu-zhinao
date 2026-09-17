@@ -8,15 +8,17 @@ import {
 import {
   CURRENT_IAM_SCHEMA_VERSION,
   IAM_NAMESPACE,
-  IAM_WORKSPACE_KEY,
-  createInitialIAMWorkspace,
+  iamWorkspaceKey,
+  createTenantIAMWorkspace,
   migrateIAMWorkspace,
   normalizeIAMAccount
 } from './iam-workspace-model.js';
 
 const clone = (value) => structuredClone(value);
 
-export function createAsyncIAMStore({ repository, clock = () => new Date().toISOString(), createId = randomUUID } = {}) {
+export function createAsyncIAMStore({ repository, tenantId = 'demo-enterprise', clock = () => new Date().toISOString(), createId = randomUUID } = {}) {
+  const IAM_WORKSPACE_KEY = iamWorkspaceKey(tenantId);
+  const createInitialIAMWorkspace = () => createTenantIAMWorkspace(tenantId);
   if (!repository || typeof repository.readState !== 'function' || typeof repository.mutateState !== 'function' || typeof repository.mutateStates !== 'function') {
     throw new TypeError('Async IAM store requires an asynchronous runtime state repository.');
   }
@@ -40,7 +42,7 @@ export function createAsyncIAMStore({ repository, clock = () => new Date().toISO
       if (outcome.commit === false) return { commit: false, result: outcome.result };
       const nextAggregate = Object.hasOwn(outcome, 'value') ? outcome.value : aggregate;
       const event = typeof domainEvent === 'function' ? domainEvent(outcome.result, nextAggregate) : domainEvent;
-      appendDomainEventToWorkspace(outbox, event);
+      appendDomainEventToWorkspace(outbox, { ...event, tenantId });
       return { values: { aggregate: nextAggregate, outbox }, result: outcome.result };
     });
   };

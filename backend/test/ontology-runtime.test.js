@@ -138,3 +138,21 @@ test('parallel publication has one external writer', async () => {
   assert.equal((await publishGovernedOntology({ role, identityScope, deploy: () => assert.fail('second writer') })).code, 'PUBLICATION_BUSY');
   release(); assert.equal((await first).error, undefined);
 });
+
+test('instance preflight failures are retryable only when no publication request was sent', async () => {
+  for (const reason of ['tenant_config_invalid', 'instance_identity_unverified', 'service_unavailable']) {
+    setup();
+    const blocked = await publishGovernedOntology({ role, identityScope,
+      deploy: async () => ({ status: 'unavailable', reason, requestAttempted: false }) });
+    assert.equal(blocked.code, 'PUBLICATION_NOT_ATTEMPTED');
+    assert.equal(getPublishedOntologyModel(), null);
+    assert.equal((await publishGovernedOntology({ role, identityScope, deploy: receipt })).error, undefined);
+    setup();
+    const uncertain = await publishGovernedOntology({ role, identityScope,
+      deploy: async () => ({ status: 'unavailable', reason, requestAttempted: true }) });
+    assert.equal(uncertain.code, 'PUBLICATION_RECEIPT_UNCONFIRMED');
+    const retried = await publishGovernedOntology({ role, identityScope,
+      deploy: () => assert.fail('uncertain write must not repeat'), inspect: async () => ({ status: 'not_published' }) });
+    assert.equal(retried.code, 'PUBLICATION_RECONCILIATION_REQUIRED');
+  }
+});

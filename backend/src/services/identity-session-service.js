@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { findIAMUserByAccount, getIAMRolePolicy } from './iam-store.js';
+import { currentIAMTenant, findIAMUserByAccount, getIAMRolePolicy, runWithIAMStoreContext } from './iam-store.js';
 import { asyncRuntimeStateRepository } from '../repositories/async-runtime-state-repository.js';
 import { identityProviders } from './identity-provider-service.js';
+import { authorizeTenantRuntime } from './tenant-runtime-control-service.js';
 
 const SESSION_NAMESPACE = 'identity_sessions';
 
@@ -26,6 +27,7 @@ export function createIdentitySessionService({
     const user = findUserByAccount(account);
     if (!user) return null;
     return {
+      tenantId: currentIAMTenant(),
       userId: user.id,
       userVersion: user.version,
       roleIds: [...user.roleIds],
@@ -38,8 +40,13 @@ export function createIdentitySessionService({
     return { error, code };
   };
 
-  const issueIdentitySession = async ({ source, tenantId = 'demo-enterprise', account, userName, roleId, roleName, deviceId, platform, identityBinding, externalIdentity }) => {
+  const issueIdentitySession = async ({ source, tenantId = 'demo-enterprise', account, userName, roleId, roleName, deviceId, platform, identityBinding, externalIdentity }) => runWithIAMStoreContext(async () => {
+    const user = findUserByAccount(account);
+    if (!user || user.status !== 'active' || !user.roleIds.includes(roleId)) {
+      throw Object.assign(new Error('账号未绑定当前租户的有效角色。'), { code: 'IDENTITY_TENANT_USER_UNBOUND', status: 403 });
+    }
     const timestamp = clock();
+    const runtimeAuthorization = await authorizeTenantRuntime({ tenantId, subjectId: account });
     const session = {
       id: createId(), source, tenantId, account, userName, roleId, roleName,
       ...(identityBinding ? { identityBinding } : {}),
@@ -47,16 +54,18 @@ export function createIdentitySessionService({
       deviceId: deviceId || null,
       platform: platform || 'mobile',
       iamAuthorization: authorizationSnapshot(account),
+      runtimeRevision: runtimeAuthorization.revision,
       issuedAt: new Date(timestamp).toISOString(),
       expiresAt: new Date(timestamp + 8 * 60 * 60 * 1000).toISOString()
     };
     await repository.writeState(SESSION_NAMESPACE, session.id, session);
     return session;
-  };
+  }, tenantId);
 
   const validateIdentitySession = async (sessionId, requestedRole, deviceId) => {
     const session = await repository.readState(SESSION_NAMESPACE, sessionId);
     if (!session) return { error: '登录会话无效，请重新登录。' };
+    if (!session.tenantId || session.iamAuthorization?.tenantId !== session.tenantId) return invalidateSession(sessionId, '会话缺少有效租户绑定，请重新登录。', 'IDENTITY_TENANT_BINDING_INVALID');
     if (new Date(session.expiresAt).getTime() <= clock()) return invalidateSession(sessionId, '登录会话已过期，请重新登录。', 'IDENTITY_SESSION_EXPIRED');
     if (requestedRole && requestedRole !== session.roleId) return { error: '登录会话角色与请求角色不一致，已拒绝访问。' };
     if (session.deviceId && session.deviceId !== deviceId) return { error: '登录会话与当前设备不匹配，已拒绝访问。' };
@@ -64,6 +73,11 @@ export function createIdentitySessionService({
     try { bindingError = await validateProviderBinding(session); }
     catch { bindingError = { error: '身份源校验未完成，请重新登录。', code: 'IDENTITY_PROVIDER_REVOKED' }; }
     if (bindingError) return invalidateSession(sessionId, bindingError.error, bindingError.code);
+    try {
+      const runtime = await authorizeTenantRuntime({ tenantId: session.tenantId, subjectId: session.account });
+      if (runtime.managed && runtime.revision !== session.runtimeRevision) throw new Error('stale');
+    } catch { return invalidateSession(sessionId, '企业运行授权已变化或不可验证，请重新登录。', 'IDENTITY_RUNTIME_REVOKED'); }
+    return runWithIAMStoreContext(async () => {
     const user = findUserByAccount(session.account);
     if (!user || user.status !== 'active') return invalidateSession(sessionId, '账号已停用或不存在，请重新登录。', 'IDENTITY_USER_INACTIVE');
     if (!user.roleIds.includes(session.roleId)) return invalidateSession(sessionId, '当前登录角色已被移除，请重新登录。', 'IDENTITY_ROLE_REVOKED');
@@ -75,6 +89,7 @@ export function createIdentitySessionService({
       return invalidateSession(sessionId, '账号角色或权限策略已变更，请重新登录。', 'IDENTITY_AUTHORIZATION_STALE');
     }
     return { session };
+    }, session.tenantId);
   };
 
   const getIdentitySessionProfile = async (sessionId, deviceId) => {

@@ -1,5 +1,25 @@
 # 项目文档中心
 
+协作约定：[GitHub提交与交付](development/GITHUB_DELIVERY.md)——每次上传使用简短中文说明，附验证范围，不提交私有配置与运行数据。
+
+2026-09-17 沙箱准入增量：[初始化与运行控制指南](guides/TENANT_RUNTIME_CONTROL.md) · [报告第15节](development/MULTITENANT_VALIDATION.md#15-沙箱初始化运行准入与门户申请界面2026-09-17)。补齐审核式人员初始化、有限功能配额、门户撤权复验及客户中心申请/取消界面；并非正式商业开通。以下为历史记录。
+
+2026-09-17 IAM隔离补充：[认证与升级注意事项](guides/IDENTITY_PROVIDER_ADAPTERS.md) · [报告第14节](development/MULTITENANT_VALIDATION.md#14-执行面iam租户隔离2026-09-17)。IAM按租户隔离，新企业不继承Demo权限；OIDC/钉钉、HTTP授权及会话版本验证已回归，全量683次通过。门户到企业人员的初始化、权益和在途撤权未完成，不能理解为自动开通。下方为历史记录。
+
+2026-09-17 开通流程首批：[申请与资源预检指南](guides/PORTAL_RUNTIME_PROVISIONING.md) · [报告第13节](development/MULTITENANT_VALIDATION.md#13-门户开通申请与资源预检子流程2026-09-17)。已实现后端申请/取消、版本与权限失效、只读预检和SQLite记录恢复；全量671次、真实进程16个测试计数通过。业务IAM/权益/撤权及激活仍未实现，不代表已经自动开通。以下为历史记录。
+
+2026-09-17 备份恢复补充：[运维操作说明](guides/SEMANTIC_TENANT_INSTANCES.md) · [报告第12节](development/MULTITENANT_VALIDATION.md#12-停机备份与新库恢复演练2026-09-17)。已提供停机校验、手动备份和恢复到新库，并通过真实实例恢复演练；全量659次、进程14个测试计数、Python32项通过。未开启自动备份，未操作现有业务库。以下为历史记录。
+
+2026-09-17 语义实例持久化：[配置及故障处理](guides/SEMANTIC_TENANT_INSTANCES.md) · [报告第11节](development/MULTITENANT_VALIDATION.md#11-单实例持久化与故障恢复2026-09-17)。已实现租户绑定SQLite原子快照、重启恢复、损坏拒绝与提交失败停读写；全量659次、真实进程14个测试计数、Python23项通过。自动开通、备份/高可用和生产隔离仍未完成。以下为此前阶段记录。
+
+2026-09-16 独立语义实例：[接入指南](guides/SEMANTIC_TENANT_INSTANCES.md) · [真实双进程回归](development/MULTITENANT_VALIDATION.md#10-独立语义实例接入与真实联调2026-09-16)。已实现租户实例映射、服务认证、预检与操作回执；全量659次执行、独立进程7个测试计数及Python10项通过。仍为内存实例，门户自动开通与生产隔离未完成。下面为此前阶段记录。
+
+2026-09-16 多租户修复：[报告第9节](development/MULTITENANT_VALIDATION.md#9-修复实现与回归2026-09-16)。共享草稿应用层隔离、日常限流和旧提示已修复；649次全量执行通过，含28项专项。非Demo共享Semantica访问已阻断，自动开通和独立语义实例仍未交付，不代表生产多租户就绪。
+
+产品改版：[元域产品官网改版方案](development/PRODUCT_WEBSITE_REDESIGN.md)——首页、独立产品详情、合成案例和文档阅读首批已实施；客户中心深度改版等后续范围及验收分开记录。
+
+新增：[产品官网与客户中心](guides/PRODUCT_PORTAL.md) · [产品化范围与验收](development/PRODUCT_PORTAL_ACCEPTANCE.md)——官网、公开技术文档、账号、租户、会员、测试充值与优惠券；不是可公开收款的生产服务。
+
 新增：[异常助手](guides/ANOMALY_ASSISTANT.md)——非结构化汇报、来源追溯、字段校对、确认与撤回；第一阶段为个人工作区，未连接真实钉钉群或下游系统。
 
 最新修复：[双 Agent × WeKnora 回归](development/DUAL_AGENT_WEKNORA_REPAIR.md)。已补齐问答契约/诊断、规则召回、双端选定文档补查和运营只读方案候选；简单授信方案已完成生成到发布后业务读取验证，仍需人工校对和独立回放。

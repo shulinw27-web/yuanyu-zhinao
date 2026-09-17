@@ -9,6 +9,7 @@ import { validateSemanticMappingContract } from './semantic-mapping-validation-s
 import { semanticFingerprint } from './semantic-model-fingerprint.js';
 import { inferObjectGranularity } from './ontology-contract-service.js';
 import { semanticOperationsOwnerMatches, semanticOperationsPrincipalKey } from './semantic-operations-identity.js';
+import { assertSemanticTenant } from './semantic-tenant-context.js';
 import { discoverWorkspaceSchemas, extendSemanticMaterials } from './semantic-material-workspace-service.js';
 import { validateProposalSamples } from './semantic-uploaded-sample-service.js';
 import { compileWorldModelRequirements, validateProposalEvidence, proposalBusinessValidation } from './semantic-world-model-service.js';
@@ -259,6 +260,7 @@ const publicSnapshot = (snapshot) => snapshot && ({
 });
 
 export function createSemanticOperationsProposal({ input, multimodalContent, attachments = [], schemaDiscovery = null, identityScope, requirements = '', sampleRefs = [], roleId, adoptionMode = 'merge' }) {
+  assertSemanticTenant(identityScope);
   if (!['merge', 'replace'].includes(adoptionMode)) return { error: '请选择合并或替换当前草稿。', code: 'SEMANTIC_ADOPTION_MODE_INVALID' };
   const sourceText = `${normalize(input)}\n${normalize(multimodalContent?.modelContext)}`.slice(0, 24_000);
   const selected = catalog.filter((item) => includesAny(sourceText, item.terms));
@@ -307,6 +309,7 @@ export function createSemanticOperationsProposal({ input, multimodalContent, att
 }
 
 export function updateSemanticOperationsProposal({ proposalId, revision, objectTypes, relationshipTypes, role, identityScope }) {
+  assertSemanticTenant(identityScope);
   return mapMaybe(readSemanticGovernanceState(PROPOSAL_NAMESPACE, proposalKey(proposalId)), (proposal) => {
   if (!proposal || !semanticOperationsOwnerMatches(proposal.owner, identityScope)) return { error: '未找到可修订的语义建模提案，或该提案不属于当前身份。', code: 'SEMANTIC_PROPOSAL_NOT_FOUND' };
   if (proposal.status !== 'pending_review') return { error: '只有等待评审的语义提案可以修订。', code: 'SEMANTIC_PROPOSAL_NOT_PENDING' };
@@ -334,6 +337,7 @@ export function updateSemanticOperationsProposal({ proposalId, revision, objectT
 }
 
 export async function createSemanticOperationsProposalFromRequest({ body, role, identityScope, scannedMaterial = null, sourceMaterialIncomplete = false, workspaceDocuments = null }) {
+  assertSemanticTenant(identityScope);
   const input = String(body?.text || '').trim();
   const promptSafety = inspectModelPromptSafety(input);
   if (!promptSafety.safe) return { error: '运营指令未通过安全检查，未生成语义草稿。', status: 400 };
@@ -361,10 +365,12 @@ export async function createSemanticOperationsProposalFromRequest({ body, role, 
 }
 
 export function listSemanticOperationsSnapshots({ identityScope }) {
+  assertSemanticTenant(identityScope);
   return mapMaybe(readSemanticGovernanceState(SNAPSHOT_NAMESPACE, 'index', {}), (index) => Object.values(index).filter((snapshot) => semanticOperationsOwnerMatches(snapshot.owner, identityScope)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(publicSnapshot));
 }
 
 export function applySemanticOperationsProposal({ proposalId, role, identityScope }) {
+  assertSemanticTenant(identityScope);
   return mapMaybe(readSemanticGovernanceState(PROPOSAL_NAMESPACE, proposalKey(proposalId)), (proposal) => {
   if (!proposal || !semanticOperationsOwnerMatches(proposal.owner, identityScope)) return { error: '未找到可采纳的语义建模草稿，或该草稿不属于当前身份。', code: 'SEMANTIC_PROPOSAL_NOT_FOUND' };
   if (proposal.status !== 'pending_review') return { error: '该语义建模草稿已被采纳或已失效。', code: 'SEMANTIC_PROPOSAL_NOT_PENDING' };
@@ -431,6 +437,7 @@ export function applySemanticOperationsProposal({ proposalId, role, identityScop
 }
 
 export function rollbackSemanticOperationsSnapshot({ snapshotId, role, identityScope }) {
+  assertSemanticTenant(identityScope);
   return mutateSemanticGovernanceStates([
     getOAMetaModelRuntimeTransactionEntry(),
     { name: 'snapshots', namespace: SNAPSHOT_NAMESPACE, key: 'index', initialValue: {} }

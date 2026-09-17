@@ -1,11 +1,11 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { URL } from 'node:url';
-import { getEffectiveAccess, selectEffectiveRoleForPermission } from './services/access-control-service.js';
 import { consumeRequestQuota, getRateLimitPolicy } from './services/request-guard-service.js';
 import { isDemoRoleHeaderEnabled, resolveRequestIdentityAsync } from './services/request-identity-service.js';
 import { createBodyReader, sendJson as send } from './http/http-utils.js';
-import { isPublicPath, requiredReadPagePermissions } from './http/route-security.js';
+import { isPublicPath } from './http/route-security.js';
+import { dispatchAuthorizedRoutes } from './http/authorized-route-dispatch.js';
 import { handleIdentityRoutes } from './routes/identity-routes.js';
 import { handlePermissionRoutes } from './routes/permission-routes.js';
 import { handleAgentRoutes } from './routes/agent-routes.js';
@@ -31,11 +31,9 @@ const runtimeConfiguration = loadRuntimeConfiguration();
 await configureRuntimeDependencies(runtimeConfiguration);
 const allowedOrigins = new Set(runtimeConfiguration.corsOrigins);
 const allowDemoRoleHeader = isDemoRoleHeaderEnabled();
-
 // Three 4MB attachments expand to roughly 16MB when Base64 encoded.
 const maxBodyBytes = runtimeConfiguration.maxBodyBytes;
 const readBody = createBodyReader(maxBodyBytes);
-
 const routeHandlers = [
   handleIdentityRoutes,
   handlePermissionRoutes,
@@ -51,7 +49,6 @@ const routeHandlers = [
   handleKeyRoutes,
   handlePlatformRoutes
 ];
-
 const handleRequest = async (req, res) => {
   try {
     if (req.method === 'OPTIONS') return send(res, res.corsOrigin || !req.headers.origin ? 204 : 403, {});
@@ -79,22 +76,6 @@ const handleRequest = async (req, res) => {
       source: identity.source || null,
       platform: String(req.headers['x-client-platform'] || 'unknown').slice(0, 80)
     };
-    const effectiveAccess = getEffectiveAccess(role, agentIdentity);
-    const selectActionRole = (permissionId) => selectEffectiveRoleForPermission(role, permissionId, agentIdentity);
-    const denyButton = (permissionId) => send(res, 403, {
-      message: `当前有效权限未授予按钮操作：${permissionId}。`,
-      code: 'BUTTON_PERMISSION_DENIED'
-    });
-
-    const requiredPages = req.method === 'GET' ? requiredReadPagePermissions(url.pathname) : null;
-    if (requiredPages && !requiredPages.some((permissionId) => effectiveAccess.pagePermissionIds.includes(permissionId))) {
-      return send(res, 403, {
-        message: `当前有效权限未授予页面访问：${requiredPages.join(' / ')}。`,
-        code: 'PAGE_PERMISSION_DENIED',
-        requiredPagePermissionIds: requiredPages
-      });
-    }
-
     const context = {
       req,
       res,
@@ -102,17 +83,11 @@ const handleRequest = async (req, res) => {
       role,
       identity,
       agentIdentity,
-      effectiveAccess,
       oaSessionId: req.headers['x-identity-session'] || req.headers['x-oa-session'],
-      selectActionRole,
-      denyButton,
       readBody,
       send
     };
-    for (const handleRoutes of routeHandlers) {
-      if (await handleRoutes(context)) return;
-    }
-    return send(res, 404, { message: '未找到接口。' });
+    return await dispatchAuthorizedRoutes(context, routeHandlers, handleIdentityRoutes);
   } catch (error) {
     return send(res, error.status || 500, {
       message: error.status ? error.message : '服务暂时不可用，请稍后重试。',
@@ -120,7 +95,6 @@ const handleRequest = async (req, res) => {
     });
   }
 };
-
 const server = createServer((req, res) => {
   attachHttpCompletionLog(req, res);
   res.requestId = String(req.headers['x-request-id'] || '').slice(0, 96) || randomUUID();
