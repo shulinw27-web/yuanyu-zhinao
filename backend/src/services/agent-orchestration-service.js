@@ -62,6 +62,10 @@ const identityOf = (scope = {}) => ({ tenantId: String(scope.tenantId || '').sli
 const scopeKey = (scope) => JSON.stringify([scope.tenantId, scope.subjectId]);
 const initialWorkspace = () => ({ schemaVersion: 1, orchestrations: {} });
 const digest = (value) => createHash('sha256').update(JSON.stringify(value ?? null)).digest('hex');
+const ownsLease = (item, workerId, token, nowAt) => Boolean(item && ['active', 'running'].includes(item.status)
+  && typeof token === 'string' && token && item.lease?.token === token && item.lease.workerId === workerId
+  && Date.parse(item.lease.expiresAt) > nowAt);
+const leaseMismatch = () => ({ commit: false, result: { error: '当前 Worker 的编排租约已失效。', code: 'AGENT_ORCHESTRATION_LEASE_MISMATCH' } });
 const publicOrchestration = (item) => {
   if (!item) return null;
   const safe = clone(item);
@@ -163,7 +167,7 @@ export async function controlAgentOrchestration({ identityScope, orchestrationId
     if (!item) return { commit: false, result: { error: '未找到当前用户的任务编排。', code: 'AGENT_ORCHESTRATION_NOT_FOUND' } };
     if (!['pause', 'resume', 'cancel'].includes(action)) return { commit: false, result: { error: '不支持该编排控制动作。', code: 'AGENT_ORCHESTRATION_ACTION_INVALID' } };
     if (action === 'resume' && !['paused', 'waiting_confirmation'].includes(item.status)) return { commit: false, result: { error: '只有暂停或等待确认的编排可以恢复。', code: 'AGENT_ORCHESTRATION_STATE_CONFLICT' } };
-    if (action === 'pause' && item.status !== 'active') return { commit: false, result: { error: '只有活动编排可以暂停。', code: 'AGENT_ORCHESTRATION_STATE_CONFLICT' } };
+    if (action === 'pause' && !['active', 'running'].includes(item.status)) return { commit: false, result: { error: '只有活动或运行中的编排可以暂停。', code: 'AGENT_ORCHESTRATION_STATE_CONFLICT' } };
     if (action === 'cancel' && ['cancelled', 'completed'].includes(item.status)) return { commit: false, result: { error: '当前编排状态不允许取消。', code: 'AGENT_ORCHESTRATION_STATE_CONFLICT' } };
     item.status = action === 'pause' ? 'paused' : action === 'resume' ? 'active' : 'cancelled';
     item.updatedAt = nowIso(nowAt);
@@ -172,12 +176,13 @@ export async function controlAgentOrchestration({ identityScope, orchestrationId
   });
 }
 
-export async function recordAgentOrchestrationCheckpoint({ identityScope, orchestrationId, stepId, status, result = null, nowAt = Date.now() }) {
+export async function recordAgentOrchestrationCheckpoint({ identityScope, orchestrationId, workerId, leaseToken, stepId, status, result = null, nowAt = Date.now() }) {
   const identity = identityOf(identityScope);
   return mutateWorkspace(identity, (workspace) => {
     const item = workspace.orchestrations[orchestrationId];
     const step = item?.steps.find((entry) => entry.id === stepId);
     if (!item || !step) return { commit: false, result: { error: '未找到编排或步骤。', code: 'AGENT_ORCHESTRATION_STEP_NOT_FOUND' } };
+    if (!ownsLease(item, workerId, leaseToken, nowAt)) return leaseMismatch();
     if (!['running', 'succeeded', 'failed', 'waiting_confirmation'].includes(status)) return { commit: false, result: { error: '检查点状态无效。', code: 'AGENT_ORCHESTRATION_CHECKPOINT_INVALID' } };
     const dependenciesReady = step.dependsOn.every((id) => item.checkpoints[id]?.status === 'succeeded');
     if (!dependenciesReady) return { commit: false, result: { error: '前置步骤尚未完成，不能推进当前步骤。', code: 'AGENT_ORCHESTRATION_DEPENDENCY_PENDING' } };
@@ -196,6 +201,7 @@ export async function recordAgentOrchestrationCheckpoint({ identityScope, orches
 }
 
 export async function claimDueAgentOrchestrations({ workerId, nowAt = Date.now(), leaseMs = 60_000, limit = 20 } = {}) {
+  if (typeof workerId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,119}$/.test(workerId)) throw new TypeError('Invalid orchestration worker ID.');
   const rows = postgresRepository ? await postgresRepository.listState(NAMESPACE) : listState(NAMESPACE);
   const claimed = [];
   for (const row of rows.slice(0, Math.max(1, Math.min(limit * 4, 200)))) {
@@ -203,26 +209,38 @@ export async function claimDueAgentOrchestrations({ workerId, nowAt = Date.now()
     const identity = { tenantId: row.value?.orchestrations && Object.values(row.value.orchestrations)[0]?.tenantId, subjectId: row.value?.orchestrations && Object.values(row.value.orchestrations)[0]?.subjectId };
     if (!identity.tenantId || !identity.subjectId) continue;
     const outcome = await mutateWorkspace(identity, (workspace) => {
+      let expired = false;
+      for (const item of Object.values(workspace.orchestrations)) {
+        if (item.lease && Date.parse(item.lease.expiresAt) <= nowAt) {
+          item.lease = null; item.lastRunStatus = 'failed'; item.lastRunCompletedAt = nowIso(nowAt); item.updatedAt = nowIso(nowAt);
+          if (item.status === 'running') item.status = 'failed';
+          expired = true;
+        }
+      }
       const due = Object.values(workspace.orchestrations).filter((item) => item.status === 'active' && Date.parse(item.schedule.nextRunAt) <= nowAt && (!item.lease || Date.parse(item.lease.expiresAt) <= nowAt)).sort((a, b) => a.schedule.nextRunAt.localeCompare(b.schedule.nextRunAt))[0];
-      if (!due) return { commit: false, result: null };
-      due.lease = { workerId: String(workerId || '').slice(0, 120), claimedAt: nowIso(nowAt), expiresAt: nowIso(nowAt + Math.max(10_000, Math.min(leaseMs, 300_000))) };
+      if (!due) return expired ? { value: workspace, result: null } : { commit: false, result: null };
+      due.lease = { workerId, token: randomUUID(), claimedAt: nowIso(nowAt), expiresAt: nowIso(nowAt + Math.max(10_000, Math.min(leaseMs, 300_000))) };
       due.runCount += 1; due.lastRunAt = nowIso(nowAt); due.checkpoints = {}; due.updatedAt = nowIso(nowAt);
       if (due.schedule.type === 'once') due.status = 'running';
       else due.schedule.nextRunAt = nowIso(Math.max(nowAt, Date.parse(due.schedule.nextRunAt)) + due.schedule.intervalMinutes * 60_000);
-      return { value: workspace, result: publicOrchestration(due) };
+      return { value: workspace, result: { ...publicOrchestration(due), lease: clone(due.lease) } };
     });
     if (outcome) claimed.push(outcome);
   }
   return claimed;
 }
 
-export async function finalizeAgentOrchestrationRun({ identityScope, orchestrationId, workerId, outcome, nowAt = Date.now() }) {
+export async function finalizeAgentOrchestrationRun({ identityScope, orchestrationId, workerId, leaseToken, outcome, nowAt = Date.now() }) {
   const identity = identityOf(identityScope);
   return mutateWorkspace(identity, (workspace) => {
     const item = workspace.orchestrations[orchestrationId];
     if (!item) return { commit: false, result: { error: '未找到当前用户的任务编排。', code: 'AGENT_ORCHESTRATION_NOT_FOUND' } };
-    if (!item.lease || item.lease.workerId !== workerId) return { commit: false, result: { error: '当前 Worker 未持有该编排租约。', code: 'AGENT_ORCHESTRATION_LEASE_MISMATCH' } };
+    if (!ownsLease(item, workerId, leaseToken, nowAt)) return leaseMismatch();
     if (!['succeeded', 'failed', 'waiting_confirmation'].includes(outcome)) return { commit: false, result: { error: '编排运行结果无效。', code: 'AGENT_ORCHESTRATION_OUTCOME_INVALID' } };
+    if ((outcome === 'succeeded' && !item.steps.every(step => item.checkpoints[step.id]?.status === 'succeeded'))
+      || (outcome === 'waiting_confirmation' && !item.steps.some(step => item.checkpoints[step.id]?.status === 'waiting_confirmation'))) {
+      return { commit: false, result: { error: '检查点未证明该完成状态。', code: 'AGENT_ORCHESTRATION_OUTCOME_UNVERIFIED' } };
+    }
     item.lastRunStatus = outcome;
     item.lastRunCompletedAt = nowIso(nowAt);
     item.lease = null;

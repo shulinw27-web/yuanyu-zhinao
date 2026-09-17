@@ -9,6 +9,7 @@ import { createIdentitySessionService } from '../src/services/identity-session-s
 import { runWithTenantExecution } from '../src/services/tenant-execution-context.js';
 import { dispatchAuthorizedRoutes } from '../src/http/authorized-route-dispatch.js';
 import { executePrivateAgentCommand, claimPrivateAgentLongTask, completePrivateAgentDesktopExecution } from '../src/services/private-agent-service.js';
+import { controlSemanticInspectionSchedule, createSemanticInspectionSchedule, listSemanticInspectionSchedules, runSemanticInspectionCycle } from '../src/services/semantic-inspection-schedule-service.js';
 
 const timestamp = Date.parse('2026-09-17T00:00:00Z');
 function fixture(tenantId = 'enrolled-a', options = {}) {
@@ -30,6 +31,55 @@ function fixture(tenantId = 'enrolled-a', options = {}) {
 }
 test.beforeEach(() => { resetRuntimeState(['iam', 'tenant_runtime_control_v1', 'identity_sessions']); configureTenantRuntimeControl({}); });
 test.afterEach(() => configureTenantRuntimeControl({}));
+
+test('inspection cancelled while admission awaits never starts the executor', async () => {
+  resetRuntimeState(['semantic_inspection_schedules', 'semantic_operations_notifications']);
+  let cancelId;
+  const f = fixture('cancel-admission', { readPortal: async () => {
+    if (cancelId) { await controlSemanticInspectionSchedule({ id: cancelId, action: 'cancel', identityScope: f.identity }); cancelId = null; }
+    return f.portal;
+  } });
+  f.install(); await f.approve();
+  const created = await createSemanticInspectionSchedule({ body: { checks: ['schema_integrity'] }, role: { id: 'executive' }, identityScope: f.identity });
+  cancelId = created.schedule.id;
+  let calls = 0;
+  await runSemanticInspectionCycle({ executeInspection: async () => { calls++; return { severity: 'info' }; } });
+  assert.equal(calls, 0);
+  const current = (await listSemanticInspectionSchedules({ identityScope: f.identity }))[0];
+  assert.equal(current.status, 'cancelled'); assert.equal(current.lastRun, null);
+});
+
+test('inspection cycle itself enforces tenant admission and charges exactly once', async () => {
+  resetRuntimeState(['semantic_inspection_schedules', 'semantic_operations_notifications']);
+  const f = fixture(); f.install(); await f.approve();
+  await createSemanticInspectionSchedule({ body: { checks: ['schema_integrity'] }, role: { id: 'executive' }, identityScope: f.identity });
+  let calls = 0;
+  await runSemanticInspectionCycle({ executeInspection: async () => {
+    calls++;
+    assert.deepEqual(getIAMUsers().map(user => user.account), [f.identity.subjectId]);
+    return { severity: 'info', summary: '合成检查通过', findings: [] };
+  } });
+  assert.equal(calls, 1);
+  assert.equal((await f.control.inspect(f.identity.tenantId)).usage.count, 1);
+  assert.equal((await listSemanticInspectionSchedules({ identityScope: f.identity }))[0].lastRun.status, 'passed');
+});
+
+for (const phase of ['before', 'during']) test(`inspection rejects ${phase} execution revocation without adopting results`, async () => {
+  resetRuntimeState(['semantic_inspection_schedules', 'semantic_operations_notifications']);
+  const f = fixture(); f.install(); await f.approve();
+  await createSemanticInspectionSchedule({ body: { checks: ['schema_integrity'] }, role: { id: 'executive' }, identityScope: f.identity });
+  if (phase === 'before') await f.control.revoke(f.identity.tenantId, 1);
+  let calls = 0;
+  await runSemanticInspectionCycle({ executeInspection: async () => {
+    calls++; await f.control.revoke(f.identity.tenantId, 1);
+    return { severity: 'warning', summary: 'must-not-persist', findings: [] };
+  } });
+  assert.equal(calls, phase === 'before' ? 0 : 1);
+  const schedules = await listSemanticInspectionSchedules({ identityScope: f.identity });
+  assert.equal(schedules[0].lastRun.status, 'failed');
+  assert.equal(schedules[0].lastRun.result, null);
+  assert.doesNotMatch(JSON.stringify(schedules), /must-not-persist/);
+});
 
 test('direct execution entry points cannot bypass enrolled sandbox feature boundaries', async () => {
   const f = fixture(); f.install(); await f.approve();

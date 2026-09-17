@@ -17,6 +17,7 @@ export function agentResponseToOrchestrationResult(response) {
 
 export async function executeClaimedAgentOrchestration({ task, workerId, executeStep, now = () => Date.now() }) {
   const identityScope = { tenantId: task.tenantId, subjectId: task.subjectId };
+  const lease = { workerId, leaseToken: task.lease?.token };
   let waitingForConfirmation = false;
   let failed = false;
   const remaining = new Map(task.steps.map((step) => [step.id, step]));
@@ -25,23 +26,27 @@ export async function executeClaimedAgentOrchestration({ task, workerId, execute
     const ready = [...remaining.values()].filter((step) => successfulDependency(task, step));
     if (!ready.length) { failed = true; break; }
     for (const step of ready) {
-      const started = await recordAgentOrchestrationCheckpoint({ identityScope, orchestrationId: task.id, stepId: step.id, status: 'running', nowAt: now() });
-      if (started.error) { failed = true; break; }
-      task.checkpoints[step.id] = started.checkpoints[step.id];
       try {
-        const result = await runWithTenantExecution({ identity: identityScope, roleId: task.roleId, feature: 'background-agent', permission: 'page.agent.view' }, () => executeStep({ task, step, identityScope }));
+        const result = await runWithTenantExecution({ identity: identityScope, roleId: task.roleId, feature: 'background-agent', permission: 'page.agent.view' }, async () => {
+          // Admission can await external control state. Recheck the schedule
+          // lease afterwards, immediately before starting this step.
+          const started = await recordAgentOrchestrationCheckpoint({ ...lease, identityScope, orchestrationId: task.id, stepId: step.id, status: 'running', nowAt: now() });
+          if (started.error) throw Object.assign(new Error(started.error), { code: started.code });
+          task.checkpoints[step.id] = started.checkpoints[step.id];
+          return executeStep({ task, step, identityScope });
+        });
         // A returned message is not a completion receipt. Clarification,
         // refusal and partial analyses must stop the dependent DAG steps.
         if (!result?.traceId || !['succeeded', 'waiting_confirmation'].includes(result.outcome) || (step.mode === 'proposal' && result.outcome !== 'waiting_confirmation')) {
           throw Object.assign(new Error('Agent step did not return a verified completion or confirmation.'), { code: 'AGENT_ORCHESTRATION_STEP_UNVERIFIED' });
         }
         const status = result.outcome;
-        const checkpoint = await recordAgentOrchestrationCheckpoint({ identityScope, orchestrationId: task.id, stepId: step.id, status, result, nowAt: now() });
+        const checkpoint = await recordAgentOrchestrationCheckpoint({ ...lease, identityScope, orchestrationId: task.id, stepId: step.id, status, result, nowAt: now() });
         if (checkpoint.error) { failed = true; break; }
         task.checkpoints[step.id] = checkpoint.checkpoints[step.id];
         waitingForConfirmation = status === 'waiting_confirmation';
       } catch (error) {
-        const checkpoint = await recordAgentOrchestrationCheckpoint({ identityScope, orchestrationId: task.id, stepId: step.id, status: 'failed', result: { errorCode: error?.code || 'AGENT_ORCHESTRATION_STEP_FAILED' }, nowAt: now() });
+        const checkpoint = await recordAgentOrchestrationCheckpoint({ ...lease, identityScope, orchestrationId: task.id, stepId: step.id, status: 'failed', result: { errorCode: error?.code || 'AGENT_ORCHESTRATION_STEP_FAILED' }, nowAt: now() });
         if (!checkpoint.error) task.checkpoints[step.id] = checkpoint.checkpoints[step.id];
         failed = true;
       }
@@ -51,7 +56,7 @@ export async function executeClaimedAgentOrchestration({ task, workerId, execute
   }
 
   const outcome = failed ? 'failed' : waitingForConfirmation ? 'waiting_confirmation' : 'succeeded';
-  return finalizeAgentOrchestrationRun({ identityScope, orchestrationId: task.id, workerId, outcome, nowAt: now() });
+  return finalizeAgentOrchestrationRun({ ...lease, identityScope, orchestrationId: task.id, outcome, nowAt: now() });
 }
 
 export async function runAgentOrchestrationWorkerCycle({ workerId, executeStep, now = () => Date.now(), limit = 10, leaseMs = 180_000 } = {}) {

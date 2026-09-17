@@ -5,6 +5,7 @@
 PRODUCTION_TODO_CHECKLIST 是生产待办的唯一勾选入口；Kubernetes 模板仍需企业环境参数与安全验收。
 
 - [元域智脑长任务运行时 v0.1](AGENT_LONG_TASK_RUNTIME.md)
+- [后台编排与语义巡检执行边界](WORKER_EXECUTION_BOUNDARIES.md)
 - [智脑可观测性与 SIEM 接入](AGENT_OBSERVABILITY_AND_SIEM.md)
 - [Agent Run PostgreSQL 执行控制面 v0.1](AGENT_RUN_POSTGRES_RUNTIME.md)
 - [元域智脑部署、回滚与故障处置手册](DEPLOYMENT_ROLLBACK_RUNBOOK.md)

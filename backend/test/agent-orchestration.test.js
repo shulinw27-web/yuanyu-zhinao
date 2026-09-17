@@ -5,9 +5,10 @@ import {
   controlAgentOrchestration,
   createAgentOrchestration,
   listAgentOrchestrations,
-  recordAgentOrchestrationCheckpoint
+  recordAgentOrchestrationCheckpoint,
+  finalizeAgentOrchestrationRun
 } from '../src/services/agent-orchestration-service.js';
-import { agentResponseToOrchestrationResult, runAgentOrchestrationWorkerCycle } from '../src/workers/agent-orchestration-worker.js';
+import { agentResponseToOrchestrationResult, executeClaimedAgentOrchestration, runAgentOrchestrationWorkerCycle } from '../src/workers/agent-orchestration-worker.js';
 
 const identity = (subjectId) => ({ tenantId: 'orchestration-test', subjectId, sessionId: `${subjectId}-session`, deviceId: `${subjectId}-device` });
 const steps = [
@@ -15,6 +16,64 @@ const steps = [
   { id: 'analyze', title: '分析差异', mode: 'analysis', dependsOn: ['collect'] },
   { id: 'proposal', title: '形成待确认提案', mode: 'proposal', dependsOn: ['analyze'] }
 ];
+
+test('cancel during a running step prevents downstream execution and late checkpoints', async () => {
+  const scope = identity('cancel-in-flight');
+  const created = await createAgentOrchestration({ identityScope: scope, roleId: 'executive', goal: '取消中的任务', nowAt: 1000, schedule: { type: 'once', runAt: new Date(70000).toISOString() }, steps: steps.slice(0, 2) });
+  const task = (await claimDueAgentOrchestrations({ workerId: 'cancel-worker', nowAt: 70001 })).find(item => item.id === created.id);
+  const calls = [];
+  await executeClaimedAgentOrchestration({ task, workerId: 'cancel-worker', now: () => 70002, executeStep: async ({ step }) => {
+    calls.push(step.id);
+    await controlAgentOrchestration({ identityScope: scope, orchestrationId: task.id, action: 'cancel', nowAt: 70002 });
+    return { traceId: 'trace-cancelled-result', outcome: 'succeeded' };
+  } });
+  assert.deepEqual(calls, ['collect']);
+  const current = (await listAgentOrchestrations(scope))[0];
+  assert.equal(current.status, 'cancelled');
+  assert.notEqual(current.checkpoints.collect.status, 'succeeded');
+  assert.equal(current.checkpoints.analyze, undefined);
+});
+
+test('expired orchestration leases and same-worker old generations cannot write results', async () => {
+  const scope = identity('lease-generation');
+  const created = await createAgentOrchestration({ identityScope: scope, roleId: 'executive', goal: '租约竞争', nowAt: 1000, schedule: { type: 'interval', intervalMinutes: 15, startAt: new Date(70000).toISOString() }, steps: [steps[0]] });
+  const first = (await claimDueAgentOrchestrations({ workerId: 'shared-worker', nowAt: 70001, leaseMs: 10000 })).find(item => item.id === created.id);
+  const common = { identityScope: scope, orchestrationId: created.id, workerId: 'shared-worker', leaseToken: first.lease?.token };
+  assert.equal((await finalizeAgentOrchestrationRun({ ...common, outcome: 'succeeded', nowAt: 80001 })).code, 'AGENT_ORCHESTRATION_LEASE_MISMATCH');
+  const second = (await claimDueAgentOrchestrations({ workerId: 'shared-worker', nowAt: 970002 })).find(item => item.id === created.id);
+  assert.notEqual(second.lease?.token, first.lease?.token);
+  assert.equal((await recordAgentOrchestrationCheckpoint({ ...common, stepId: 'collect', status: 'succeeded', nowAt: 970003 })).code, 'AGENT_ORCHESTRATION_LEASE_MISMATCH');
+});
+
+test('expired one-shot tasks fail closed instead of staying running or automatically repeating', async () => {
+  const scope = identity('expired-once');
+  const created = await createAgentOrchestration({ identityScope: scope, roleId: 'executive', goal: '单次任务超时', nowAt: 1000, schedule: { type: 'once', runAt: new Date(70000).toISOString() }, steps: [steps[0]] });
+  const first = (await claimDueAgentOrchestrations({ workerId: 'once-worker', nowAt: 70001, leaseMs: 10000 })).find(item => item.id === created.id);
+  assert.ok(first.lease.token);
+  const reclaimed = await claimDueAgentOrchestrations({ workerId: 'replacement-worker', nowAt: 80001 });
+  assert.equal(reclaimed.some(item => item.id === created.id), false);
+  const current = (await listAgentOrchestrations(scope))[0];
+  assert.equal(current.status, 'failed'); assert.equal(current.lastRunStatus, 'failed');
+  assert.equal(Object.hasOwn(current, 'lease'), false);
+});
+
+test('a valid lease does not permit completion without matching checkpoints', async () => {
+  const scope = identity('unproven-final');
+  const created = await createAgentOrchestration({ identityScope: scope, roleId: 'executive', goal: '不可虚报完成', nowAt: 1000, schedule: { type: 'once', runAt: new Date(70000).toISOString() }, steps: [steps[0]] });
+  const claimed = (await claimDueAgentOrchestrations({ workerId: 'unproven-worker', nowAt: 70001 })).find(item => item.id === created.id);
+  for (const outcome of ['succeeded', 'waiting_confirmation']) assert.equal((await finalizeAgentOrchestrationRun({ identityScope: scope, orchestrationId: created.id, workerId: 'unproven-worker', leaseToken: claimed.lease.token, outcome, nowAt: 70002 })).code, 'AGENT_ORCHESTRATION_OUTCOME_UNVERIFIED');
+});
+
+test('pause and resume invalidates the prior run even when the worker ID is reused', async () => {
+  const scope = identity('pause-running');
+  const created = await createAgentOrchestration({ identityScope: scope, roleId: 'executive', goal: '暂停运行任务', nowAt: 1000, schedule: { type: 'once', runAt: new Date(70000).toISOString() }, steps: [steps[0]] });
+  const first = (await claimDueAgentOrchestrations({ workerId: 'pause-worker', nowAt: 70001 })).find(item => item.id === created.id);
+  assert.equal((await controlAgentOrchestration({ identityScope: scope, orchestrationId: created.id, action: 'pause', nowAt: 70002 })).status, 'paused');
+  await controlAgentOrchestration({ identityScope: scope, orchestrationId: created.id, action: 'resume', nowAt: 70003 });
+  const second = (await claimDueAgentOrchestrations({ workerId: 'pause-worker', nowAt: 70004 })).find(item => item.id === created.id);
+  assert.notEqual(second.lease.token, first.lease.token);
+  assert.equal((await finalizeAgentOrchestrationRun({ identityScope: scope, orchestrationId: created.id, workerId: 'pause-worker', leaseToken: first.lease.token, outcome: 'succeeded', nowAt: 70005 })).code, 'AGENT_ORCHESTRATION_LEASE_MISMATCH');
+});
 
 test('orchestration validates DAG schedules and isolates each authenticated user', async () => {
   const scope = identity('dag-user');
@@ -34,14 +93,15 @@ test('due orchestration is lease-claimed, checkpointed in dependency order, and 
   const created = await createAgentOrchestration({ identityScope: scope, roleId: 'production_manager', title: '质量巡检', goal: '巡检质量状态并形成提案', schedule: { type: 'once', runAt: new Date(70_000).toISOString() }, steps, nowAt: 1_000 });
   const claimed = await claimDueAgentOrchestrations({ workerId: 'worker-a', nowAt: 70_001 });
   assert.ok(claimed.some((item) => item.id === created.id));
-  assert.equal((await recordAgentOrchestrationCheckpoint({ identityScope: scope, orchestrationId: created.id, stepId: 'analyze', status: 'running' })).code, 'AGENT_ORCHESTRATION_DEPENDENCY_PENDING');
-  const first = await recordAgentOrchestrationCheckpoint({ identityScope: scope, orchestrationId: created.id, stepId: 'collect', status: 'succeeded', result: { records: 12, secret: 'not-stored' } });
+  const lease = { workerId: 'worker-a', leaseToken: claimed.find(item => item.id === created.id).lease.token, nowAt: 70002 };
+  assert.equal((await recordAgentOrchestrationCheckpoint({ ...lease, identityScope: scope, orchestrationId: created.id, stepId: 'analyze', status: 'running' })).code, 'AGENT_ORCHESTRATION_DEPENDENCY_PENDING');
+  const first = await recordAgentOrchestrationCheckpoint({ ...lease, identityScope: scope, orchestrationId: created.id, stepId: 'collect', status: 'succeeded', result: { records: 12, secret: 'not-stored' } });
   assert.equal(first.checkpoints.collect.rawResultStored, false);
   assert.equal(first.checkpoints.collect.resultDigest.length, 64);
-  await recordAgentOrchestrationCheckpoint({ identityScope: scope, orchestrationId: created.id, stepId: 'analyze', status: 'succeeded', result: { differences: 2 } });
-  const blocked = await recordAgentOrchestrationCheckpoint({ identityScope: scope, orchestrationId: created.id, stepId: 'proposal', status: 'succeeded', result: { action: 'create_order' } });
+  await recordAgentOrchestrationCheckpoint({ ...lease, identityScope: scope, orchestrationId: created.id, stepId: 'analyze', status: 'succeeded', result: { differences: 2 } });
+  const blocked = await recordAgentOrchestrationCheckpoint({ ...lease, identityScope: scope, orchestrationId: created.id, stepId: 'proposal', status: 'succeeded', result: { action: 'create_order' } });
   assert.equal(blocked.code, 'AGENT_ORCHESTRATION_CONFIRMATION_REQUIRED');
-  const waiting = await recordAgentOrchestrationCheckpoint({ identityScope: scope, orchestrationId: created.id, stepId: 'proposal', status: 'waiting_confirmation', result: { action: 'create_order' } });
+  const waiting = await recordAgentOrchestrationCheckpoint({ ...lease, identityScope: scope, orchestrationId: created.id, stepId: 'proposal', status: 'waiting_confirmation', result: { action: 'create_order' } });
   assert.equal(waiting.checkpoints.proposal.status, 'waiting_confirmation');
 });
 
