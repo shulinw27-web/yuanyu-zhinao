@@ -1,5 +1,7 @@
 # 项目文档中心
 
+2026-09-17 调度与通知：[报告第18节](development/MULTITENANT_VALIDATION.md#18-调度扫描与巡检通知一致性2026-09-17) · [运行说明](operations/WORKER_EXECUTION_BOUNDARIES.md)。补齐后段任务领取、巡检与通知原子保存、主体级保留及身份编码防碰撞，731次Node执行通过。旧歧义归属需核验迁移，大规模调度和外部送达未验收。
+
 2026-09-17 后台任务：[Worker执行与升级边界](operations/WORKER_EXECUTION_BOUNDARIES.md) · [报告第17节](development/MULTITENANT_VALIDATION.md#17-后台编排与巡检租约修复2026-09-17)。取消、租约过期和旧轮次不能推进任务，巡检内部准入及异常脱敏已补齐；722次Node执行通过，生产门禁保持。
 
 2026-09-17 终端撤权：[实时信任与派发说明](operations/DESKTOP_ENDPOINT_RUNTIME.md) · [报告第16节](development/MULTITENANT_VALIDATION.md#16-终端派发撤权复验2026-09-17)。修复旧心跳信任缓存，执行入口与派发返回前复验；709次Node执行通过，生产门禁保持。

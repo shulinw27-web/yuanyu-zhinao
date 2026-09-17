@@ -1,11 +1,97 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resetRuntimeState } from '../src/repositories/runtime-state-repository.js';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { resetRuntimeState, writeState, readState } from '../src/repositories/runtime-state-repository.js';
+import { asyncRuntimeStateRepository } from '../src/repositories/async-runtime-state-repository.js';
+import { configureSemanticGovernanceRepository } from '../src/services/semantic-governance-store.js';
 import { getRole } from '../src/services/authorization-service.js';
 import { claimDueSemanticInspection, completeSemanticInspection, controlSemanticInspectionSchedule, createSemanticInspectionSchedule, listSemanticInspectionSchedules, runSemanticInspectionCycle } from '../src/services/semantic-inspection-schedule-service.js';
-import { listSemanticOperationsNotifications } from '../src/services/semantic-operations-notification-service.js';
+import { createSemanticOperationsNotification, listSemanticOperationsNotifications } from '../src/services/semantic-operations-notification-service.js';
+import { semanticOperationsPrincipalKey, semanticOperationsOwnerMatches } from '../src/services/semantic-operations-identity.js';
+import { extendSemanticMaterials, loadSemanticMaterials } from '../src/services/semantic-material-workspace-service.js';
 
 const identity = { tenantId: 'inspection-tenant', subjectId: 'inspection-user', deviceId: 'inspection-device', platform: 'test' };
+
+test('delimiter-bearing tenants and subjects cannot share notices or schedule ownership', async () => {
+  resetRuntimeState(['semantic_operations_notifications', 'semantic_inspection_schedules']);
+  const a = { tenantId: 'company:a', subjectId: 'b' }; const b = { tenantId: 'company', subjectId: 'a:b' };
+  assert.notEqual(semanticOperationsPrincipalKey(a), semanticOperationsPrincipalKey(b));
+  await createSemanticOperationsNotification({ identityScope: a, message: 'A ONLY' });
+  const created = await createSemanticInspectionSchedule({ body: { checks: ['schema_integrity'] }, role: getRole('executive'), identityScope: a });
+  assert.equal((await listSemanticOperationsNotifications({ identityScope: b })).length, 0);
+  assert.equal((await listSemanticInspectionSchedules({ identityScope: b })).length, 0);
+  assert.equal((await controlSemanticInspectionSchedule({ id: created.schedule.id, action: 'cancel', identityScope: b })).code, 'SEMANTIC_INSPECTION_NOT_FOUND');
+});
+
+test('legacy unambiguous owners remain readable; ambiguous and device owners fail closed', () => {
+  assert.equal(semanticOperationsOwnerMatches('company:user', { tenantId: 'company', subjectId: 'user' }), true);
+  assert.equal(semanticOperationsOwnerMatches('company:a:b', { tenantId: 'company:a', subjectId: 'b' }), false);
+  assert.equal(semanticOperationsOwnerMatches('company:a:b', { tenantId: 'company', subjectId: 'a:b' }), false);
+  assert.equal(semanticOperationsOwnerMatches('company:user:device', { tenantId: 'company', subjectId: 'user', deviceId: 'device' }), false);
+});
+
+test('material references isolate delimiter-bearing identities and preserve safe legacy reads', async () => {
+  resetRuntimeState(['semantic_material_artifacts']);
+  const a = { tenantId: 'company:a', subjectId: 'b' }; const b = { tenantId: 'company', subjectId: 'a:b' };
+  const stored = await extendSemanticMaterials({ identityScope: a, roleId: 'executive', content: { documents: [{ name: 'synthetic.txt', mimeType: 'text/plain', text: 'A only' }] } });
+  await assert.rejects(loadSemanticMaterials(stored.refs, b, 'executive'), /SEMANTIC_MATERIAL_ACCESS_DENIED/);
+  assert.equal((await loadSemanticMaterials(stored.refs, a, 'executive'))[0].text, 'A only');
+  writeState('semantic_material_artifacts', 'legacy-ref', { owner: 'company:user', roleId: 'executive', document: { text: 'legacy' } });
+  assert.equal((await loadSemanticMaterials(['legacy-ref'], { tenantId: 'company', subjectId: 'user' }, 'executive'))[0].text, 'legacy');
+});
+
+test('SQLite rolls back a failed notification row and both records survive process restart', { timeout: 30000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'semantic-notice-atomic-'));
+  const env = { ...process.env, NODE_ENV: 'test', RUNTIME_STORE_DRIVER: 'sqlite', RUNTIME_SQLITE_PATH: join(directory, 'runtime.db') };
+  try {
+    for (const mode of ['write', 'read']) {
+      const result = await promisify(execFile)(process.execPath, ['backend/test/helpers/inspection-atomic-worker.mjs', mode], { env, windowsHide: true });
+      assert.deepEqual(JSON.parse(result.stdout), { status: 'passed', schedules: 1, notifications: 1 });
+    }
+  } finally {
+    assert.equal(dirname(resolve(directory)), resolve(tmpdir()));
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('inspection result and notification roll back together, then retry creates one notice', async () => {
+  resetRuntimeState(['semantic_inspection_schedules', 'semantic_operations_notifications']);
+  await createSemanticInspectionSchedule({ body: { checks: ['schema_integrity'] }, role: getRole('executive'), identityScope: identity });
+  const schedule = await claimDueSemanticInspection({ workerId: 'atomic-worker' });
+  const completion = { id: schedule.id, workerId: 'atomic-worker', leaseToken: schedule.lease.token, result: { severity: 'warning', summary: '合成告警', findings: [] } };
+  configureSemanticGovernanceRepository({ ...asyncRuntimeStateRepository,
+    mutateState: async (...args) => { if (args[0] === 'semantic_operations_notifications') throw new Error('simulated commit failure'); return asyncRuntimeStateRepository.mutateState(...args); },
+    mutateStates: async (entries, work) => asyncRuntimeStateRepository.mutateStates(entries, (...args) => { work(...args); throw new Error('simulated commit failure'); })
+  });
+  try {
+    await assert.rejects(completeSemanticInspection(completion), /simulated commit failure/);
+    assert.equal((await listSemanticInspectionSchedules({ identityScope: identity }))[0].lastRun, null);
+    assert.equal((await listSemanticOperationsNotifications({ identityScope: identity })).length, 0);
+  } finally { configureSemanticGovernanceRepository(null); }
+  assert.equal((await completeSemanticInspection(completion)).lastRun.status, 'warning');
+  assert.equal(await completeSemanticInspection(completion), null);
+  assert.equal((await listSemanticOperationsNotifications({ identityScope: identity })).length, 1);
+});
+
+test('notification retention cannot evict another tenant or another subject', async () => {
+  resetRuntimeState(['semantic_operations_notifications']);
+  const other = { tenantId: 'other-company', subjectId: 'other-user' };
+  const saved = await createSemanticOperationsNotification({ identityScope: other, message: '必须保留' });
+  const sameCompany = await createSemanticOperationsNotification({ identityScope: { ...identity, subjectId: 'colleague' }, message: '同企业其他人的通知' });
+  const index = readState('semantic_operations_notifications', 'index');
+  for (let i = 0; i < 500; i++) index[`synthetic-${i}`] = { id: `synthetic-${i}`, owner: i % 2 ? semanticOperationsPrincipalKey(identity) : `${identity.tenantId}:${identity.subjectId}`, createdAt: '2000-01-01T00:00:00.000Z' };
+  // Ensure old notices from other principals would be evicted by a global cap.
+  index[saved.id].createdAt = '1999-01-01T00:00:00.000Z'; index[sameCompany.id].createdAt = index[saved.id].createdAt;
+  writeState('semantic_operations_notifications', 'index', index);
+  const latest = await createSemanticOperationsNotification({ identityScope: identity, message: '最新通知' });
+  const after = readState('semantic_operations_notifications', 'index');
+  assert.ok(after[saved.id]); assert.ok(after[sameCompany.id]); assert.ok(after[latest.id]);
+  assert.equal(Object.values(after).filter(item => semanticOperationsOwnerMatches(item.owner, identity)).length, 500);
+});
 
 test('semantic schedules execute only declared read-only checks and notify findings', async () => {
   resetRuntimeState(['semantic_inspection_schedules', 'semantic_operations_notifications']);

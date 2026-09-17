@@ -8,6 +8,7 @@ import {
   recordAgentOrchestrationCheckpoint,
   finalizeAgentOrchestrationRun
 } from '../src/services/agent-orchestration-service.js';
+import { resetRuntimeState } from '../src/repositories/runtime-state-repository.js';
 import { agentResponseToOrchestrationResult, executeClaimedAgentOrchestration, runAgentOrchestrationWorkerCycle } from '../src/workers/agent-orchestration-worker.js';
 
 const identity = (subjectId) => ({ tenantId: 'orchestration-test', subjectId, sessionId: `${subjectId}-session`, deviceId: `${subjectId}-device` });
@@ -16,6 +17,37 @@ const steps = [
   { id: 'analyze', title: '分析差异', mode: 'analysis', dependsOn: ['collect'] },
   { id: 'proposal', title: '形成待确认提案', mode: 'proposal', dependsOn: ['analyze'] }
 ];
+
+test('due work beyond an inactive workspace prefix is still claimed', async () => {
+  resetRuntimeState(['agent_orchestrations']);
+  for (let i = 0; i < 8; i++) await createAgentOrchestration({ identityScope: identity(`future-${i}`), roleId: 'executive', goal: '未来任务', nowAt: 1000, schedule: { type: 'once', runAt: new Date(9000000).toISOString() }, steps: [steps[0]] });
+  const target = await createAgentOrchestration({ identityScope: identity('due-after-prefix'), roleId: 'executive', goal: '已到期任务', nowAt: 1000, schedule: { type: 'once', runAt: new Date(70000).toISOString() }, steps: [steps[0]] });
+  const claimed = await claimDueAgentOrchestrations({ workerId: 'fair-worker', nowAt: 70001, limit: 1 });
+  assert.deepEqual(claimed.map(item => item.id), [target.id]);
+  resetRuntimeState(['agent_orchestrations']);
+});
+
+test('scheduler orders due work by time across workspaces rather than insertion order', async () => {
+  resetRuntimeState(['agent_orchestrations']);
+  const late = await createAgentOrchestration({ identityScope: identity('late-first'), roleId: 'executive', goal: '晚到期', nowAt: 1000, schedule: { type: 'once', runAt: new Date(90000).toISOString() }, steps: [steps[0]] });
+  const early = await createAgentOrchestration({ identityScope: identity('early-second'), roleId: 'executive', goal: '早到期', nowAt: 1000, schedule: { type: 'once', runAt: new Date(70000).toISOString() }, steps: [steps[0]] });
+  const first = await claimDueAgentOrchestrations({ workerId: 'order-worker', nowAt: 100000, limit: 1 });
+  assert.equal(first[0].id, early.id);
+  const second = await claimDueAgentOrchestrations({ workerId: 'other-worker', nowAt: 100000, limit: 1 });
+  assert.equal(second[0].id, late.id);
+  resetRuntimeState(['agent_orchestrations']);
+});
+
+test('expired cleanup also reaches workspaces beyond a future-work prefix', async () => {
+  resetRuntimeState(['agent_orchestrations']);
+  for (let i = 0; i < 8; i++) await createAgentOrchestration({ identityScope: identity(`future-cleanup-${i}`), roleId: 'executive', goal: '未来任务', nowAt: 1000, schedule: { type: 'once', runAt: new Date(9000000).toISOString() }, steps: [steps[0]] });
+  const scope = identity('expired-after-prefix');
+  const target = await createAgentOrchestration({ identityScope: scope, roleId: 'executive', goal: '待清理任务', nowAt: 1000, schedule: { type: 'once', runAt: new Date(70000).toISOString() }, steps: [steps[0]] });
+  assert.equal((await claimDueAgentOrchestrations({ workerId: 'cleanup-worker', nowAt: 70001, leaseMs: 10000, limit: 1 }))[0].id, target.id);
+  assert.equal((await claimDueAgentOrchestrations({ workerId: 'cleanup-worker', nowAt: 80001, limit: 1 })).length, 0);
+  assert.equal((await listAgentOrchestrations(scope))[0].status, 'failed');
+  resetRuntimeState(['agent_orchestrations']);
+});
 
 test('cancel during a running step prevents downstream execution and late checkpoints', async () => {
   const scope = identity('cancel-in-flight');

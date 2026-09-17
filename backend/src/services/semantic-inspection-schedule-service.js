@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { mutateSemanticGovernanceState, readSemanticGovernanceState } from './semantic-governance-store.js';
+import { mutateSemanticGovernanceState, mutateSemanticGovernanceStates, readSemanticGovernanceState } from './semantic-governance-store.js';
 import { semanticOperationsOwnerMatches, semanticOperationsPrincipalKey } from './semantic-operations-identity.js';
-import { createSemanticOperationsNotification } from './semantic-operations-notification-service.js';
+import { buildSemanticOperationsNotification, insertSemanticOperationsNotification, SEMANTIC_NOTIFICATION_NAMESPACE } from './semantic-operations-notification-service.js';
 import { runWithTenantExecution } from './tenant-execution-context.js';
 
 const NAMESPACE = 'semantic_inspection_schedules';
@@ -60,16 +60,22 @@ export async function completeSemanticInspection({ id, workerId, leaseToken, res
   // Returning from an executor is not proof that an inspection succeeded.
   if (!error && (!result || !['info', 'warning'].includes(result.severity) || typeof result.summary !== 'string'
     || !result.summary.trim() || result.summary.length > 1000 || !Array.isArray(result.findings) || result.findings.length > 100)) error = 'SEMANTIC_INSPECTION_RESULT_INVALID';
-  const outcome = await mutateIndex((index) => {
+  return mutateSemanticGovernanceStates([
+    { name: 'schedules', namespace: NAMESPACE, key: KEY, initialValue: {} },
+    { name: 'notifications', namespace: SEMANTIC_NOTIFICATION_NAMESPACE, key: KEY, initialValue: {} }
+  ], ({ schedules: index, notifications }) => {
     const schedule = index[id];
     if (!ownsLease(schedule, workerId, leaseToken, nowAt)) return { commit: false, result: null };
     const finishedAt = now(nowAt);
     schedule.lastRun = { finishedAt, status: error ? 'failed' : result?.severity === 'warning' ? 'warning' : 'passed', result: error ? null : result || null, error: error ? 'SEMANTIC_INSPECTION_FAILED' : null };
     schedule.nextRunAt = nextTime(schedule.intervalMinutes, nowAt); schedule.updatedAt = finishedAt; schedule.lease = null; index[id] = schedule;
-    return { value: index, result: structuredClone(schedule) };
+    if (error || result?.severity === 'warning') insertSemanticOperationsNotification(notifications, buildSemanticOperationsNotification({
+      identityScope: schedule.identityScope, severity: error ? 'error' : 'warning', title: error ? '语义巡检执行失败' : '语义巡检发现待处理项',
+      message: error ? '巡检未完成，请检查授权和服务状态后重试。' : result.summary,
+      sourceType: 'inspection', sourceId: schedule.id, action: { type: 'open_inspection', id: schedule.id }, createdAt: finishedAt
+    }));
+    return { values: { schedules: index, notifications }, result: publicSchedule(schedule) };
   });
-  if (outcome && (error || result?.severity === 'warning')) await createSemanticOperationsNotification({ identityScope: outcome.identityScope, severity: error ? 'error' : 'warning', title: error ? '语义巡检执行失败' : '语义巡检发现待处理项', message: error ? '巡检未完成，请检查授权和服务状态后重试。' : result.summary, sourceType: 'inspection', sourceId: outcome.id, action: { type: 'open_inspection', id: outcome.id } });
-  return outcome;
 }
 
 export async function runSemanticInspectionCycle({ workerId = `semantic-worker-${process.pid}`, executeInspection, maxRuns = 10 } = {}) {

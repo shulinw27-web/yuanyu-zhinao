@@ -202,9 +202,22 @@ export async function recordAgentOrchestrationCheckpoint({ identityScope, orches
 
 export async function claimDueAgentOrchestrations({ workerId, nowAt = Date.now(), leaseMs = 60_000, limit = 20 } = {}) {
   if (typeof workerId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,119}$/.test(workerId)) throw new TypeError('Invalid orchestration worker ID.');
+  limit = Math.max(1, Math.min(Math.floor(Number(limit) || 20), 100));
+  leaseMs = Math.max(10000, Math.min(Number(leaseMs) || 60000, 300000));
   const rows = postgresRepository ? await postgresRepository.listState(NAMESPACE) : listState(NAMESPACE);
+  // The repository already returns the full namespace. Truncating it before
+  // finding due work permanently starves work behind an inactive prefix.
+  const candidates = rows.map(row => {
+    const times = Object.values(row.value?.orchestrations || {}).flatMap(item => {
+      const expires = Date.parse(item.lease?.expiresAt);
+      if (Number.isFinite(expires) && expires <= nowAt) return [expires];
+      const due = Date.parse(item.schedule?.nextRunAt);
+      return item.status === 'active' && due <= nowAt && !item.lease ? [due] : [];
+    });
+    return { row, dueAt: times.length ? Math.min(...times) : Infinity };
+  }).filter(item => Number.isFinite(item.dueAt)).sort((a, b) => a.dueAt - b.dueAt || a.row.key.localeCompare(b.row.key));
   const claimed = [];
-  for (const row of rows.slice(0, Math.max(1, Math.min(limit * 4, 200)))) {
+  for (const { row } of candidates) {
     if (claimed.length >= limit) break;
     const identity = { tenantId: row.value?.orchestrations && Object.values(row.value.orchestrations)[0]?.tenantId, subjectId: row.value?.orchestrations && Object.values(row.value.orchestrations)[0]?.subjectId };
     if (!identity.tenantId || !identity.subjectId) continue;

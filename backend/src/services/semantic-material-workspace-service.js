@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readSemanticGovernanceState, mutateSemanticGovernanceState } from './semantic-governance-store.js';
 import { discoverSchemasFromAttachments } from './semantic-schema-discovery-service.js';
-import { semanticOperationsPrincipalKey } from './semantic-operations-identity.js';
+import { semanticOperationsOwnerMatches, semanticOperationsPrincipalKey } from './semantic-operations-identity.js';
 
 const namespace = 'semantic_material_artifacts';
 const maxBytes = 2 * 1024 * 1024;
@@ -11,11 +11,10 @@ const digest = text => createHash('sha256').update(text).digest('hex');
 // These refs are internal task state, never accepted from request bodies.
 // Owner AND originating role must match again on every retrieval.
 export async function loadSemanticMaterials(refs, identityScope, roleId) {
-  const owner = semanticOperationsPrincipalKey(identityScope);
   const documents = [];
   for (const ref of refs || []) {
     const artifact = await readSemanticGovernanceState(namespace, ref, null);
-    if (!artifact || artifact.owner !== owner || artifact.roleId !== roleId) throw new Error('SEMANTIC_MATERIAL_ACCESS_DENIED');
+    if (!artifact || !semanticOperationsOwnerMatches(artifact.owner, identityScope) || artifact.roleId !== roleId) throw new Error('SEMANTIC_MATERIAL_ACCESS_DENIED');
     documents.push(artifact.document);
   }
   return documents;
