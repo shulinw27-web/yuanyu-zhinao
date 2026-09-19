@@ -13,6 +13,30 @@ import { understandAgentTurn } from '../src/services/agent-turn-understanding-se
 import { createAgentConversation, recordAgentConversationExchange, getAgentConversationContext } from '../src/services/agent-conversation-service.js';
 import { bufferDiagnosticStream } from '../../scripts/ark-stream-diagnostic.mjs';
 import { recoverReadPlanJson } from '../src/services/read-plan-json-recovery.js';
+import { arkFailureReason } from '../src/services/ark-provider-failure.js';
+
+test('Ark overdue classification is bounded, exact and never exposes provider details', async () => {
+  for (const body of ['not-json', JSON.stringify({ error: { code: 'SecretError', message: 'private upstream error' } }), JSON.stringify({ error: { code: 'AccountOverdueError', message: 'x'.repeat(9000) } })]) {
+    assert.equal(await arkFailureReason(new Response(body, { status: 403 })), 'ark chat completions status 403');
+  }
+  assert.equal(await arkFailureReason(new Response(JSON.stringify({ error: { code: 'AccountOverdueError', message: 'private upstream error' } }), { status: 403 })), 'ARK_ACCOUNT_OVERDUE');
+  assert.equal(await arkFailureReason(new Response(JSON.stringify({ error: { code: 'AccountOverdueError' } }), { status: 401 })), 'ark chat completions status 401');
+});
+
+test('Ark overdue tells both Agent surfaces the actual failure without reading or executing', async () => {
+  await withArk({}, async () => {
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: { code: 'AccountOverdueError', message: 'synthetic-test-credential private upstream error' } }), { status: 403 });
+    for (const surface of ['business', 'semantic']) {
+      const result = await understandAgentTurn({ surface, input: '你好', history: '' });
+      assert.equal(result.source, 'understanding_failed');
+      assert.equal(result.failureCode, 'ARK_ACCOUNT_OVERDUE');
+      assert.equal(result.intent, 'dialogue');
+      assert.match(result.answer, /账户欠费/);
+      assert.doesNotMatch(JSON.stringify(result), /synthetic-test-credential|private upstream error/);
+    }
+    assert.equal(getModelGovernanceObservability().activeRequests, 0);
+  });
+});
 
 const envelope = (answer = '你好，我可以协助分析问题和整理工作，尚未执行任何操作。') => ({ schemaVersion: 'agent-summary.v1', answer, proposedAction: null, claimsExecution: false, executionReceipt: null });
 const reply = (value = envelope()) => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(value), reasoning_content: 'never expose this reasoning' } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });

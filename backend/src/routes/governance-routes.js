@@ -1,4 +1,15 @@
 import {
+  listMockOnboarding,
+  createMockOnboardingProject,
+  getMockOnboardingProject,
+  saveMockOnboardingMaterial,
+  testMockOnboardingConnection,
+  getMockOnboardingPreview,
+  getMockOnboardingAlignment,
+  saveMockOnboardingAlignment,
+  handoffMockOnboardingModel,
+  getMockOnboardingCalculations,
+  previewMockOnboardingCalculation,
   runWithSemanticTenant,
   runOntologyReadReplay,
   archiveSemanticOperationsTask,
@@ -56,6 +67,29 @@ export function handleGovernanceRoutes(context) {
 }
 
 async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity, effectiveAccess, selectActionRole, denyButton, readBody, send }) {
+  const onboardingMatch = url.pathname.match(/^\/api\/semantic-operations\/onboarding(?:\/([^/]+)(?:\/(materials|connection|preview|alignment|handoff|calculations))?)?$/u);
+  if (onboardingMatch && ['GET', 'POST'].includes(req.method)) {
+    const [, encodedId, action] = onboardingMatch;
+    if ((req.method === 'GET' && action && !['preview', 'alignment', 'calculations'].includes(action)) || (req.method === 'POST' && encodedId && !['materials', 'connection', 'alignment', 'handoff', 'calculations'].includes(action))) return false;
+    const actionRole = selectActionRole('meta_model.draft.save');
+    if (req.method === 'POST' && !actionRole) { denyButton('meta_model.draft.save'); return true; }
+    const options = { role: actionRole || getRole(role), identityScope: agentIdentity };
+    let result;
+    if (req.method === 'GET') result = action === 'preview' ? await getMockOnboardingPreview({ ...options, id: decodeURIComponent(encodedId), objectType: url.searchParams.get('objectType') })
+      : action === 'calculations' ? await getMockOnboardingCalculations({ ...options, id: decodeURIComponent(encodedId) })
+      : action === 'alignment' ? await getMockOnboardingAlignment({ ...options, id: decodeURIComponent(encodedId) })
+      : encodedId ? await getMockOnboardingProject({ ...options, id: decodeURIComponent(encodedId) }) : await listMockOnboarding(options);
+    else {
+      const body = await readBody(req);
+      result = action === 'connection' ? await testMockOnboardingConnection({ ...options, id: decodeURIComponent(encodedId), body })
+        : action === 'calculations' ? await previewMockOnboardingCalculation({ ...options, id: decodeURIComponent(encodedId), body })
+        : action === 'alignment' ? await saveMockOnboardingAlignment({ ...options, id: decodeURIComponent(encodedId), body })
+        : action === 'handoff' ? await handoffMockOnboardingModel({ ...options, id: decodeURIComponent(encodedId), body })
+        : action === 'materials' ? await saveMockOnboardingMaterial({ ...options, id: decodeURIComponent(encodedId), body }) : await createMockOnboardingProject({ ...options, body });
+    }
+    send(res, result.error ? result.status || 400 : req.method === 'POST' && !action ? 201 : 200, result.error ? { message: result.error, code: result.code } : result);
+    return true;
+  }
   if (req.method === 'POST' && url.pathname === '/api/meta-models/oa-governance/read-plan-replay') {
     const actionRole = selectActionRole('meta_model.publish');
     if (!actionRole) { denyButton('meta_model.publish'); return true; }
@@ -112,6 +146,12 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
     return true;
   }
   const semanticTaskTraceMatch = url.pathname.match(/^\/api\/semantic-operations\/tasks\/([^/]+)\/trace$/);
+  const semanticTaskDetailMatch = url.pathname.match(/^\/api\/semantic-operations\/tasks\/([^/]+)$/);
+  if (req.method === 'GET' && semanticTaskDetailMatch) {
+    const task = await getSemanticOperationsTask({ taskId: decodeURIComponent(semanticTaskDetailMatch[1]), identityScope: agentIdentity, accessContext: effectiveAccess });
+    send(res, task ? 200 : 404, task ? { task } : { message: '未找到当前身份可见的语义运营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' });
+    return true;
+  }
   if (req.method === 'GET' && semanticTaskTraceMatch) {
     const trace = await getSemanticOperationsTaskTrace({ taskId: decodeURIComponent(semanticTaskTraceMatch[1]), identityScope: agentIdentity, accessContext: effectiveAccess });
     send(res, trace ? 200 : 404, trace || { message: '未找到当前身份可见的语义证据链。', code: 'SEMANTIC_TRACE_NOT_FOUND' });

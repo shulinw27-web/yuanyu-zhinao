@@ -110,7 +110,8 @@ prompt: `${domain}\nintent 只允许以下精确字符串之一：${allowed.join
   }
   if (materialMismatch(parsed)) return finish({ intent: 'dialogue', answer: '回复中的指标数值、币种或对象粒度未能核对一致，请缩小到对应记录后重试。本次没有执行操作。', resolvedRequest: '', needsClarification: true, source: 'understanding_failed', failureCode: 'MATERIAL_LITERAL_MISMATCH' });
   if (parsed && prohibitsAction(input, parsed.intent)) return finish({ intent: 'dialogue', answer: '本轮禁止的操作不会执行。请重试说明需要讨论的内容；没有读取系统数据或执行操作。', resolvedRequest: '', needsClarification: true, source: generated.source });
-  return finish(parsed ? { ...parsed, source: generated.source } : { intent: 'dialogue', answer: '本轮模型未返回可用的理解结果，请重试；复杂材料可按指标、原因、责任分开提问。没有读取系统数据或执行操作。', resolvedRequest: '', needsClarification: false, source: 'understanding_failed', diagnostics: modelFailureDiagnostics(generated), failureCode: modelSucceeded(generated) ? 'TURN_CONTRACT_INVALID' : `MODEL_RESULT_UNAVAILABLE_${String(generated.source || 'unknown').replace(/[^a-z_]/g, '').toUpperCase()}` });
+  const accountOverdue = generated.warning === 'ARK_ACCOUNT_OVERDUE';
+  return finish(parsed ? { ...parsed, source: generated.source } : { intent: 'dialogue', answer: accountOverdue ? '方舟返回账户欠费错误（AccountOverdueError），本轮无法调用模型。请管理员检查账户余额与欠费状态后重试。没有读取系统数据或执行操作。' : '本轮模型未返回可用的理解结果，请重试；复杂材料可按指标、原因、责任分开提问。没有读取系统数据或执行操作。', resolvedRequest: '', needsClarification: false, source: 'understanding_failed', diagnostics: modelFailureDiagnostics(generated), failureCode: accountOverdue ? 'ARK_ACCOUNT_OVERDUE' : modelSucceeded(generated) ? 'TURN_CONTRACT_INVALID' : `MODEL_RESULT_UNAVAILABLE_${String(generated.source || 'unknown').replace(/[^a-z_]/g, '').toUpperCase()}` });
 }
 
 // A narrow factual guard, not a general semantic accuracy guarantee. Do not

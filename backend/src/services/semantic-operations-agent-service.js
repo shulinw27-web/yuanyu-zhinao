@@ -12,7 +12,8 @@ import { semanticOperationsOwnerMatches, semanticOperationsPrincipalKey } from '
 import { assertSemanticTenant } from './semantic-tenant-context.js';
 import { discoverWorkspaceSchemas, extendSemanticMaterials } from './semantic-material-workspace-service.js';
 import { validateProposalSamples } from './semantic-uploaded-sample-service.js';
-import { compileWorldModelRequirements, validateProposalEvidence, proposalBusinessValidation } from './semantic-world-model-service.js';
+import { compileWorldModelRequirements, validateProposalEvidence, proposalBusinessValidation, preparePrimaryKeyCorrections } from './semantic-world-model-service.js';
+import { mockOnboardingBasis } from './mock-onboarding-basis.js';
 
 const PROPOSAL_NAMESPACE = 'semantic_operations_agent_proposals';
 const SNAPSHOT_NAMESPACE = 'semantic_operations_agent_snapshots';
@@ -25,6 +26,10 @@ const includesAny = (text, values) => values.some((value) => text.includes(value
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const mapMaybe = (value, callback) => value && typeof value.then === 'function' ? value.then(callback) : callback(value);
 const writeSemanticState = (namespace, key, value) => mutateSemanticGovernanceState(namespace, key, null, () => ({ value, result: value }));
+const persistProposalReviewFailure = (proposal, result) => mutateSemanticGovernanceState(PROPOSAL_NAMESPACE, proposalKey(proposal.id), null, current => {
+  if (!current || current.status !== 'pending_review' || (current.revision || 1) !== (proposal.revision || 1)) return { commit: false, result: { error: '提案已被更新，旧校验结果未覆盖当前修订。', code: 'SEMANTIC_PROPOSAL_REVISION_CONFLICT' } };
+  return { value: proposal, result };
+});
 const approvedSourceSystems = new Set(['ERP', 'WMS', 'LIMS', 'MES', 'QMS', 'OMS', 'OA', 'SRM', 'MDM', 'PLM', 'EAM', 'IOT', 'AI', 'AUDIT']);
 const approvedCoreObjects = new Set(['Person', 'RawMaterial', 'Product', 'Equipment', 'Store']);
 const approvedCardinalities = new Set(['1:1', '1:n', 'n:1', 'n:n']);
@@ -219,7 +224,7 @@ const buildDiff = (base, draft, adoptionMode = 'merge') => {
   return { adoptionMode, baseFingerprint: semanticFingerprint(base), summary: { addedObjects, updatedObjects, addedRelationships, removedObjects: removals.length }, objectChanges: [...objectChanges, ...removals], relationshipChanges };
 };
 
-const critiqueProposalDraft = (draft, base, discovery) => {
+const critiqueProposalDraft = (draft, base, discovery, primaryKeyCorrections = []) => {
   const objectIds = new Set((base.objectTypes || []).map((item) => item.id));
   const candidateIds = new Set();
   const checks = [];
@@ -238,11 +243,12 @@ const critiqueProposalDraft = (draft, base, discovery) => {
   checks.push({ name: '字段与主键一致性', status: invalidKeys.length ? 'failed' : 'passed', detail: invalidKeys.length ? `有 ${invalidKeys.length} 个对象的主键未落在字段定义中，或存在多个主键标记。` : '每个对象均有且仅有一个稳定主键，字段定义与主键一致。' });
   const invalidMappings = (draft.objectTypes || []).flatMap((item) => (item.fieldDefinitions || []).filter((field) => field.mappingStatus === 'pending' || (!field.sourceField && !['derived', 'ignored'].includes(field.mappingStatus)) || (field.primaryKey && !['mapped', 'manual'].includes(field.mappingStatus))).map((field) => `${item.id}.${field.name}`));
   checks.push({ name: '字段来源映射', status: invalidMappings.length ? 'failed' : 'passed', detail: invalidMappings.length ? `有 ${invalidMappings.length} 个字段尚未映射，或主键未绑定稳定源字段。` : '字段均已绑定源字段、人工映射、派生规则或明确忽略策略。' });
-  checks.push(...validateProposalEvidence(draft, discovery));
+  checks.push(...validateProposalEvidence(draft, discovery, primaryKeyCorrections));
   return { status: checks.every((item) => item.status === 'passed') ? 'passed' : 'failed', checkedAt: now(), checks };
 };
 
 const publicProposal = (proposal) => proposal && ({
+  primaryKeyCorrections: proposal.primaryKeyCorrections || [],
   adoptionMode: proposal.adoptionMode || 'merge',
   worldModel: proposal.draft.worldModel || null,
   scenario: proposal.draft.scenario || null,
@@ -259,7 +265,7 @@ const publicSnapshot = (snapshot) => snapshot && ({
   rolledBackAt: snapshot.rolledBackAt || null, summary: snapshot.diff.summary, diff: snapshot.diff, rollbackAllowed: snapshot.status === 'active'
 });
 
-export function createSemanticOperationsProposal({ input, multimodalContent, attachments = [], schemaDiscovery = null, identityScope, requirements = '', sampleRefs = [], roleId, adoptionMode = 'merge' }) {
+export function createSemanticOperationsProposal({ input, multimodalContent, attachments = [], schemaDiscovery = null, identityScope, requirements = '', sampleRefs = [], roleId, adoptionMode = 'merge', prepareOnly = false }) {
   assertSemanticTenant(identityScope);
   if (!['merge', 'replace'].includes(adoptionMode)) return { error: '请选择合并或替换当前草稿。', code: 'SEMANTIC_ADOPTION_MODE_INVALID' };
   const sourceText = `${normalize(input)}\n${normalize(multimodalContent?.modelContext)}`.slice(0, 24_000);
@@ -304,11 +310,12 @@ export function createSemanticOperationsProposal({ input, multimodalContent, att
       ...(schemaDiscovery?.warnings?.length ? ['结构化材料仍有待复核项，Schema Critic 失败前不能采纳。'] : [])
     ]
   };
+  if (prepareOnly) return { proposal, publicProposal: publicProposal(proposal), entry: { name: 'proposal', namespace: PROPOSAL_NAMESPACE, key: proposalKey(id), initialValue: null } };
   return mapMaybe(writeSemanticState(PROPOSAL_NAMESPACE, proposalKey(id), proposal), () => publicProposal(proposal));
   }));
 }
 
-export function updateSemanticOperationsProposal({ proposalId, revision, objectTypes, relationshipTypes, role, identityScope }) {
+export function updateSemanticOperationsProposal({ proposalId, revision, objectTypes, relationshipTypes, primaryKeyCorrections, role, identityScope }) {
   assertSemanticTenant(identityScope);
   return mapMaybe(readSemanticGovernanceState(PROPOSAL_NAMESPACE, proposalKey(proposalId)), (proposal) => {
   if (!proposal || !semanticOperationsOwnerMatches(proposal.owner, identityScope)) return { error: '未找到可修订的语义建模提案，或该提案不属于当前身份。', code: 'SEMANTIC_PROPOSAL_NOT_FOUND' };
@@ -317,21 +324,29 @@ export function updateSemanticOperationsProposal({ proposalId, revision, objectT
   if (Number(revision) !== currentRevision) return { error: '提案已在其他窗口更新，请刷新后基于最新版本继续修改。', code: 'SEMANTIC_PROPOSAL_REVISION_CONFLICT', proposal: publicProposal(proposal) };
   const normalized = sanitizeProposalDraft({ objectTypes, relationshipTypes }, proposal.draft);
   if (normalized.error) return { error: normalized.error, code: 'SEMANTIC_PROPOSAL_INVALID' };
+  const correctionResult = preparePrimaryKeyCorrections({ discovery: proposal.schemaDiscovery, draft: normalized.draft,
+    previous: proposal.primaryKeyCorrections, requested: primaryKeyCorrections, actor: identityScope?.subjectId, roleId: role.id, revision: currentRevision + 1, time: now() });
+  if (correctionResult.error) return { error: correctionResult.error, code: 'SEMANTIC_PRIMARY_KEY_CORRECTION_INVALID' };
   return mapMaybe(getOAMetaModelDraft(), (base) => mapMaybe(validateProposalSamples(normalized.draft, { sampleRefs: proposal.sampleRefs, roleId: role.id, identityScope, requireEvidence: Boolean(proposal.schemaDiscovery?.schemas?.length) }), (mappingValidation) => {
   proposal.originalDraft ||= clone(proposal.draft);
   proposal.draft = normalized.draft;
   proposal.revision = currentRevision + 1;
   proposal.updatedAt = now();
   proposal.updatedBy = role.id;
-  proposal.critic = critiqueProposalDraft(proposal.draft, base, proposal.schemaDiscovery);
+  proposal.primaryKeyCorrections = correctionResult.corrections;
+  proposal.critic = critiqueProposalDraft(proposal.draft, base, proposal.schemaDiscovery, proposal.primaryKeyCorrections);
   proposal.diff = buildDiff(base, proposal.draft, proposal.adoptionMode);
   proposal.editDiff = buildEditDiff(proposal.originalDraft, proposal.draft);
   proposal.impactAnalysis = buildImpactAnalysis(proposal.originalDraft, proposal.draft, proposal.editDiff);
   proposal.mappingValidation = mappingValidation;
   proposal.revisions ||= [];
-  proposal.revisions.unshift({ revision: proposal.revision, time: proposal.updatedAt, actor: role.id, criticStatus: proposal.critic.status, summary: proposal.editDiff.summary });
+  proposal.revisions.unshift({ revision: proposal.revision, time: proposal.updatedAt, actor: role.id, criticStatus: proposal.critic.status, summary: proposal.editDiff.summary, primaryKeyCorrections: clone(proposal.primaryKeyCorrections) });
   proposal.revisions = proposal.revisions.slice(0, 20);
-  return mapMaybe(writeSemanticState(PROPOSAL_NAMESPACE, proposalKey(proposalId), proposal), () => publicProposal(proposal));
+  return mutateSemanticGovernanceState(PROPOSAL_NAMESPACE, proposalKey(proposalId), null, current => {
+    if (!current || !semanticOperationsOwnerMatches(current.owner, identityScope)) return { commit: false, result: { error: '提案不属于当前身份。', code: 'SEMANTIC_PROPOSAL_NOT_FOUND' } };
+    if (current.status !== 'pending_review' || (current.revision || 1) !== currentRevision) return { commit: false, result: { error: '提案已更新，请重新读取后审阅。', code: 'SEMANTIC_PROPOSAL_REVISION_CONFLICT' } };
+    return { value: proposal, result: publicProposal(proposal) };
+  });
   }));
   });
 }
@@ -376,16 +391,16 @@ export function applySemanticOperationsProposal({ proposalId, role, identityScop
   if (proposal.status !== 'pending_review') return { error: '该语义建模草稿已被采纳或已失效。', code: 'SEMANTIC_PROPOSAL_NOT_PENDING' };
   proposal.draft.objectTypes = proposal.draft.objectTypes.map((item) => ({ ...item, ...normalizeFieldDefinitions(item) }));
   return mapMaybe(getOAMetaModelDraft(), (base) => mapMaybe(validateProposalSamples(proposal.draft, { sampleRefs: proposal.sampleRefs, roleId: role.id, identityScope, requireEvidence: Boolean(proposal.schemaDiscovery?.schemas?.length) }), (mappingValidation) => {
-  proposal.critic = critiqueProposalDraft(proposal.draft, base, proposal.schemaDiscovery);
+  proposal.critic = critiqueProposalDraft(proposal.draft, base, proposal.schemaDiscovery, proposal.primaryKeyCorrections);
   proposal.diff = buildDiff(base, proposal.draft, proposal.adoptionMode);
   proposal.editDiff = buildEditDiff(proposal.originalDraft || proposal.draft, proposal.draft);
   proposal.impactAnalysis = buildImpactAnalysis(proposal.originalDraft || proposal.draft, proposal.draft, proposal.editDiff);
   proposal.mappingValidation = mappingValidation;
   if (proposal.critic.status !== 'passed') {
-    return mapMaybe(writeSemanticState(PROPOSAL_NAMESPACE, proposalKey(proposalId), proposal), () => ({ error: 'Schema Critic 未通过，修复失败项后才能采纳草稿。', code: 'SEMANTIC_PROPOSAL_CRITIC_FAILED', proposal: publicProposal(proposal) }));
+    return persistProposalReviewFailure(proposal, { error: 'Schema Critic 未通过，修复失败项后才能采纳草稿。', code: 'SEMANTIC_PROPOSAL_CRITIC_FAILED', proposal: publicProposal(proposal) });
   }
   if (proposal.mappingValidation.blocked) {
-    return mapMaybe(writeSemanticState(PROPOSAL_NAMESPACE, proposalKey(proposalId), proposal), () => ({ error: 'Mock 样本映射演练未通过，修复必填字段、类型或主键映射后才能采纳草稿。', code: 'SEMANTIC_PROPOSAL_MAPPING_VALIDATION_FAILED', proposal: publicProposal(proposal) }));
+    return persistProposalReviewFailure(proposal, { error: 'Mock 样本映射演练未通过，修复必填字段、类型或主键映射后才能采纳草稿。', code: 'SEMANTIC_PROPOSAL_MAPPING_VALIDATION_FAILED', proposal: publicProposal(proposal) });
   }
   const replacing = proposal.adoptionMode === 'replace';
   const existing = new Map((replacing ? [] : base.objectTypes).map((item) => [item.id, item]));
@@ -409,11 +424,17 @@ export function applySemanticOperationsProposal({ proposalId, role, identityScop
   return mutateSemanticGovernanceStates([
     getOAMetaModelRuntimeTransactionEntry(),
     { name: 'proposal', namespace: PROPOSAL_NAMESPACE, key: proposalKey(proposalId), initialValue: null },
-    { name: 'snapshots', namespace: SNAPSHOT_NAMESPACE, key: 'index', initialValue: {} }
+    { name: 'snapshots', namespace: SNAPSHOT_NAMESPACE, key: 'index', initialValue: {} },
+    ...(proposal.onboardingBasis ? [{ name: 'onboardingProjects', namespace: 'mock_onboarding_v1', key: proposal.onboardingBasis.key, initialValue: {} }] : [])
   ], (values) => {
     const storedProposal = values.proposal;
     if (!storedProposal || !semanticOperationsOwnerMatches(storedProposal.owner, identityScope)) return { commit: false, result: { error: '未找到可采纳的语义建模草稿，或该草稿不属于当前身份。', code: 'SEMANTIC_PROPOSAL_NOT_FOUND' } };
     if (storedProposal.status !== 'pending_review' || (storedProposal.revision || 1) !== (proposal.revision || 1)) return { commit: false, result: { error: '提案已被其他窗口更新或采纳，请刷新后重试。', code: 'SEMANTIC_PROPOSAL_REVISION_CONFLICT' } };
+    if (storedProposal.onboardingBasis) {
+      const basis = storedProposal.onboardingBasis;
+      const project = values.onboardingProjects?.[basis.projectId];
+      if (!project || !semanticOperationsOwnerMatches(project.owner, identityScope) || project.roleId !== role.id || mockOnboardingBasis(project) !== basis.fingerprint) return { commit: false, result: { error: '来源接入项目已变化或当前角色不匹配，请重新完成验证并交接。旧提案未写入草稿。', code: 'SEMANTIC_ONBOARDING_SOURCE_STALE' } };
+    }
     const transactionBase = getOAMetaModelDraftFromRuntime(values.oaRuntime);
     if (semanticFingerprint(transactionBase) !== expectedBaseFingerprint) return { commit: false, result: { error: '语义草稿已发生并发变化，请重新审阅 Diff 后采纳。', code: 'SEMANTIC_PROPOSAL_BASE_STALE' } };
     const change = buildOAMetaModelDraftRuntimeChange(values.oaRuntime, mergedInput, role, {

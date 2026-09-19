@@ -2,8 +2,9 @@
 
 [返回文档中心](../README.md)
 
-先读 GETTING_STARTED；真实联调准备看 DEVELOPMENT_READINESS，后续阶段看 DEVELOPMENT_ROADMAP。
+先读 GETTING_STARTED；当前按 DEVELOPMENT_ROADMAP 使用 Mock 企业、系统和业务材料开发验收，不等待真实企业场景。DEVELOPMENT_READINESS 保留未来真实接入的准备要求。
 
+- [Mock 企业接入：材料、连接与业务对齐](MOCK_ENTERPRISE_ONBOARDING.md)
 - [元域智脑客户端兼容与发布矩阵](CLIENT_COMPATIBILITY_MATRIX.md)
 - [本体建模改进与验收记录](ONTOLOGY_MODELING_ACCEPTANCE.md)
 - [钉钉 H5 接入测试报告](DINGTALK_ACCEPTANCE_2026-09-08.md)

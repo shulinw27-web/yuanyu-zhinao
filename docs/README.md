@@ -1,5 +1,13 @@
 # 项目文档中心
 
+2026-09-19 草稿试算与生命周期：[操作和验证](development/MOCK_ENTERPRISE_ONBOARDING.md)。接入项目已支持人工方案只读试算；隔离 HTTP 7 项、发布生命周期 10 项通过。生命周期发布回执为测试替身。真实方舟联调返回 `AccountOverdueError`，未取得模型回答；现已补充两端明确欠费提示，不再误导用户拆分问题。
+
+2026-09-19 审阅修复：[企业接入操作与验证](development/MOCK_ENTERPRISE_ONBOARDING.md)。读取方案面板新增操作代次保护，阻断旧导入、旧模型提案和旧策略响应覆盖当前候选；客户端、草稿或权限改变时清除候选与发送确认。完整自动建模、发布与智脑问答仍未完成。
+
+2026-09-18 Mock 接入更新：[企业接入操作与验证](development/MOCK_ENTERPRISE_ONBOARDING.md)。已有材料、连接、可视化映射、原文版本引用及到语义运营 Agent 的待审阅建模交接，修复缺主键有依据补充后的审阅阻塞。新增完整合成快照到受控对象查询的内部适配，交接草稿配合测试授权和人工方案通过跨系统计算及 16 个回放分支；全量 quality 820 次执行通过。面向用户的计算方案生成、完整发布及智脑问答仍待推进，不能视为自动建模或真实企业连接器已完成。
+
+2026-09-17 计划调整：[Mock 优先开发路线](development/DEVELOPMENT_ROADMAP.md)。当前无真实企业验证场景，先用合成材料和模拟接口完成接入、业务对齐、世界模型、双 Agent、持续更新和场景复用验证。本次仅调整计划，未新增功能或重跑业务验收；真实接入和生产门禁保持。
+
 2026-09-17 调度与通知：[报告第18节](development/MULTITENANT_VALIDATION.md#18-调度扫描与巡检通知一致性2026-09-17) · [运行说明](operations/WORKER_EXECUTION_BOUNDARIES.md)。补齐后段任务领取、巡检与通知原子保存、主体级保留及身份编码防碰撞，731次Node执行通过。旧歧义归属需核验迁移，大规模调度和外部送达未验收。
 
 2026-09-17 后台任务：[Worker执行与升级边界](operations/WORKER_EXECUTION_BOUNDARIES.md) · [报告第17节](development/MULTITENANT_VALIDATION.md#17-后台编排与巡检租约修复2026-09-17)。取消、租约过期和旧轮次不能推进任务，巡检内部准入及异常脱敏已补齐；722次Node执行通过，生产门禁保持。
@@ -52,7 +60,8 @@
 | --- | --- |
 | 了解项目、接手开发 | [项目交接](overview/PROJECT_HANDOFF.md) → [当前状态](overview/PROJECT_STATUS.md) |
 | 启动本地环境 | [开发与启动](development/GETTING_STARTED.md) |
-| 准备真实系统联调 | [开发准备事项](development/DEVELOPMENT_READINESS.md) → [开发路线](development/DEVELOPMENT_ROADMAP.md) |
+| 现阶段用 Mock 推进开发与业务验证 | [阶段计划与验收规则](development/DEVELOPMENT_ROADMAP.md) → [模拟运行时](development/MOCK_SIMULATION_RUNTIME.md) |
+| 准备未来真实系统联调 | [开发准备事项](development/DEVELOPMENT_READINESS.md) |
 | 理解整体设计 | [整体架构](architecture/ARCHITECTURE.md) → [模块文档](modules/README.md) |
 | 了解参考 WeKnora 的升级方向 | [采纳点与验证路线](architecture/WEKNORA_UPGRADE_REFERENCE.md) · [分批实施与接口验收](development/WEKNORA_UPGRADE_ACCEPTANCE.md) · [D 盘本地部署](operations/WEKNORA_LOCAL_DEPLOYMENT.md)（聊天与 2048 维 Embedding 原生调用通过；双端只读适配器已开发，真实集成未启用） |
 | 使用智脑或语义运营端 | [操作指南目录](guides/README.md) |

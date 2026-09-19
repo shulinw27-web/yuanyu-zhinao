@@ -129,6 +129,7 @@ const commandLabel = {
 };
 
 const publicTask = (task) => task && ({
+  onboardingSource: task.onboardingSource || null,
   id: task.id,
   traceId: task.traceId || null,
   parentTaskId: task.parentTaskId || null,
@@ -164,6 +165,24 @@ const publicTask = (task) => task && ({
   materialReview: task.materialReview || null,
   events: task.events
 });
+
+// Internal preparation port for the sandbox onboarding transaction. No model
+// inference, publication, confirmation token or independent persistence here.
+export async function prepareOnboardingSemanticTask({ id, proposal, identityScope, roleId, onboardingSource }) {
+  const createdAt = now();
+  const response = `已从模拟接入材料生成 ${proposal.objectTypes.length} 个对象、${proposal.relationshipTypes.length} 条关系的候选提案。结构校验${proposal.critic.status === 'passed' ? '通过' : '未通过'}，样本验证${proposal.mappingValidation.status === 'passed' ? '通过' : '待处理'}；尚未采纳或发布。业务映射仅作为审阅附件，不自动变成指标或执行规则。`;
+  const request = '根据当前已校对的模拟企业接入材料生成候选模型，等待人工审阅。';
+  const task = { id, threadId: id, parentTaskId: null, turn: 1, traceId: null, owner: identityKey(identityScope),
+    createdAt, updatedAt: createdAt, status: 'waiting_confirmation', intent: 'build_model', title: '模拟企业接入 · 建模交接', request,
+    originRoleId: roleId, originDeviceId: identityScope.deviceId || null,
+    command: 'apply_proposal', requiredPermission: 'meta_model.draft.save', confirmationRequired: true, confirmation: { state: 'not_issued' },
+    plan: planFor('build_model'), planning: { mode: 'deterministic', provider: 'server_rules', policy: '结构化材料交接，不代表大模型推理。' },
+    routing: { mode: 'server_rules', decision: 'build_model', reason: 'explicit_mock_onboarding_handoff' },
+    onboardingSource, proposal, response, messages: [{ role: 'user', content: request, time: createdAt }, { role: 'assistant', content: response, time: createdAt }],
+    events: [{ time: createdAt, type: 'onboarding_handoff', detail: `来源项目 ${onboardingSource.projectId}，材料修订 ${onboardingSource.materialRevision}；未自动执行。` }],
+    reviewContext: { draftFingerprint: await currentDraftFingerprint(), proposalId: proposal.id, proposalRevision: proposal.revision, capturedAt: createdAt } };
+  return { task, publicTask: publicTask(task), entry: { name: 'tasks', namespace: TASK_NAMESPACE, key: TASK_INDEX_KEY, initialValue: {} } };
+}
 
 const getIndex = readTaskIndex;
 
@@ -392,7 +411,8 @@ export function reviseSemanticOperationsTaskProposal({ taskId: id, body, role, i
     proposalId: task.proposal.id,
     revision: body?.revision,
     objectTypes: body?.objectTypes,
-    relationshipTypes: body?.relationshipTypes,
+      relationshipTypes: body?.relationshipTypes,
+      primaryKeyCorrections: body?.primaryKeyCorrections,
     role,
     identityScope
   }), (proposal) => {

@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref } from 'vue';
 import { createSemanticOperationsClient } from '@healthcare-ai/semantic-operations-sdk';
 import SemanticAgentWorkspace from './components/SemanticAgentWorkspace.vue';
 import SemanticOperationsCenter from './components/SemanticOperationsCenter.vue';
+import SemanticOnboardingWorkspace from './components/SemanticOnboardingWorkspace.vue';
 import OAMetaModelStudio from '../../../frontend/src/features/meta-model/OAMetaModelStudio.vue';
 import KnowledgeLibraryPanel from '../../../frontend/src/features/knowledge/KnowledgeLibraryPanel.vue';
 import { semanticSimulationMessage } from '../../../frontend/src/features/meta-model/ontology-scenario.js';
@@ -28,6 +29,7 @@ const rollbackTarget = ref(null);
 const rollbackPhrase = ref('');
 const agentPanel = ref(null);
 const activeView = ref('agent');
+const onboardingTaskId = ref('');
 const loading = ref(true);
 const refreshingStatus = ref(false);
 const message = ref('');
@@ -73,6 +75,8 @@ async function loadWorkspace({ preserveMessage = false } = {}) {
   try {
     const accessValue = unwrapAccess(await client.effectiveAccess());
     if (!Array.isArray(accessValue?.buttonPermissionIds)) throw new Error('当前身份的权限信息无效。');
+    if (generation !== loadGeneration) return;
+    access.value = accessValue;
     const [profileValue, draftValue, modelsValue, simulationValue, contextValue, snapshotValue] = await Promise.all([
       client.authoringProfile(), client.draft(), client.metaModels(), client.simulation(), client.semanticContext(),
       accessValue.buttonPermissionIds.includes('meta_model.draft.save') ? client.snapshots() : Promise.resolve({ snapshots: [] })
@@ -170,6 +174,7 @@ onMounted(async () => {
       <div class="ops-brand"><span>Σ</span><div><b>元域智脑</b><small>SEMANTIC OPERATIONS</small></div></div>
       <div class="ops-boundary"><i/><div><b>独立运营端</b><small>不属于业务端智脑</small></div></div>
       <nav>
+        <button :class="{ active: activeView === 'onboarding' }" @click="activeView = 'onboarding'"><span>＋</span><div><b>企业接入</b><small>模拟项目与材料准备</small></div></button>
         <button :class="{ active: activeView === 'agent' }" @click="activeView = 'agent'"><span>01</span><div><b>Agent 工作台</b><small>自然语言与多模态建模</small></div></button>
         <button :class="{ active: activeView === 'model' }" @click="activeView = 'model'"><span>02</span><div><b>模型校对</b><small>人工可视化精调</small></div></button>
         <button :class="{ active: activeView === 'versions' }" @click="activeView = 'versions'"><span>03</span><div><b>版本与回滚</b><small>Diff、快照和恢复</small></div></button>
@@ -180,18 +185,21 @@ onMounted(async () => {
     </aside>
 
     <main>
-      <header class="ops-topbar"><div><span>SEMANTIC CONTROL PLANE</span><h1>{{ activeView === 'knowledge' ? '知识资料与来源校对' : activeView === 'agent' ? '语义运营 Agent 工作台' : activeView === 'model' ? '语义模型人工校对' : '模型版本与恢复' }}</h1></div><div class="ops-top-actions"><div :class="['ops-live', deploymentDrift]"><i/>Semantica · {{ semanticaStatus }} · {{ deploymentDriftLabel }}</div><button class="ops-logout" :disabled="refreshingStatus" @click="refreshSemanticStatus">{{ refreshingStatus ? '刷新中…' : '刷新服务状态' }}</button><label>已认证运营身份<strong>{{ currentUser?.name || currentUser?.account }}</strong><small>{{ roles.find(item => item.id === role)?.name || role }} · {{ client.deviceId.slice(-8) }}</small></label><button class="ops-logout" @click="logout">退出</button></div></header>
+      <header class="ops-topbar"><div><span>SEMANTIC CONTROL PLANE</span><h1>{{ activeView === 'onboarding' ? '企业接入与材料准备' : activeView === 'knowledge' ? '知识资料与来源校对' : activeView === 'agent' ? '语义运营 Agent 工作台' : activeView === 'model' ? '语义模型人工校对' : '模型版本与恢复' }}</h1></div><div class="ops-top-actions"><div v-if="activeView !== 'onboarding'" :class="['ops-live', deploymentDrift]"><i/>Semantica · {{ semanticaStatus }} · {{ deploymentDriftLabel }}</div><button v-if="activeView !== 'onboarding'" class="ops-logout" :disabled="refreshingStatus" @click="refreshSemanticStatus">{{ refreshingStatus ? '刷新中…' : '刷新服务状态' }}</button><label>已认证运营身份<strong>{{ currentUser?.name || currentUser?.account }}</strong><small>{{ roles.find(item => item.id === role)?.name || role }} · {{ client.deviceId.slice(-8) }}</small></label><button class="ops-logout" @click="logout">退出</button></div></header>
 
-      <div v-if="error" class="ops-error">{{ error }}<button @click="loadWorkspace">重新加载</button></div>
-      <div v-if="message" class="ops-message">{{ message }}</div>
-      <div v-if="loading" class="ops-loading">正在校验身份、装载语义模型与Semantica状态…</div>
+      <div v-if="error && activeView !== 'onboarding'" class="ops-error">{{ error }}<button @click="loadWorkspace">重新加载</button></div>
+      <div v-if="message && activeView !== 'onboarding'" class="ops-message">{{ message }}</div>
+      <div v-if="loading && activeView !== 'onboarding'" class="ops-loading">正在校验身份、装载语义模型与Semantica状态…</div>
 
-      <div v-else-if="!error" class="ops-workspace">
+      <div v-if="activeView === 'onboarding'" class="ops-onboarding-pane">
+        <SemanticOnboardingWorkspace :client="client" :can-write="buttonPermissionIds.includes('meta_model.draft.save')" @open-agent="onboardingTaskId = $event; activeView = 'agent'" @open-model="activeView = 'model'" />
+      </div>
+      <div v-else-if="!error && !loading" class="ops-workspace">
         <section class="ops-main-pane">
           <template v-if="activeView === 'agent'">
             <div class="ops-intro"><div><span>AGENT-FIRST AUTHORING</span><h2>告诉 Agent 想建设什么，不需要先理解配置表单</h2><p>Agent会读取自然语言和受控材料，形成计划、对象、关系及来源映射；Schema Critic通过并经你确认后，才会写入未发布草稿。</p></div><div><b>{{ canModel ? '可执行建模' : '只读模式' }}</b><small>{{ profile?.role || role }}</small></div></div>
             <div class="ops-prompts"><span>可以这样提出任务</span><button v-for="prompt in suggestedPrompts" :key="prompt" @click="agentPanel?.setInput(prompt)">{{ prompt }}</button></div>
-            <SemanticAgentWorkspace ref="agentPanel" :client="client" @applied="refreshAfterAgent"/>
+            <SemanticAgentWorkspace ref="agentPanel" :client="client" :initial-task-id="onboardingTaskId" @applied="refreshAfterAgent"/>
           </template>
 
           <template v-else-if="activeView === 'model'">
@@ -219,3 +227,8 @@ onMounted(async () => {
     </template>
   </div>
 </template>
+
+<style scoped>
+.ops-onboarding-pane { min-width: 0; padding: 24px; }
+@media (max-width: 760px) { .ops-onboarding-pane { padding: 14px; } }
+</style>

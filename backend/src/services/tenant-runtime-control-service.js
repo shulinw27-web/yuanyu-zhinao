@@ -119,6 +119,7 @@ export function tenantRuntimeFeature(path) {
   if (/^\/api\/permission-management(?:\/|$)/.test(path)) return 'iam';
   if (/^\/api\/(?:agent|semantic-operations)\/knowledge-library(?:\/|$)/.test(path)) return 'knowledge';
   if (/^\/api\/meta-models\/oa-governance(?:\/|$)/.test(path)) return 'semantic';
+  if (/^\/api\/semantic-operations\/onboarding(?:\/|$)/.test(path)) return 'semantic';
   // Shared business connectors and desktop execution have not passed tenant isolation yet.
   return 'unverified_runtime';
 }

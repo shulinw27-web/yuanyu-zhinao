@@ -1,8 +1,9 @@
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { canExecuteSemanticTask } from '../task-guards.js';
+import { resolveSemanticTaskSelection } from '../task-selection.js';
 
-const props = defineProps({ client: { type: Object, required: true } });
+const props = defineProps({ client: { type: Object, required: true }, initialTaskId: { type: String, default: '' } });
 const desktopBridge = globalThis.semanticOperationsDesktop || null;
 const emit = defineEmits(['applied']);
 const tasks = ref([]);
@@ -19,6 +20,8 @@ const transcript = ref(null);
 const proposalEditor = ref(null);
 const editorDirty = ref(false);
 const editorMessage = ref('');
+const keyCorrectionReasons = ref({});
+const needsKeyCorrection = objectId => selected.value?.proposal?.schemaDiscovery?.objectTypes?.some(object => object.id === objectId && !object.key);
 const selectedGraphObjectId = ref('');
 const taskQuery = ref('');
 const taskStatus = ref('');
@@ -86,10 +89,20 @@ async function chooseFiles(event) {
 
 async function loadTasks(preferredId) {
   const generation = ++taskLoadGeneration;
-  const result = await props.client.tasks({ query: taskQuery.value, status: taskStatus.value, archived: showArchived.value || undefined, limit: 100 });
-  if (generation !== taskLoadGeneration) return;
-  tasks.value = result.tasks || [];
-  selected.value = tasks.value.find((task) => task.id === preferredId) || tasks.value.find((task) => task.id === selected.value?.id) || tasks.value[0] || null;
+  const client = props.client;
+  if (preferredId) selected.value = null;
+  try {
+    const result = await client.tasks({ query: taskQuery.value, status: taskStatus.value, archived: showArchived.value || undefined, limit: 100 });
+    if (generation !== taskLoadGeneration) return;
+    const next = await resolveSemanticTaskSelection({ client, tasks: result.tasks || [], preferredId, selectedId: selected.value?.id });
+    if (generation !== taskLoadGeneration) return;
+    tasks.value = next.tasks; selected.value = next.selected;
+    if (preferredId) message.value = '';
+  } catch (error) {
+    if (generation !== taskLoadGeneration) return;
+    if (preferredId) { selected.value = null; message.value = '目标任务不可见或加载失败，请返回接入项目核对后重试。'; }
+    else throw error;
+  }
 }
 
 async function archiveTask() {
@@ -107,6 +120,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 
 function initializeProposalEditor() {
   const proposal = selected.value?.proposal;
+  keyCorrectionReasons.value = Object.fromEntries((proposal?.primaryKeyCorrections || []).map(item => [item.objectId, item.reason]));
   if (!proposal) { proposalEditor.value = null; editorDirty.value = false; editorMessage.value = ''; return; }
   proposalEditor.value = {
     revision: proposal.revision || 1,
@@ -191,7 +205,8 @@ async function saveProposalRevision() {
   busy.value = true; editorMessage.value = '';
   try {
     const objectTypes = proposalEditor.value.objectTypes.map((item) => ({ ...item, fields: item.fieldDefinitions.map((field) => field.name) }));
-    const task = await props.client.reviseProposal(selected.value.id, { revision: proposalEditor.value.revision, objectTypes, relationshipTypes: proposalEditor.value.relationshipTypes });
+    const primaryKeyCorrections = objectTypes.filter(item => needsKeyCorrection(item.id) && keyCorrectionReasons.value[item.id]?.trim()).map(item => ({ objectId: item.id, field: item.key, reason: keyCorrectionReasons.value[item.id].trim() }));
+    const task = await props.client.reviseProposal(selected.value.id, { revision: proposalEditor.value.revision, objectTypes, relationshipTypes: proposalEditor.value.relationshipTypes, primaryKeyCorrections });
     await loadTasks(task.id);
     message.value = task.response;
     editorMessage.value = '修订已保存，Schema Critic 和 Diff 已重新计算。';
@@ -257,7 +272,8 @@ async function exportReport() {
   finally { busy.value = false; }
 }
 
-onMounted(() => loadTasks().catch((error) => { message.value = error.message; }));
+onMounted(() => loadTasks(props.initialTaskId || undefined).catch((error) => { message.value = error.message; }));
+watch(() => props.initialTaskId, id => loadTasks(id || undefined).catch(error => { message.value = error.message; }));
 watch([taskStatus, showArchived], () => loadTasks().catch((error) => { message.value = error.message; }));
 watch([() => selected.value?.id, () => selected.value?.proposal?.revision], initializeProposalEditor);
 watch(() => selected.value?.id, loadSelectedTrace);
@@ -308,6 +324,7 @@ watch(() => selected.value?.id, () => nextTick(() => {
 
         <details v-if="selected.proposal" class="task-proposal" open>
           <summary>模型提案审阅 · {{ selected.proposal.objectTypes.length }} 个对象 · 第 {{ selected.proposal.revision }} 版</summary>
+          <p v-if="selected.onboardingSource">来源：模拟接入项目 {{ selected.onboardingSource.projectId }}，材料修订 {{ selected.onboardingSource.materialRevision }}。{{ selected.onboardingSource.boundary }}</p>
           <header><div><span>SCHEMA CRITIC</span><b :class="selected.proposal.critic.status">{{ selected.proposal.critic.status === 'passed' ? '结构校验通过' : '存在阻断问题' }}</b></div><small>相对于当前草稿：新增对象 {{ selected.proposal.diff.summary.addedObjects }} · 更新对象 {{ selected.proposal.diff.summary.updatedObjects }} · 新增关系 {{ selected.proposal.diff.summary.addedRelationships }}</small></header>
           <div v-if="selected.proposal.schemaDiscovery?.files?.length" class="schema-discovery-summary"><div><b>结构化材料发现</b><span>{{ selected.proposal.schemaDiscovery.summary }}</span></div><span v-for="file in selected.proposal.schemaDiscovery.files" :key="file.attachmentId">{{ file.name }} · {{ file.format }} · {{ file.sourceSystem }} · {{ file.schemaCount }} 对象</span><small v-for="warning in selected.proposal.schemaDiscovery.warnings" :key="warning">{{ warning }}</small></div>
           <div class="task-critic-checks"><span v-for="check in selected.proposal.critic.checks" :key="check.name"><b>{{ check.status === 'passed' ? '通过' : '失败' }}</b>{{ check.name }}</span></div>
@@ -368,6 +385,10 @@ watch(() => selected.value?.id, () => nextTick(() => {
                   </div>
                   <button :disabled="!canEditProposal || busy" @click="addField(object)">＋ 添加字段</button>
                 </div>
+                <label v-if="needsKeyCorrection(object.id)">原材料缺少主键：补充选择依据（12–1000 字符）
+                  <textarea v-model="keyCorrectionReasons[object.id]" :disabled="!canEditProposal || busy" maxlength="1000" rows="3" placeholder="先选择原材料已有字段作为主键，再说明业务唯一性依据和核对范围。人工声明不等于样本或生产验收。" @input="markEditorDirty" />
+                </label>
+                <p v-if="needsKeyCorrection(object.id)">原始材料与缺项提示会保留。此处仅补充缺失主键，不允许覆盖材料中已经声明的主键；采纳时仍会重新检查样本和权限。</p>
               </article>
             </div>
 

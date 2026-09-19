@@ -45,3 +45,4 @@ export {
 } from '../../services/world-model-template-service.js';
 export { listAnomalyReports, changeAnomalyReport, extractAnomalyReport } from '../../services/anomaly-assistant-service.js';
 export { runWithSemanticTenant } from '../../services/semantic-tenant-context.js';
+export { listMockOnboarding, createMockOnboardingProject, getMockOnboardingProject, saveMockOnboardingMaterial, testMockOnboardingConnection, getMockOnboardingPreview, getMockOnboardingAlignment, saveMockOnboardingAlignment, handoffMockOnboardingModel, getMockOnboardingCalculations, previewMockOnboardingCalculation } from '../../services/mock-onboarding-service.js';

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch } from 'vue';
+import { onUnmounted, ref, watch } from 'vue';
 const props = defineProps({ fingerprint: String, role: String, disabled: Boolean, execute: Function, readPlanMode: Boolean });
 const input = ref(''); const report = ref(null); const error = ref(''); const busy = ref(false);
 const outcomeLabel = (value) => ({ sufficient_snapshot: '单项库存快照充足', insufficient_snapshot: '单项库存快照不足', inventory_blocked: '库存受控', same_entity: '映射指向同一对象', different_entity: '映射指向不同对象', unresolved: '缺少有效映射', resolved: '存在已确认映射', related: '样本中关系有效', not_related: '样本中无有效关系', conflict: '存在冲突，需复核', needs_review: '需人工复核', investigation_recommended: '建议调查', review_recommended: '建议复核', closed: '已关闭', in_progress: '处理中' })[value] || value || '无基线';
@@ -8,24 +8,31 @@ const importCases = async (event) => {
   if (!file || props.disabled || busy.value) return;
   const current = ++generation; error.value = ''; report.value = null;
   if (file.size > 250000) { error.value = '样本超过 250 KB，请缩减后重试。'; return; }
-  try { const content = await file.text(); if (current === generation) input.value = content; }
+  busy.value = true;
+  try { const content = await file.text(); if (current === generation) { busy.value = false; input.value = content; } }
   catch { if (current === generation) error.value = '文件读取失败，请重新选择。'; }
+  finally { if (current === generation) busy.value = false; }
 };
 let generation = 0;
-watch(input, () => { generation++; report.value = null; error.value = ''; });
-watch(() => [props.fingerprint, props.role, props.disabled], () => { generation++; report.value = null; error.value = ''; input.value = ''; });
+watch(input, () => { generation++; busy.value = false; report.value = null; error.value = ''; }, { flush: 'sync' });
+watch(() => [props.fingerprint, props.role, props.disabled, props.readPlanMode, props.execute], () => { generation++; busy.value = false; report.value = null; error.value = ''; input.value = ''; }, { flush: 'sync' });
+onUnmounted(() => { generation++; });
 const run = async () => {
-  if (props.disabled || busy.value || !props.execute) return;
+  if (props.disabled || busy.value || !props.execute || !props.fingerprint || !input.value.trim()) return;
   const current = ++generation; busy.value = true; error.value = ''; report.value = null;
   try {
     if (input.value.length > 250000) throw new Error('样本超过 250 KB，请缩减后重试。');
     const cases = JSON.parse(input.value);
     const minimum = props.readPlanMode ? 2 : 1; const maximum = props.readPlanMode ? 24 : 100;
     if (!Array.isArray(cases) || cases.length < minimum || cases.length > maximum) throw new Error(`请提供 ${minimum}–${maximum} 个案例组成的 JSON 数组。`);
-    const result = await props.execute({ candidateFingerprint: props.fingerprint, cases, ...(props.readPlanMode ? { mode: 'ontology-read' } : {}) });
-    if (current === generation) report.value = result;
+    const fingerprint = props.fingerprint;
+    const result = await props.execute({ candidateFingerprint: fingerprint, cases, ...(props.readPlanMode ? { mode: 'ontology-read' } : {}) });
+    if (current === generation) {
+      if (result?.candidateFingerprint !== fingerprint || !['passed', 'failed'].includes(result?.status)) throw new Error('回放报告未对应当前模型或格式无效，请刷新后重试。');
+      report.value = result;
+    }
   } catch (err) { if (current === generation) error.value = err.message || '回放失败。'; }
-  finally { busy.value = false; }
+  finally { if (current === generation) busy.value = false; }
 };
 </script>
 <template>

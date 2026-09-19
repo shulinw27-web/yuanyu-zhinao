@@ -7,7 +7,7 @@ import { createSemanticOperationsTask } from '../src/services/semantic-operation
 import { inspectMultimodalInput, extractMultimodalEvidence } from '../src/services/multimodal-input-service.js';
 import { discoverSchemasFromAttachments } from '../src/services/semantic-schema-discovery-service.js';
 import { loadSemanticMaterials, extendSemanticMaterials } from '../src/services/semantic-material-workspace-service.js';
-import { compileWorldModelRequirements, validateProposalEvidence } from '../src/services/semantic-world-model-service.js';
+import { compileWorldModelRequirements, validateProposalEvidence, preparePrimaryKeyCorrections } from '../src/services/semantic-world-model-service.js';
 import { hasSemanticGranularityMismatch } from '../src/services/agent-turn-understanding-service.js';
 import { semanticFingerprint } from '../src/services/semantic-model-fingerprint.js';
 import { getOAMetaModelDraft } from '../src/services/meta-model-service.js';
@@ -81,6 +81,65 @@ test('SM08: changing correct source or dropping a relation cannot retain a green
   assert.equal(changed.critic.status, 'failed');
   assert.equal(changed.businessValidation.productionReady, false);
   assert.equal(changed.mappingValidation.blocked, true);
+});
+
+test('missing primary key can be explicitly corrected without erasing source evidence or bypassing samples', async () => {
+  const source = { tables: [{ name: 'Asset', system: 'ERP', granularity: 'master', fields: [{ name: 'code', type: 'string' }, { name: 'name', type: 'string' }] }] };
+  const original = await build([attachment('missing-key.json', source)]);
+  assert.equal(original.objectTypes[0].key, null); assert.equal(original.critic.status, 'failed');
+  const objects = structuredClone(original.objectTypes); objects[0].key = 'code';
+  const withoutReason = await updateSemanticOperationsProposal({ proposalId: original.id, revision: 1, objectTypes: objects, relationshipTypes: [], role, identityScope });
+  assert.equal(withoutReason.critic.status, 'failed');
+  const revised = await updateSemanticOperationsProposal({ proposalId: original.id, revision: 2, objectTypes: objects, relationshipTypes: [], role, identityScope,
+    primaryKeyCorrections: [{ objectId: 'Asset', field: 'code', reason: '人工核对资产编码字段，当前业务约定每个资产具有唯一编码。' }] });
+  assert.equal(revised.critic.status, 'passed', JSON.stringify(revised.critic));
+  assert.equal(revised.schemaDiscovery.objectTypes[0].key, null);
+  assert.ok(revised.schemaDiscovery.warnings.some(w => w.includes('未识别主键')));
+  assert.equal(revised.primaryKeyCorrections[0].actor, identityScope.subjectId);
+  assert.equal(revised.primaryKeyCorrections[0].revision, 3);
+  assert.equal(revised.revisions[0].primaryKeyCorrections.length, 1);
+  assert.equal(revised.businessValidation.productionReady, false);
+  const adoption = await applySemanticOperationsProposal({ proposalId: original.id, role, identityScope });
+  assert.equal(adoption.code, 'SEMANTIC_PROPOSAL_MAPPING_VALIDATION_FAILED');
+  assert.equal(adoption.proposal.critic.status, 'passed');
+  const concurrent = await Promise.all([1, 2].map(() => updateSemanticOperationsProposal({ proposalId: original.id, revision: 3, objectTypes: objects, relationshipTypes: [], role, identityScope })));
+  assert.equal(concurrent.filter(result => result.code === 'SEMANTIC_PROPOSAL_REVISION_CONFLICT').length, 1);
+});
+
+test('key correction rejects forged stamps, declared keys, invented fields, conflicts and stale evidence', async () => {
+  const original = await build([attachment('data-dictionary.json')]);
+  const object = original.objectTypes[0];
+  const bad = await updateSemanticOperationsProposal({ proposalId: original.id, revision: 1, objectTypes: original.objectTypes, relationshipTypes: original.relationshipTypes, role, identityScope,
+    primaryKeyCorrections: [{ objectId: object.id, field: object.key, reason: '不允许以人工补充覆盖已有明确的主键定义。' }] });
+  assert.equal(bad.code, 'SEMANTIC_PRIMARY_KEY_CORRECTION_INVALID');
+  const discovery = { schemas: [{ fields: [] }], objectTypes: [{ id: 'Asset', key: null, granularity: 'master', sourceSystems: ['ERP'], fieldDefinitions: [{ name: 'code', type: 'string' }] }], relationshipTypes: [], conflicts: [], warnings: ['Asset：未识别主键，进入 Review Queue 后必须补充。'] };
+  const draft = { objectTypes: [{ ...structuredClone(discovery.objectTypes[0]), key: 'code' }], relationshipTypes: [] };
+  draft.objectTypes[0].fieldDefinitions[0].sourceField = 'code'; draft.objectTypes[0].fieldDefinitions[0].mappingStatus = 'manual';
+  const base = { objectId: 'Asset', field: 'code', reason: '人工核对编码业务定义后补充的唯一性声明。' };
+  const prepare = requested => preparePrimaryKeyCorrections({ discovery, draft, requested, actor: 'server-user', roleId: 'executive', revision: 2, time: '2026-09-18T00:00:00Z' });
+  for (const requested of [[{ ...base, actor: 'forged' }], [{ ...base, reason: '' }], [{ ...base, field: 'invented' }], [base, base]]) assert.ok(prepare(requested).error);
+  const corrected = prepare([base]).corrections;
+  assert.equal(validateProposalEvidence(draft, discovery, corrected)[0].status, 'passed');
+  discovery.warnings.push('材料解析存在另一项缺口');
+  assert.equal(validateProposalEvidence(draft, discovery, corrected)[0].status, 'failed');
+  discovery.warnings.pop(); discovery.objectTypes[0].sourceSystems = ['WMS']; draft.objectTypes[0].sourceSystems = ['WMS'];
+  assert.equal(validateProposalEvidence(draft, discovery, corrected)[0].status, 'failed');
+  discovery.conflicts = [{ objectId: 'Asset' }]; assert.ok(prepare([base]).error);
+});
+
+test('corrected missing key with permitted uploaded samples can be adopted only as a draft', async () => {
+  const scope = { tenantId: 'demo-enterprise', subjectId: 'admin@demo.local' };
+  const dictionary = { tables: [{ name: 'ReviewedAsset', system: 'ERP', granularity: 'master', fields: [{ name: 'code', type: 'string' }, { name: 'name', type: 'string' }] }] };
+  const samples = { records: [{ ...fixture('sample-events.json').records[0], objectType: 'ReviewedAsset', payload: { code: 'SYN-ASSET-1', name: '模拟资产' } }] };
+  const original = await createSemanticOperationsProposalFromRequest({ body: { text: '建立受控资产草稿，不发布。', adoptionMode: 'replace', attachments: [attachment('asset.json', dictionary), attachment('samples.json', samples)] }, role, identityScope: scope });
+  const objects = structuredClone(original.objectTypes); objects[0].key = 'code';
+  const revised = await updateSemanticOperationsProposal({ proposalId: original.id, revision: 1, objectTypes: objects, relationshipTypes: [], role, identityScope: scope,
+    primaryKeyCorrections: [{ objectId: 'ReviewedAsset', field: 'code', reason: '依据模拟资产编码规则补充主键，完整生产唯一性仍需单独验收。' }] });
+  assert.equal(revised.critic.status, 'passed'); assert.equal(revised.mappingValidation.status, 'passed');
+  const result = await applySemanticOperationsProposal({ proposalId: original.id, role, identityScope: scope });
+  assert.ok(!result.error, result.error); assert.equal(result.proposal.status, 'applied_to_draft');
+  assert.equal(result.proposal.primaryKeyCorrections[0].field, 'code'); assert.equal(result.draft.objectTypes[0].key, 'code');
+  assert.equal(result.proposal.businessValidation.productionReady, false);
 });
 
 test('SM09: requirement evidence, categories, state candidates and fingerprint survive without granting execution', async () => {

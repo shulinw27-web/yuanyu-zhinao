@@ -1,5 +1,7 @@
 # 使用指南
 
+- [Mock 企业接入与业务对齐](../development/MOCK_ENTERPRISE_ONBOARDING.md)：空白项目、材料、本地接口、映射表单、原文引用、Agent 建模交接及缺主键补充操作。
+
 - [企业沙箱初始化与运行准入](TENANT_RUNTIME_CONTROL.md)：OIDC/钉钉映射审核、原子初始化、请求额度、撤权复验及门户申请界面。
 
 - [企业身份源与租户权限边界](IDENTITY_PROVIDER_ADAPTERS.md)：IAM工作区隔离、可信企业绑定、改权失效，以及旧会话重新登录和账号初始化限制。

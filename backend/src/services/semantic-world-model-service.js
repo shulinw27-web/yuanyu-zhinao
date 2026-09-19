@@ -40,14 +40,45 @@ export function compileWorldModelRequirements(material, objectTypes) {
   };
 }
 
-export function validateProposalEvidence(draft, discovery) {
+// A reviewer may fill a missing key, never rewrite a declared source contract.
+// Keep the discovery immutable: the correction is a separate, server-stamped assertion.
+export function preparePrimaryKeyCorrections({ discovery, draft, previous = [], requested, actor, roleId, revision, time }) {
+  if (requested === undefined) return { corrections: previous };
+  if (!Array.isArray(requested) || requested.length > 40) return { error: '主键补充必须为最多 40 条记录。' };
+  const corrections = new Map(previous.map(item => [item.objectId, item]));
+  const seen = new Set();
+  for (const item of requested) {
+    if (!item || typeof item !== 'object' || Array.isArray(item) || Object.keys(item).some(key => !['objectId', 'field', 'reason'].includes(key))
+      || typeof item.reason !== 'string' || item.reason.trim().length < 12 || item.reason.length > 1000 || /[\u0000-\u001f\u007f]/u.test(item.reason)
+      || seen.has(item.objectId)) return { error: '每个对象仅能补充一次；需填写 12–1000 字符的依据，不接受客户端审阅人或时间。' };
+    seen.add(item.objectId);
+    const source = discovery?.objectTypes?.find(object => object.id === item.objectId);
+    const actual = draft.objectTypes.find(object => object.id === item.objectId);
+    const field = source?.fieldDefinitions.find(field => field.name === item.field);
+    const mapped = actual?.fieldDefinitions.find(field => field.name === item.field);
+    if (!source || source.key || discovery.conflicts?.some(conflict => conflict.objectId === item.objectId)
+      || !field || !['string', 'integer', 'number'].includes(field.type) || actual?.key !== item.field
+      || mapped?.sourceField !== (field.sourceField || field.name) || !['mapped', 'manual'].includes(mapped?.mappingStatus)) return { error: '仅能为原材料缺主键且无版本冲突的对象，选择原材料已有的标量字段并绑定该源字段；必须与本次主键选择一致。' };
+    corrections.set(item.objectId, { objectId: item.objectId, field: item.field, reason: item.reason.trim(),
+      sourceFingerprint: hash(JSON.stringify(source)), actor, roleId, revision, time, kind: 'human_missing_key_assertion' });
+  }
+  return { corrections: [...corrections.values()] };
+}
+
+export function validateProposalEvidence(draft, discovery, primaryKeyCorrections = []) {
   if (!discovery?.schemas?.length) return [];
   const failures = [];
   const objects = new Map(draft.objectTypes.map(item => [item.id, item]));
   if (discovery.conflicts?.length) failures.push('材料版本存在未解决冲突');
+  const corrected = new Set();
   for (const expected of discovery.objectTypes) {
     const actual = objects.get(expected.id);
-    if (!actual || actual.key !== expected.key || actual.granularity !== expected.granularity
+    const correction = primaryKeyCorrections.find(item => item.objectId === expected.id && item.kind === 'human_missing_key_assertion'
+      && item.sourceFingerprint === hash(JSON.stringify(expected)) && item.field === actual?.key
+      && expected.fieldDefinitions.some(field => field.name === item.field && ['string', 'integer', 'number'].includes(field.type)
+        && actual.fieldDefinitions.some(mapped => mapped.name === field.name && mapped.sourceField === (field.sourceField || field.name) && ['mapped', 'manual'].includes(mapped.mappingStatus))));
+    if (!expected.key && correction && !discovery.conflicts?.some(item => item.objectId === expected.id)) corrected.add(expected.id);
+    if (!actual || (actual.key !== expected.key && !corrected.has(expected.id)) || actual.granularity !== expected.granularity
       || JSON.stringify(actual.sourceSystems) !== JSON.stringify(expected.sourceSystems)
       || expected.fieldDefinitions.some(field => !actual.fieldDefinitions.some(other => other.name === field.name && other.type === field.type && other.reference === field.reference && (other.unit || null) === (field.unit || null)))) failures.push(`${expected.id} 来源/粒度/主键/字段与材料不一致`);
   }
@@ -57,9 +88,9 @@ export function validateProposalEvidence(draft, discovery) {
   for (const schema of discovery.schemas) for (const field of schema.fields) {
     if (field.reference && !objects.has(field.reference)) failures.push(`${schema.id}.${field.name} 引用目标尚未提供`);
   }
-  failures.push(...(discovery.warnings || []));
+  failures.push(...(discovery.warnings || []).filter(warning => ![...corrected].some(id => warning === `${id}：未识别主键，进入 Review Queue 后必须补充。`)));
   if (draft.worldModel && !draft.worldModel.coverage.complete) failures.push('需求条目超过处理上限，未完整编译');
-  return [{ name: '材料语义保真与覆盖', status: failures.length ? 'failed' : 'passed', detail: failures.length ? [...new Set(failures)].join('；') : '对象来源、粒度、主键、字段及显式关系均与输入材料一致；不代表真实业务样本或执行规则已验收。' }];
+  return [{ name: '材料语义保真与覆盖', status: failures.length ? 'failed' : 'passed', detail: failures.length ? [...new Set(failures)].join('；') : `对象来源、粒度、字段及显式关系与材料一致；${corrected.size ? `${corrected.size} 个缺失主键采用有记录的人工补充，不代表原材料已经声明或业务唯一性已证实` : '主键与材料一致'}；不代表真实业务样本或执行规则已验收。` }];
 }
 
 export function proposalBusinessValidation(draft, critic, mapping) {

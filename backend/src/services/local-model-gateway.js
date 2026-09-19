@@ -4,6 +4,7 @@ import { getRuntimeStoreInfo, readState, writeState } from '../repositories/runt
 import { beginModelInvocation, completeModelInvocation, getModelGovernanceObservability, getModelGovernancePolicy, validateModelSelection } from './model-governance-service.js';
 import { ARK_DEFAULT_BASE_URL, getArkRequestOptions, isAllowedArkEndpoint } from './ark-model-config.js';
 import { fetchArkChat } from './ark-transport.js';
+import { arkFailureReason, arkAccountOverdueMessage } from './ark-provider-failure.js';
 import { ONTOLOGY_CLAIMS_SCHEMA } from './ontology-analysis-claims.js';
 import { KNOWLEDGE_ANSWER_SCHEMA } from './knowledge-answer-contract.js';
 import { READ_PLAN_ANSWER_SCHEMA, READ_PLAN_DEFS, READ_PLAN_SYSTEM_PROMPT } from './read-plan-answer-contract.js';
@@ -412,7 +413,7 @@ async function generateModelSummaryInternal({ prompt, fallback, safetyIdentifier
       }, modelTiming.transport);
       modelTiming.responseHeadersMs = Math.round(performance.now() - requestStartedAt);
       modelTiming.httpStatus = response.status;
-      if (!response.ok) throw new Error(`${currentMode} chat completions status ${response.status}`);
+      if (!response.ok) throw new Error(currentMode === 'ark' ? await arkFailureReason(response) : `${currentMode} chat completions status ${response.status}`);
       const bodyStartedAt = performance.now();
       let payload;
       try { payload = await response.json(); } finally { modelTiming.bodyReadMs = Math.round(performance.now() - bodyStartedAt); }
@@ -446,11 +447,11 @@ async function generateModelSummaryInternal({ prompt, fallback, safetyIdentifier
     const payload = await response.json();
     return validateProviderOutput({ text: payload.choices?.[0]?.message?.content?.trim() || fallback, fallback, provider: 'local', requireStructured: true, prompt, answerContract });
   } catch (error) {
-    const reason = currentMode === 'ark' ? (/^ark chat completions status \d{3}$/.test(error.message) ? error.message : error.message === 'ARK_ENDPOINT_REJECTED' ? error.message : 'ARK_REQUEST_FAILED_OR_CONFIGURATION_MISSING') : error.message;
+    const reason = currentMode === 'ark' ? (/^ark chat completions status \d{3}$/.test(error.message) ? error.message : ['ARK_ENDPOINT_REJECTED', 'ARK_ACCOUNT_OVERDUE'].includes(error.message) ? error.message : 'ARK_REQUEST_FAILED_OR_CONFIGURATION_MISSING') : error.message;
     recordFailure(currentMode, reason);
     const failureStage = /配置|NOT_CONFIGURED|CONFIGURATION|ARK_ENDPOINT_REJECTED/.test(String(error?.message)) ? 'configuration' : ['TimeoutError', 'AbortError'].includes(error?.name) ? 'timeout'
       : modelTiming.httpStatus >= 400 ? 'upstream' : error instanceof SyntaxError ? 'response_json' : 'transport';
-    return { ...deterministicFallback({ text: `${fallback}\n\n模型端点暂不可用，已降级为受控业务计划。`, source: 'fallback', warning: reason }), failureStage };
+    return { ...deterministicFallback({ text: reason === 'ARK_ACCOUNT_OVERDUE' ? `${fallback}\n\n${arkAccountOverdueMessage}` : `${fallback}\n\n模型端点暂不可用，已降级为受控业务计划。`, source: 'fallback', warning: reason }), failureStage };
   } finally {
     completeModelInvocation(governanceLease.leaseId);
   }

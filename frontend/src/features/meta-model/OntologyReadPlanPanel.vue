@@ -8,19 +8,21 @@ const proposalNotice = ref('');
 const joinChoices = ref([]); const joinSelections = ref({});
 const clarification = ref([]);
 const request = ref(''); const rootType = ref(''); const consent = ref(false); const policy = ref(null); const busy = ref(false); let generation = 0;
-const context = computed(() => JSON.stringify([props.draft, props.canEdit, props.savedFingerprint]));
+const context = computed(() => JSON.stringify([props.draft, props.canEdit, props.savedFingerprint, props.hasUnsavedChanges]));
 const resetJoins = () => { joinChoices.value = []; joinSelections.value = {}; clarification.value = []; proposalNotice.value = ''; };
-watch(context, () => { generation++; pending.value = null; consent.value = false; busy.value = false; resetJoins(); });
+watch(context, () => { generation++; pending.value = null; consent.value = false; busy.value = false; resetJoins(); }, { flush: 'sync' });
 watch([request, rootType], () => { generation++; busy.value = false; consent.value = false; pending.value = null; resetJoins(); });
 watch(joinSelections, () => { consent.value = false; pending.value = null; }, { deep: true });
 const unresolvedJoins = computed(() => joinChoices.value.some(choice => !joinSelections.value[choice.objectType]));
+let policyGeneration = 0;
 watch(() => props.client, async client => {
-  policy.value = null;
-  if (client) { try { const result = await client.providers(); if (client === props.client) policy.value = result.answerPolicy; } catch { /* Existing import remains available. */ } }
-}, { immediate: true });
-onUnmounted(() => { generation++; });
+  const ticket = ++policyGeneration;
+  generation++; pending.value = null; consent.value = false; busy.value = false; error.value = ''; resetJoins(); policy.value = null;
+  if (client) { try { const result = await client.providers(); if (ticket === policyGeneration) policy.value = result.answerPolicy; } catch { /* Existing import remains available. */ } }
+}, { immediate: true, flush: 'sync' });
+onUnmounted(() => { generation++; policyGeneration++; });
 const propose = async () => {
-  if (busy.value || unresolvedJoins.value || !props.canEdit || props.hasUnsavedChanges || !props.client || !consent.value || !policy.value?.enabled) return;
+  if (busy.value || unresolvedJoins.value || !props.canEdit || props.hasUnsavedChanges || !props.client || !consent.value || !policy.value?.enabled || !request.value.trim() || !rootType.value) return;
   const ticket = ++generation; busy.value = true; pending.value = null; error.value = ''; clarification.value = []; proposalNotice.value = '';
   try {
     const result = await props.client.proposeReadPlan({ request: request.value, rootType: rootType.value, expectedFingerprint: props.savedFingerprint,
@@ -48,18 +50,20 @@ const propose = async () => {
 const plans = computed(() => props.draft?.scenario?.readPlans || []);
 watch(() => [props.draft, props.canEdit], () => { pending.value = null; error.value = ''; });
 const importPlan = async event => {
+  const ticket = ++generation; busy.value = false; consent.value = false;
   const file = event.target.files?.[0]; event.target.value = ''; error.value = ''; pending.value = null; proposalNotice.value = '';
   if (!file || !props.canEdit) return;
-  const currentDraft = context.value;
+  busy.value = true;
   try {
     if (file.size > 150000) throw new Error('方案超过 150 KB，请缩小。');
     const value = JSON.parse(await file.text());
     const input = parseReadPlanImport(value);
-    if (context.value === currentDraft && props.canEdit) pending.value = input;
-  } catch (e) { error.value = e.message; }
+    if (ticket === generation && props.canEdit) pending.value = input;
+  } catch (e) { if (ticket === generation) error.value = e.message; }
+  finally { if (ticket === generation) busy.value = false; }
 };
 const apply = () => {
-  if (!props.canEdit || !pending.value) return;
+  if (!props.canEdit || busy.value || !pending.value) return;
   if (props.draft.scenario.decisionBindings?.length) { error.value = '请先明确移除原判断绑定，再配置关联计算；不会自动删除已有绑定。'; return; }
   emit('apply-plan', pending.value); pending.value = null;
 };
@@ -70,6 +74,7 @@ const expression = (e, depth = 0) => {
   if (e.op === 'field' || e.op === 'one') return `${e.dataset}.${e.field}`;
   if (e.op === 'lookup') return `关联 ${e.dataset}.${e.resultField}（${e.field} = ${expression(e.value, depth + 1)}）`;
   if (e.op === 'sum') return `汇总 ${e.dataset}：${expression(e.value, depth + 1)}${e.where ? `；条件 ${expression(e.where, depth + 1)}` : ''}`;
+  if (e.op === 'all') return `全部 ${e.dataset} 记录均满足：${expression(e.value, depth + 1)}`;
   if (e.op === 'if') return `若 ${expression(e.condition, depth + 1)} 则 ${expression(e.then, depth + 1)} 否则 ${expression(e.else, depth + 1)}`;
   const symbols = { add: '+', sub: '−', mul: '×', max: '取较大值', eq: '=', ne: '≠', and: '且', or: '或', gt: '>' };
   return `(${(e.args || []).map(a => expression(a, depth + 1)).join(` ${symbols[e.op] || e.op} `)})`;
@@ -107,6 +112,7 @@ const expression = (e, depth = 0) => {
       <p>覆盖：{{ plan.coverage ? '仅声明关系图内的有界完整性，非全企业实时真相' : '仅当前计划，不承诺完整影响范围' }} · {{ plan.analysis?.enabled ? '计算后按当前问题解释证据' : '仅确定性计算' }}</p>
       <ol><li v-for="ds in plan.datasets" :key="ds.id"><b>{{ ds.objectType }}</b> · {{ ds.id }}<small v-for="(filter, index) in ds.where" :key="index">{{ filter.field }} ← {{ filter.target ? '用户本轮明确编号' : `${filter.dataset}.${filter.sourceField}` }}</small></li></ol>
       <details v-for="item in plan.outputs" :key="item.id"><summary>{{ item.label }} · {{ item.unit || '判断' }}</summary><p>{{ expression(item.expression) }}</p></details>
+      <section v-if="plan.preconditions?.length" aria-label="计算前置条件"><b>计算前必须全部满足，否则停止</b><ul><li v-for="(condition, index) in plan.preconditions" :key="index">{{ expression(condition) }}</li></ul></section>
       <p v-for="ds in plan.datasets.filter(d => d.expand)" :key="`${ds.id}-expansion`">{{ ds.id }} 向后展开 {{ ds.expand.edgeObjectType }}：{{ ds.expand.fromField }} → {{ ds.expand.toField }}，状态 {{ Array.isArray(ds.expand.activeStates) ? ds.expand.activeStates.join('、') : '待补充有效状态' }}，最多 {{ ds.expand.maxDepth }} 层；环、断链或未完成时停止计算。</p>
       <p v-for="ds in plan.datasets.filter(d => d.filter)" :key="`${ds.id}-filter`">{{ ds.id }} 仅使用 {{ ds.filter.field }} ∈ {{ Array.isArray(ds.filter.values) ? ds.filter.values.join('、') : '待补充过滤值' }} 的记录。</p>
     </article>
