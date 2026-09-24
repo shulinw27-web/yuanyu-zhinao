@@ -3,9 +3,22 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, unlink, rmdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createMockEventReplay } from '../../scripts/lib/mock-event-replay.mjs';
 import { saveMockEventCheckpoint, loadMockEventCheckpoint } from '../../scripts/lib/mock-event-checkpoint.mjs';
+
+// 同步 spawnSync 在部分 Windows 环境（受控沙箱/文件锁）会以 EBUSY 失败；
+// 改用异步 spawn 等价封装，保持真实跨进程语义、超时终止与 { status, stdout, stderr } 返回结构。
+const spawnNode = (args, options = {}) => new Promise((resolvePromise) => {
+  const child = spawn(process.execPath, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  const timer = options.timeout ? setTimeout(() => child.kill(), options.timeout) : null;
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.on('close', (code, signal) => { if (timer) clearTimeout(timer); resolvePromise({ status: signal ? null : code, stdout, stderr }); });
+  child.on('error', () => { if (timer) clearTimeout(timer); resolvePromise({ status: null, stdout, stderr }); });
+});
 const scope = { tenantId: 'synthetic-recovery', projectId: 'synthetic-project' };
 const row = { tenantId: scope.tenantId, system: 'ERP', objectType: 'Order', id: 'order-one', payload: { amount: 10 } };
 const deleted = { ...scope, system: row.system, objectType: row.objectType, id: row.id, eventId: 'deleted-v2', revision: 2, operation: 'delete' };
@@ -17,7 +30,7 @@ async function temporary(work) {
 }
 test('fresh Node process recovers file checkpoint with tombstones and duplicate receipts', async () => temporary(async path => {
   const replay = fixture(); await saveMockEventCheckpoint(path, replay);
-  const result = spawnSync(process.execPath, ['scripts/mock-event-recovery-probe.mjs', path, scope.tenantId, scope.projectId], { windowsHide: true, timeout: 10000, encoding: 'utf8', env: { ...process.env, NODE_ENV: 'test' } });
+  const result = await spawnNode(['scripts/mock-event-recovery-probe.mjs', path, scope.tenantId, scope.projectId], { windowsHide: true, timeout: 10000, env: { ...process.env, NODE_ENV: 'test' } });
   assert.equal(result.status, 0, result.stdout);
   assert.deepEqual(JSON.parse(result.stdout), { recovered: true, synthetic: true, snapshotId: replay.snapshot().snapshotId, records: 0, tombstones: 1, duplicateReceipts: 1, unchanged: true });
   const restored = await loadMockEventCheckpoint(path, scope);
@@ -39,6 +52,6 @@ test('recovery requires externally supplied matching scope and cannot run in pro
   await assert.rejects(loadMockEventCheckpoint(path, { ...scope, tenantId: 'other' }), /SCOPE_MISMATCH/);
   await assert.rejects(loadMockEventCheckpoint(path, { ...scope, projectId: 'other' }), /SCOPE_MISMATCH/);
   await assert.rejects(loadMockEventCheckpoint(path, {}), /SCOPE_REQUIRED/);
-  const result = spawnSync(process.execPath, ['scripts/mock-event-recovery-probe.mjs', path, scope.tenantId, scope.projectId], { windowsHide: true, timeout: 10000, encoding: 'utf8', env: { ...process.env, NODE_ENV: 'production' } });
+  const result = await spawnNode(['scripts/mock-event-recovery-probe.mjs', path, scope.tenantId, scope.projectId], { windowsHide: true, timeout: 10000, env: { ...process.env, NODE_ENV: 'production' } });
   assert.equal(result.status, 1); assert.equal(JSON.parse(result.stdout).code, 'MOCK_CHECKPOINT_TEST_ONLY');
 }));

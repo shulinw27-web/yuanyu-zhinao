@@ -40,7 +40,7 @@ export async function discoverNaturalSchema(material) {
     prompt: `仅抽取材料明确给出的表、字段、主键、外键。不要补充默认 id/status，不确定则不生成。每个 evidence/keyEvidence/referenceEvidence 必须逐字引用材料的一段原文，并包含对应名称。reference 是明确的目标表名；没有外键证据则 null。字段类型、来源系统不猜测。\n材料：${material.slice(-20000)}\n在 answer 字段中返回 JSON 字符串：{"tables":[{"name":"原文表名","label":"中文名","evidence":"含表名的原文","key":"主键字段","keyEvidence":"明确该字段是主键的原文","fields":[{"name":"字段名","evidence":"含字段名的原文","reference":null,"referenceEvidence":null}]}]}`,
     fallback: '', safetyIdentifier: 'semantic-schema-discovery'
   });
-  if (!['ark', 'local', 'openai', 'deepseek', 'compatible'].includes(result.source)) return { error: '模型未能提取可核对的结构，请重试或上传结构化数据字典。' };
+  if (!['ark', 'local', 'openai', 'deepseek', 'compatible', 'workbuddy'].includes(result.source)) return { error: '模型未能提取可核对的结构，请重试或上传结构化数据字典。' };
   try {
     const diagnostics = [];
     return validateNaturalSchema(JSON.parse(result.text), material, diagnostics) || { error: `候选结构缺少可核对的原文证据（${diagnostics[0]}），请补充主外键定义或上传结构化字典；未使用默认模板代替。` };

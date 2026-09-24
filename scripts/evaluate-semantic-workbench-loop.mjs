@@ -46,7 +46,7 @@ for (const key of Object.keys(env)) if (key.endsWith('_STORE_DRIVER')) env[key] 
 Object.assign(env, {
   NODE_ENV: 'test', RUNTIME_STORE_DRIVER: 'memory', AGENT_RUNTIME_TASK_STORE_DRIVER: 'sqlite',
   RUNTIME_SQLITE_PATH: resolve(out, 'isolated-runtime.sqlite'), EVENT_BROKER_TYPE: 'projection',
-  AGENT_RUNTIME_MODE: 'ark', AGENT_MODEL_CONFIG_SOURCE: 'environment',
+  AGENT_RUNTIME_MODE: process.env.AGENT_RUNTIME_MODE || 'ark', AGENT_MODEL_CONFIG_SOURCE: 'environment',
   API_HOST: '127.0.0.1', PORT: String(apiPort), DEMO_ALLOW_ROLE_HEADER: 'true',
   IDENTITY_PROVIDERS_FILE: '', DINGTALK_ENABLED: 'false', CONNECTOR_MOCK_MODE: 'disabled',
   SEMANTICA_DEMO_BRIDGE_ENABLED: 'true', SEMANTIC_CONTEXT_ENDPOINT: `http://127.0.0.1:${semanticPort}`,
@@ -54,7 +54,7 @@ Object.assign(env, {
   ENTERPRISE_CONNECTORS_CONFIG_JSON: JSON.stringify(Object.fromEntries(['ERP', 'WMS', 'OMS', 'QMS', 'OA', 'MES'].map(s => [s.toLowerCase(), { endpoint: `http://127.0.0.1:${connectorPort}`, path: `/${s.toLowerCase()}` }]))),
   PYTHONIOENCODING: 'utf-8'
 });
-loadArkFileConfig(env);
+if (env.AGENT_RUNTIME_MODE === 'ark') loadArkFileConfig(env);
 if (withRuntime) {
   const dictionary = await json('data-dictionary.json');
   env.ONTOLOGY_RUNTIME_GRANTS_JSON = JSON.stringify({ 'demo-enterprise': { executive: { metadata: true,
@@ -203,20 +203,20 @@ try {
     }
     for (const [id, version] of [['B1-after-A', 'A'], ['B4-after-B', 'B'], ['B5-after-unpublished-C', 'B']]) {
       const deployed = result(`${version}-human-structure-control-publish`)?.semanticDeployment?.deployment;
-      checks.push({ id, passed: Boolean(deployed?.version && result(id)?.text.includes(deployed.version) && result(id)?.agent?.inferenceSource === 'ark') });
+      checks.push({ id, passed: Boolean(deployed?.version && result(id)?.text.includes(deployed.version) && result(id)?.agent?.inferenceSource === env.AGENT_RUNTIME_MODE) });
     }
     for (const id of ['P1-direct-material-control', 'P2-compact-material-control']) {
       const answer = result(id)?.text.replaceAll(',', '') || '';
       const { hasConflictingMaterialTotals } = await import('../backend/src/services/agent-turn-understanding-service.js');
-      checks.push({ id, assessment: 'literal_smoke_requires_human_semantic_review', passed: result(id)?.agent?.inferenceSource === 'ark' && !hasConflictingMaterialTotals(result(id)?.text) && [180, 40, 140, 4000, 5000, 7000].every(v => answer.includes(String(v))) });
+      checks.push({ id, assessment: 'literal_smoke_requires_human_semantic_review', passed: result(id)?.agent?.inferenceSource === env.AGENT_RUNTIME_MODE && !hasConflictingMaterialTotals(result(id)?.text) && [180, 40, 140, 4000, 5000, 7000].every(v => answer.includes(String(v))) });
     }
     const followup = result('P3-material-followup');
-    checks.push({ id: 'P3-material-followup', assessment: 'literal_smoke_requires_human_semantic_review', passed: followup?.agent?.inferenceSource === 'ark' && followup.command === null && ['AP-X1', 'ST-X7'].every(id => followup.text.includes(id)) && rows.find(r => r.id === 'P3-material-followup')?.connectorRequests.length === 0 });
+    checks.push({ id: 'P3-material-followup', assessment: 'literal_smoke_requires_human_semantic_review', passed: followup?.agent?.inferenceSource === env.AGENT_RUNTIME_MODE && followup.command === null && ['AP-X1', 'ST-X7'].every(id => followup.text.includes(id)) && rows.find(r => r.id === 'P3-material-followup')?.connectorRequests.length === 0 });
     await persist('acceptance-checks', { passed: checks.filter(c => c.passed).length, total: checks.length, checks });
     if (checks.some(c => !c.passed)) process.exitCode = 1;
   }
-  await persist('summary', { timestamp: new Date().toISOString(), model: env.ARK_MODEL, syntheticOnly: true,
-    scope: 'real_http_agents_real_ark_real_semantica_not_browser_not_enterprise', runtimeRepairEvaluation: withRuntime, humanControlsAreNotAutomaticAcceptance: true,
+  await persist('summary', { timestamp: new Date().toISOString(), modelProvider: env.AGENT_RUNTIME_MODE, model: env.ARK_MODEL || env.WORKBUDDY_CLOUD_MODEL, syntheticOnly: true,
+    scope: `real_http_agents_real_${env.AGENT_RUNTIME_MODE === 'workbuddy' ? 'workbuddy_cloud' : 'ark'}_real_semantica_not_browser_not_enterprise`, runtimeRepairEvaluation: withRuntime, humanControlsAreNotAutomaticAcceptance: true,
     rows: rows.map(({ data, ...r }) => ({ ...r, status: data.status, code: data.code })), connectorRequests });
   for (const state of children) {
     if (!state.exited) { const stopped = once(state.child, 'exit'); state.child.kill(); await Promise.race([stopped, delay(5000)]); }

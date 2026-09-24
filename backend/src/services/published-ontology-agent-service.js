@@ -90,7 +90,7 @@ export async function runPublishedOntologyRead({ ontology, roleId, scope, target
         const analysisStartedAt = Date.now();
         const generated = await generateModelSummary({ prompt: focusedPrompt, fallback: '', safetyIdentifier: `ontology-${roleId}`, timeoutMs: 60000, answerContract: 'ontology_claims' });
         timing.model = generated.modelTiming;
-        const succeeded = ['ark', 'local', 'openai', 'deepseek', 'compatible'].includes(generated.source);
+        const succeeded = ['ark', 'local', 'openai', 'deepseek', 'compatible', 'workbuddy'].includes(generated.source);
         timing.analysisProposalCharacters = succeeded ? generated.text.length : 0;
         timing.analysisAnswerCharacters = 0;
         analysis = { status: succeeded ? 'completed' : 'incomplete', source: generated.source, diagnostics: modelFailureDiagnostics(generated) };

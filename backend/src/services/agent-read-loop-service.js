@@ -5,7 +5,7 @@ import { canZhiNaoUseTool } from './zhinao-authorization-service.js';
 // Only implemented analysis tools belong to this loop. The server supplies
 // query parameters; model advice cannot add domains, inputs or write authority.
 const READ_TOOLS = new Set(['analyze_production_impact', 'analyze_market_impact', 'review_internal_operations']);
-const MODEL_SOURCES = new Set(['local', 'openai', 'deepseek', 'compatible', 'ark']);
+const MODEL_SOURCES = new Set(['local', 'openai', 'deepseek', 'compatible', 'ark', 'workbuddy']);
 
 export function parseReadDecision(text, remainingTools) {
   try {

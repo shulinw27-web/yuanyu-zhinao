@@ -7,11 +7,11 @@ import { loadArkFileConfig } from './ark-file-config.mjs';
 process.env.NODE_ENV = 'test';
 process.env.RUNTIME_STORE_DRIVER = 'memory';
 process.env.SEMANTIC_GOVERNANCE_STORE_DRIVER = 'runtime';
-process.env.AGENT_RUNTIME_MODE = 'ark';
+process.env.AGENT_RUNTIME_MODE = process.env.AGENT_RUNTIME_MODE || 'ark';
 process.env.AGENT_MODEL_CONFIG_SOURCE = 'environment';
 process.env.ENTERPRISE_CONNECTORS_CONFIG_JSON = '{}';
 process.env.SEMANTICA_DEMO_BRIDGE_ENABLED = 'false';
-loadArkFileConfig();
+if (process.env.AGENT_RUNTIME_MODE === 'ark') loadArkFileConfig();
 const { createSemanticOperationsTask } = await import('../backend/src/services/semantic-operations-task-service.js');
 const { getOAMetaModelDraft } = await import('../backend/src/services/meta-model-service.js');
 const { semanticFingerprint } = await import('../backend/src/services/semantic-model-fingerprint.js');
@@ -82,10 +82,10 @@ const t7 = await run('T7-first-batch', '先根据 ERP、WMS 两个系统的 API 
 await run('T8-merge-batch', '继续前面的建模任务，补充 LIMS、QMS、MES、OA 四个系统的 API；请与前一批 ERP/WMS 候选合并，生成全部13类对象的完整候选，不能丢弃前一批对象。只展示，不采纳不发布。', ['lims-openapi.json', 'qms-openapi.json', 'mes-openapi.json', 'oa-openapi.json'], t7, all);
 const summary = { timestamp: new Date().toISOString(), provider: 'ark', model: process.env.ARK_MODEL, syntheticOnly: true,
   scope: 'real_model_existing_service_entrypoints_not_browser_not_live_enterprise', durationMilliseconds: Date.now() - start,
-  totalTurns: results.length, arkTurns: results.filter(row => row.source === 'ark').length,
+  totalTurns: results.length, modelTurns: results.filter(row => row.source === (process.env.AGENT_RUNTIME_MODE || 'ark')).length,
   draftUnchanged: semanticFingerprint(await getOAMetaModelDraft()) === initialFingerprint,
   executedWrites: 0, productionCodeModified: true,
   rows: results.map(({ task: _task, ...row }) => row) };
 await writeFile(resolve(outputDir, 'summary.json'), JSON.stringify(summary, null, 2));
-console.log(JSON.stringify({ type: 'summary', totalTurns: summary.totalTurns, arkTurns: summary.arkTurns, draftUnchanged: summary.draftUnchanged, milliseconds: summary.durationMilliseconds }));
+console.log(JSON.stringify({ type: 'summary', totalTurns: summary.totalTurns, modelTurns: summary.modelTurns, draftUnchanged: summary.draftUnchanged, milliseconds: summary.durationMilliseconds }));
 }

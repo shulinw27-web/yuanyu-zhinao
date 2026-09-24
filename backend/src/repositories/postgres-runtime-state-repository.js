@@ -21,7 +21,7 @@ export class PostgresRuntimeStateRepository {
     const result = await this.pool.query('SELECT version, name FROM platform_schema_migrations ORDER BY version');
     const latest = Number(result.rows.at(-1)?.version || 0);
     if (latest < 1) throw new Error('PostgreSQL runtime schema is not initialized. Run migrate:postgres first.');
-    if (latest > 4) throw new Error(`PostgreSQL runtime schema ${latest} is newer than supported version 4.`);
+    if (latest > 5) throw new Error(`PostgreSQL runtime schema ${latest} is newer than supported version 5.`);
     return this.getInfo();
   }
 

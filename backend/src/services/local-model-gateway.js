@@ -5,6 +5,8 @@ import { beginModelInvocation, completeModelInvocation, getModelGovernanceObserv
 import { ARK_DEFAULT_BASE_URL, getArkRequestOptions, isAllowedArkEndpoint } from './ark-model-config.js';
 import { fetchArkChat } from './ark-transport.js';
 import { arkFailureReason, arkAccountOverdueMessage } from './ark-provider-failure.js';
+import { readWorkBuddyCloudConfiguration, workBuddyCloudModelIsConfigured } from './workbuddy-cloud-config.js';
+import { fetchWorkBuddyCloudChat } from './workbuddy-cloud-transport.js';
 import { ONTOLOGY_CLAIMS_SCHEMA } from './ontology-analysis-claims.js';
 import { KNOWLEDGE_ANSWER_SCHEMA } from './knowledge-answer-contract.js';
 import { READ_PLAN_ANSWER_SCHEMA, READ_PLAN_DEFS, READ_PLAN_SYSTEM_PROMPT } from './read-plan-answer-contract.js';
@@ -46,6 +48,13 @@ const deepSeekBaseUrl = () => (providerOverride('deepseek', 'baseUrl') || proces
 const deepSeekModel = () => providerOverride('deepseek', 'model') || process.env.DEEPSEEK_MODEL || 'deepseek-v4-pro';
 const compatibleBaseUrl = () => (providerOverride('compatible', 'baseUrl') || process.env.COMPATIBLE_LLM_BASE_URL || '').replace(/\/$/, '');
 const compatibleModel = () => providerOverride('compatible', 'model') || process.env.COMPATIBLE_LLM_MODEL || 'not-configured';
+// WorkBuddy 云服务免密钥 Provider：端点与公开凭据来自配置文件，模型默认取配置固定版本。
+const workBuddyCloudConfig = () => readWorkBuddyCloudConfiguration();
+const workBuddyModel = () => providerOverride('workbuddy', 'model') || process.env.WORKBUDDY_CLOUD_MODEL || workBuddyCloudConfig()?.model || 'not-configured';
+const workBuddyReady = () => {
+  const config = workBuddyCloudConfig();
+  return Boolean(config && workBuddyCloudModelIsConfigured(config, workBuddyModel()));
+};
 const externalDataMode = () => (!environmentManaged() && runtimeOverride.externalDataMode) || process.env.AGENT_EXTERNAL_DATA_MODE || 'redacted';
 const externalMultimodalMode = () => (!environmentManaged() && runtimeOverride.externalMultimodalMode) || process.env.AGENT_EXTERNAL_MULTIMODAL_MODE || 'metadata_only';
 const localMultimodalMode = () => process.env.AGENT_LOCAL_MULTIMODAL_MODE || 'metadata_only';
@@ -61,8 +70,8 @@ const localThinkingDisabled = () => {
   // generation budget before the JSON response is emitted.
   return /qwen3(?:\.5)?/i.test(localModel());
 };
-const activeApiKey = (provider) => (!environmentManaged() && runtimeOverride.apiKeys[provider]) || (provider === 'ark' ? process.env.ARK_API_KEY : provider === 'openai' ? process.env.OPENAI_API_KEY : provider === 'deepseek' ? process.env.DEEPSEEK_API_KEY : provider === 'compatible' ? process.env.COMPATIBLE_LLM_API_KEY : process.env.LOCAL_LLM_API_KEY);
-const activeModel = (provider = mode()) => provider === 'mock' ? 'deterministic-demo' : provider === 'ark' ? arkModel() : provider === 'openai' ? openAIModel() : provider === 'deepseek' ? deepSeekModel() : provider === 'compatible' ? compatibleModel() : localModel();
+const activeApiKey = (provider) => (!environmentManaged() && runtimeOverride.apiKeys[provider]) || (provider === 'ark' ? process.env.ARK_API_KEY : provider === 'openai' ? process.env.OPENAI_API_KEY : provider === 'deepseek' ? process.env.DEEPSEEK_API_KEY : provider === 'compatible' ? process.env.COMPATIBLE_LLM_API_KEY : provider === 'workbuddy' ? '' : process.env.LOCAL_LLM_API_KEY);
+const activeModel = (provider = mode()) => provider === 'mock' ? 'deterministic-demo' : provider === 'ark' ? arkModel() : provider === 'openai' ? openAIModel() : provider === 'deepseek' ? deepSeekModel() : provider === 'compatible' ? compatibleModel() : provider === 'workbuddy' ? workBuddyModel() : localModel();
 
 export function inspectModelPromptSafety(prompt) {
   return assessPromptContent(prompt, { source: 'model_prompt', maxCharacters: 64_000 });
@@ -218,13 +227,14 @@ export function resetModelGatewayObservability() {
 
 export function configureModelConnection({ mode: nextMode, baseUrl, model, apiKey, externalDataMode: nextDataMode, externalMultimodalMode: nextMultimodalMode }) {
   if (environmentManaged()) return { error: '模型连接由服务端环境变量管理，请修改服务配置并重启。', code: 'MODEL_CONFIGURATION_ENVIRONMENT_MANAGED' };
-  if (!['mock', 'local', 'openai', 'deepseek', 'compatible', 'ark'].includes(nextMode)) return { error: '不支持的模型提供方。' };
+  if (!['mock', 'local', 'openai', 'deepseek', 'compatible', 'ark', 'workbuddy'].includes(nextMode)) return { error: '不支持的模型提供方。' };
   if (nextMode === 'ark' && !isAllowedArkEndpoint(baseUrl)) return { error: '火山方舟必须使用受控的北京区 HTTPS 标准推理地址 /api/v3。', code: 'ARK_ENDPOINT_REJECTED' };
-  if (nextMode !== 'mock' && !String(baseUrl || '').trim()) return { error: '请填写模型服务地址。' };
+  if (nextMode === 'workbuddy' && String(baseUrl || '').trim() && String(baseUrl).trim() !== workBuddyCloudConfig()?.endpoint) return { error: 'WorkBuddy 云服务端点由配置文件固定，不接受运行时改写。', code: 'WORKBUDDY_ENDPOINT_PINNED' };
+  if (nextMode !== 'mock' && nextMode !== 'workbuddy' && !String(baseUrl || '').trim()) return { error: '请填写模型服务地址。' };
   if (nextMode !== 'mock' && !String(model || '').trim()) return { error: '请填写模型名称。' };
   const selection = validateModelSelection(nextMode, nextMode === 'mock' ? 'deterministic-demo' : model);
   if (!selection.allowed) return { error: selection.message, code: selection.code, allowedModels: selection.allowedModels || [] };
-  if (nextMode !== 'local' && nextMode !== 'mock' && !String(apiKey || '').trim() && !activeApiKey(nextMode)) return { error: '该模型提供方需要服务端 API Key。' };
+  if (nextMode !== 'local' && nextMode !== 'mock' && nextMode !== 'workbuddy' && !String(apiKey || '').trim() && !activeApiKey(nextMode)) return { error: '该模型提供方需要服务端 API Key。' };
   const suppliedKey = String(apiKey || '').trim();
   if (suppliedKey) runtimeOverride.apiKeys[nextMode] = suppliedKey;
   Object.assign(runtimeOverride, { mode: nextMode, baseUrl: String(baseUrl || '').trim() || null, model: String(model || '').trim() || null, externalDataMode: nextDataMode === 'full' ? 'full' : 'redacted', externalMultimodalMode: nextMultimodalMode === 'approved' ? 'approved' : 'metadata_only', updatedAt: new Date().toISOString() });
@@ -283,7 +293,8 @@ export function getModelConnectionConfiguration() {
       { id: 'local', name: '企业内网 OpenAI-compatible 模型', configured: Boolean(runtimeOverride.mode === 'local' || process.env.LOCAL_LLM_BASE_URL), model: localModel(), endpoint: localBaseUrl(), credential: activeApiKey('local') ? '服务端密钥已配置' : '无需或未配置', dataEgress: '仅企业内网端点' },
       { id: 'openai', name: 'OpenAI Responses API', configured: Boolean(activeApiKey('openai')), model: openAIModel(), endpoint: openAIBaseUrl(), credential: activeApiKey('openai') ? '服务端密钥已配置' : '未配置', dataEgress: `外部模型调用；上下文模式：${externalDataMode()}` },
       { id: 'deepseek', name: 'DeepSeek Chat Completions API', configured: Boolean(activeApiKey('deepseek')), model: deepSeekModel(), endpoint: deepSeekBaseUrl(), credential: activeApiKey('deepseek') ? '服务端密钥已配置' : '未配置', dataEgress: `外部模型调用；上下文模式：${externalDataMode()}` },
-      { id: 'compatible', name: '自定义 OpenAI-compatible API', configured: Boolean(compatibleBaseUrl() && activeApiKey('compatible')), model: compatibleModel(), endpoint: compatibleBaseUrl() || '未配置', credential: activeApiKey('compatible') ? '服务端密钥已配置' : '未配置', dataEgress: `按供应商评估；上下文模式：${externalDataMode()}` }
+      { id: 'compatible', name: '自定义 OpenAI-compatible API', configured: Boolean(compatibleBaseUrl() && activeApiKey('compatible')), model: compatibleModel(), endpoint: compatibleBaseUrl() || '未配置', credential: activeApiKey('compatible') ? '服务端密钥已配置' : '未配置', dataEgress: `按供应商评估；上下文模式：${externalDataMode()}` },
+      { id: 'workbuddy', name: 'WorkBuddy 云服务模型（免密钥）', configured: workBuddyReady(), model: workBuddyModel(), endpoint: workBuddyCloudConfig()?.endpoint || '未配置', credential: '应用级公开凭据（publishableKey，无业务权限）', dataEgress: `WorkBuddy 云服务推理；上下文模式：${externalDataMode()}` }
     ]
   };
 }
@@ -294,17 +305,22 @@ export function getLocalModelRuntime() {
     const configured = Boolean(activeApiKey('ark') && arkModel() !== 'not-configured' && isAllowedArkEndpoint(arkBaseUrl()) && validateModelSelection('ark', arkModel()).allowed);
     return { mode: 'ark', provider: '火山方舟 Chat Completions API', baseUrl: isAllowedArkEndpoint(arkBaseUrl()) ? arkBaseUrl() : '地址未通过安全检查', model: arkModel(), dataEgress: `火山方舟云端推理；${externalDataMode() === 'full' ? '完整' : '规则脱敏'}上下文；图片：${externalMultimodalMode()}`, credentialStatus: activeApiKey('ark') ? '服务端密钥已配置' : '缺少 ARK_API_KEY', status: configured ? '已配置，待真实调用验证' : '配置不完整或模型未获准入，不调用云端' };
   }
+  if (currentMode === 'workbuddy') {
+    const config = workBuddyCloudConfig();
+    return { mode: 'workbuddy', provider: 'WorkBuddy 云服务模型（免密钥，流式聚合）', baseUrl: config?.endpoint || '未配置', model: workBuddyModel(), dataEgress: `WorkBuddy 云服务推理；${externalDataMode() === 'full' ? '完整' : '规则脱敏'}上下文；图片：${externalMultimodalMode()}（当前仅文本）`, credentialStatus: config ? '应用级公开凭据已配置（无业务权限）' : '缺少云服务配置文件', status: workBuddyReady() ? '已配置，待真实调用验证' : '配置不完整或模型未获准入，不调用云端' };
+  }
   const isOpenAI = currentMode === 'openai';
   const isLocal = currentMode === 'local';
   const isDeepSeek = currentMode === 'deepseek';
   const isCompatible = currentMode === 'compatible';
-  const configured = isOpenAI ? Boolean(activeApiKey('openai')) : isDeepSeek ? Boolean(activeApiKey('deepseek')) : isCompatible ? Boolean(compatibleBaseUrl() && activeApiKey('compatible')) : isLocal ? Boolean(localBaseUrl()) : true;
+  const isWorkBuddy = currentMode === 'workbuddy';
+  const configured = isOpenAI ? Boolean(activeApiKey('openai')) : isDeepSeek ? Boolean(activeApiKey('deepseek')) : isCompatible ? Boolean(compatibleBaseUrl() && activeApiKey('compatible')) : isWorkBuddy ? workBuddyReady() : isLocal ? Boolean(localBaseUrl()) : true;
   return {
     mode: currentMode,
-    provider: isOpenAI ? 'OpenAI Responses API' : isDeepSeek ? 'DeepSeek Chat Completions API' : isCompatible ? 'Custom OpenAI-compatible API' : isLocal ? 'OpenAI-compatible private endpoint' : 'Mock Local Runtime',
-    baseUrl: isOpenAI ? openAIBaseUrl() : isDeepSeek ? deepSeekBaseUrl() : isCompatible ? compatibleBaseUrl() || '未配置' : isLocal ? localBaseUrl() : '未连接外部端点（离线演示）',
-    model: isOpenAI ? openAIModel() : isDeepSeek ? deepSeekModel() : isCompatible ? compatibleModel() : localModel(),
-    dataEgress: isOpenAI || isDeepSeek || isCompatible ? `外部模型已启用；仅发送${externalDataMode() === 'full' ? '完整' : '脱敏'}上下文` : isLocal ? '禁止出企业内网' : '无外部传输',
+    provider: isOpenAI ? 'OpenAI Responses API' : isDeepSeek ? 'DeepSeek Chat Completions API' : isCompatible ? 'Custom OpenAI-compatible API' : isWorkBuddy ? 'WorkBuddy 云服务模型（免密钥）' : isLocal ? 'OpenAI-compatible private endpoint' : 'Mock Local Runtime',
+    baseUrl: isOpenAI ? openAIBaseUrl() : isDeepSeek ? deepSeekBaseUrl() : isCompatible ? compatibleBaseUrl() || '未配置' : isWorkBuddy ? workBuddyCloudConfig()?.endpoint || '未配置' : isLocal ? localBaseUrl() : '未连接外部端点（离线演示）',
+    model: isOpenAI ? openAIModel() : isDeepSeek ? deepSeekModel() : isCompatible ? compatibleModel() : isWorkBuddy ? workBuddyModel() : localModel(),
+    dataEgress: isWorkBuddy ? `WorkBuddy 云服务已启用；仅发送${externalDataMode() === 'full' ? '完整' : '脱敏'}上下文` : isOpenAI || isDeepSeek || isCompatible ? `外部模型已启用；仅发送${externalDataMode() === 'full' ? '完整' : '脱敏'}上下文` : isLocal ? '禁止出企业内网' : '无外部传输',
     credentialStatus: configured ? '已配置' : '缺少服务端密钥',
     status: configured ? (currentMode === 'mock' ? '可用（模拟）' : '已配置，待健康检查') : '未配置，自动降级为 Mock'
   };
@@ -370,6 +386,33 @@ async function generateModelSummaryInternal({ prompt, fallback, safetyIdentifier
       if (!response.ok) throw new Error(`OpenAI Responses status ${response.status}`);
       const payload = await response.json();
       return validateProviderOutput({ text: responseText(payload) || fallback, fallback, provider: 'openai', extra: { responseId: payload.id }, requireStructured: true, prompt, answerContract });
+    }
+    if (currentMode === 'workbuddy') {
+      if (!workBuddyReady()) throw new Error('WORKBUDDY_CLOUD_NOT_CONFIGURED: 云服务配置缺失或模型未获准入');
+      modelTiming.preparationMs = Math.round(performance.now() - invocationStartedAt);
+      modelTiming.transport = { attempts: [] };
+      const requestStartedAt = performance.now();
+      // 云服务仅支持流式 JSON 返回；与 deepseek 一致采用 json_object 并在系统消息中附完整 Schema。
+      const payload = await fetchWorkBuddyCloudChat({
+        model: workBuddyModel(),
+        temperature: 0.2,
+        responseFormat: { type: 'json_object' },
+        timeoutMs: requestTimeout,
+        timing: modelTiming.transport,
+        messages: [{ role: 'system', content: `${outputSystem}${answerContract === 'read_plan' ? READ_PLAN_SYSTEM_PROMPT : ''}\n输出必须是符合以下 JSON Schema 的顶层对象，不得用 agent-summary.v1 作为外层键，也不要返回 Schema 本身：${JSON.stringify(summarySchema)}` }, { role: 'user', content: redactExternalContext(promptWithAttachmentMetadata(prompt, attachments)) }]
+      });
+      modelTiming.responseHeadersMs = Math.round(performance.now() - requestStartedAt);
+      const usage = {};
+      for (const key of ['prompt_tokens', 'completion_tokens', 'total_tokens']) if (Number.isSafeInteger(payload.usage?.[key]) && payload.usage[key] >= 0) usage[key] = payload.usage[key];
+      if (Object.keys(usage).length) modelTiming.usage = usage;
+      if (payload.choices?.[0]?.finish_reason === 'length') {
+        recordBlockedOutput('workbuddy');
+        return { text: SAFE_OUTPUT_FALLBACK, source: 'output_safety', safety: { signals: ['output_token_limit'] } };
+      }
+      const validationStartedAt = performance.now();
+      const result = validateProviderOutput({ text: payload.choices?.[0]?.message?.content?.trim() || fallback, fallback, provider: 'workbuddy', requireStructured: true, prompt, answerContract });
+      modelTiming.validationMs = Math.round(performance.now() - validationStartedAt);
+      return result;
     }
     const externalChatProvider = currentMode === 'ark'
       ? { source: 'ark', baseUrl: arkBaseUrl(), apiKey: activeApiKey('ark'), model: arkModel() }

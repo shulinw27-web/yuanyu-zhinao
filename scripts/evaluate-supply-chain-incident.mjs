@@ -51,7 +51,7 @@ for (const key of Object.keys(env)) if (key.endsWith('_STORE_DRIVER')) env[key] 
 Object.assign(env, {
   NODE_ENV: 'test', RUNTIME_STORE_DRIVER: 'memory', AGENT_RUNTIME_TASK_STORE_DRIVER: 'sqlite',
   RUNTIME_SQLITE_PATH: resolve(out, 'isolated-runtime.sqlite'), EVENT_BROKER_TYPE: 'projection',
-  AGENT_RUNTIME_MODE: 'ark', AGENT_MODEL_CONFIG_SOURCE: 'environment',
+  AGENT_RUNTIME_MODE: process.env.AGENT_RUNTIME_MODE || 'ark', AGENT_MODEL_CONFIG_SOURCE: 'environment',
   API_HOST: '127.0.0.1', PORT: String(apiPort), DEMO_ALLOW_ROLE_HEADER: 'true',
   IDENTITY_PROVIDERS_FILE: '', DINGTALK_ENABLED: 'false', CONNECTOR_MOCK_MODE: 'disabled',
   SEMANTICA_DEMO_BRIDGE_ENABLED: 'true', SEMANTIC_CONTEXT_ENDPOINT: `http://127.0.0.1:${semanticPort}`,
@@ -59,7 +59,7 @@ Object.assign(env, {
   ENTERPRISE_CONNECTORS_CONFIG_JSON: JSON.stringify(Object.fromEntries(['ERP', 'WMS', 'OMS', 'QMS', 'OA', 'MES', 'LIMS'].map(s => [s.toLowerCase(), { endpoint: `http://127.0.0.1:${connectorPort}`, path: `/${s.toLowerCase()}` }]))),
   PYTHONIOENCODING: 'utf-8'
 });
-loadArkFileConfig(env);
+if (env.AGENT_RUNTIME_MODE === 'ark') loadArkFileConfig(env);
 if (withRuntime) {
   const dictionary = await json('data-dictionary.json');
   env.ONTOLOGY_RUNTIME_GRANTS_JSON = JSON.stringify({ 'demo-enterprise': { executive: { metadata: true,
@@ -205,8 +205,8 @@ try {
     faultChecks: ['coverage_missing', 'stock_conflict', 'foreign_tenant'].map(f => ({ fault: f, text: response('F-' + f)?.data.text, noBusinessWrite: response('F-' + f)?.data.command === null, reads: response('F-' + f)?.connectorRequests.length })),
     note: 'HTTP完成不代表全部世界模型验收通过；自然语言回答必须人工阅读；人工直接范围发布不是全场景自动通过。'
   });
-  await persist('summary', { scenarioCompleted, fullMatch, syntheticOnly: true, model: env.ARK_MODEL, rows: rows.map(({data,...r}) => ({ ...r, status:data.status, code:data.code })), connectorRequests });
-  await persist('performance', { syntheticOnly: true, model: env.ARK_MODEL, rows: rows.filter(r => r.data.semanticContext?.timing).map(r => ({
+  await persist('summary', { scenarioCompleted, fullMatch, syntheticOnly: true, modelProvider: env.AGENT_RUNTIME_MODE, model: env.ARK_MODEL || env.WORKBUDDY_CLOUD_MODEL, rows: rows.map(({data,...r}) => ({ ...r, status:data.status, code:data.code })), connectorRequests });
+  await persist('performance', { syntheticOnly: true, modelProvider: env.AGENT_RUNTIME_MODE, model: env.ARK_MODEL || env.WORKBUDDY_CLOUD_MODEL, rows: rows.filter(r => r.data.semanticContext?.timing).map(r => ({
     id: r.id, httpMs: r.milliseconds, connectorCalls: r.connectorRequests.length,
     understanding: r.data.evidenceTrace?.events?.find(e => e.type === 'turn_understanding_completed')?.details?.timing,
     ...r.data.semanticContext.timing

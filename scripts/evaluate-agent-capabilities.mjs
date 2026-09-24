@@ -25,8 +25,13 @@ if (!mockContractOnly) {
     if (!getModelConnectionConfiguration().providers.find((item) => item.id === 'ark')?.configured) {
       report.status = 'blocked'; report.reason = 'Ark key, endpoint, exact model and allowlist must be configured. No evaluation was run.';
     }
+  } else if (runtime.mode === 'workbuddy') {
+    const { getModelConnectionConfiguration } = await import('../backend/src/services/local-model-gateway.js');
+    if (!getModelConnectionConfiguration().providers.find((item) => item.id === 'workbuddy')?.configured) {
+      report.status = 'blocked'; report.reason = 'WorkBuddy cloud config file, exact model and allowlist must be configured. No evaluation was run.';
+    }
   } else if (runtime.mode !== 'local') {
-    report.status = 'blocked'; report.reason = 'Set AGENT_RUNTIME_MODE=local or ark, the endpoint, exact model and its allowlist before evaluating.';
+    report.status = 'blocked'; report.reason = 'Set AGENT_RUNTIME_MODE=local, ark or workbuddy, the endpoint, exact model and its allowlist before evaluating.';
   } else {
     try {
       const endpoint = `${String(process.env.LOCAL_LLM_BASE_URL || 'http://127.0.0.1:11434/v1').replace(/\/$/, '')}/models`;

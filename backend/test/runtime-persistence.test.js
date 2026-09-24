@@ -3,17 +3,27 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 
 const repositoryUrl = new URL('../src/repositories/runtime-state-repository.js', import.meta.url).href;
 const agentStoreUrl = new URL('../src/services/agent-runtime-store.js', import.meta.url).href;
 const evidenceTraceUrl = new URL('../src/services/agent-evidence-trace-service.js', import.meta.url).href;
 
-const runModule = (source, env) => spawnSync(process.execPath, ['--input-type=module', '--eval', source], {
-  cwd: resolve('.'),
-  env: { ...process.env, ...env },
-  encoding: 'utf8'
+// 同步 spawnSync 在部分 Windows 环境（受控沙箱/文件锁）会以 EBUSY 失败；
+// 改用异步 spawn 等价封装，保持真实跨进程语义与 { status, stdout, stderr } 返回结构。
+const runModule = (source, env) => new Promise((resolvePromise) => {
+  const child = spawn(process.execPath, ['--input-type=module', '--eval', source], {
+    cwd: resolve('.'),
+    env: { ...process.env, ...env },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.on('close', (code, signal) => resolvePromise({ status: signal ? null : code, stdout, stderr }));
+  child.on('error', () => resolvePromise({ status: null, stdout, stderr }));
 });
 
 const runModuleAsync = (source, env) => new Promise((resolvePromise) => {
@@ -65,12 +75,12 @@ const stopApi = (child) => new Promise((resolveStop) => {
   child.kill();
 });
 
-test('SQLite runtime state survives a process restart and can be reset', () => {
+test('SQLite runtime state survives a process restart and can be reset', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'zhinao-runtime-'));
   const databasePath = join(directory, 'runtime.db');
   const env = { RUNTIME_STORE_DRIVER: 'sqlite', RUNTIME_SQLITE_PATH: databasePath };
   try {
-    const writer = runModule(`
+    const writer = await runModule(`
       const store = await import(${JSON.stringify(repositoryUrl)});
       store.writeState('persistence_test', 'record', { value: 42 });
       process.stdout.write(store.getRuntimeStoreInfo().persistence);
@@ -78,14 +88,14 @@ test('SQLite runtime state survives a process restart and can be reset', () => {
     assert.equal(writer.status, 0, writer.stderr);
     assert.equal(writer.stdout, 'durable_local');
 
-    const reader = runModule(`
+    const reader = await runModule(`
       const store = await import(${JSON.stringify(repositoryUrl)});
       process.stdout.write(JSON.stringify(store.readState('persistence_test', 'record')));
     `, env);
     assert.equal(reader.status, 0, reader.stderr);
     assert.deepEqual(JSON.parse(reader.stdout), { value: 42 });
 
-    const reset = runModule(`
+    const reset = await runModule(`
       const store = await import(${JSON.stringify(repositoryUrl)});
       store.resetRuntimeState(['persistence_test']);
       process.stdout.write(String(store.readState('persistence_test', 'record') === null));
@@ -103,7 +113,7 @@ test('SQLite transaction allows only one process to claim an Agent confirmation'
   const env = { RUNTIME_STORE_DRIVER: 'sqlite', RUNTIME_SQLITE_PATH: databasePath };
   const identity = { tenantId: 'tenant-a', subjectId: 'user-a', sessionId: 'session-a', deviceId: 'device-a' };
   try {
-    const seed = runModule(`
+    const seed = await runModule(`
       const store = await import(${JSON.stringify(agentStoreUrl)});
       const run = store.createAgentRun({
         roleId: 'quality_manager', identityScope: ${JSON.stringify(identity)}, input: '创建质量调查', domain: 'production',
@@ -136,13 +146,13 @@ test('SQLite transaction allows only one process to claim an Agent confirmation'
   }
 });
 
-test('evidence trace events and integrity survive a process restart', () => {
+test('evidence trace events and integrity survive a process restart', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'zhinao-evidence-trace-'));
   const databasePath = join(directory, 'runtime.db');
   const env = { RUNTIME_STORE_DRIVER: 'sqlite', RUNTIME_SQLITE_PATH: databasePath };
   const identity = { tenantId: 'trace-tenant', subjectId: 'trace-user', sessionId: 'trace-session', deviceId: 'trace-device' };
   try {
-    const writer = runModule(`
+    const writer = await runModule(`
       const traces = await import(${JSON.stringify(evidenceTraceUrl)});
       const trace = await traces.createAgentEvidenceTrace({ roleId: 'quality_manager', identityScope: ${JSON.stringify(identity)}, input: '持久化证据追踪', requestId: 'restart-trace' });
       await traces.appendAgentEvidenceEvent(trace.id, { type: 'tool_execution_succeeded', stage: 'tool_execution', status: 'succeeded', summary: '只读工具执行完成。', evidence: [{ source: 'QMS', id: 'QI-001', title: '质量调查记录', version: 'v1' }] });
@@ -152,7 +162,7 @@ test('evidence trace events and integrity survive a process restart', () => {
     `, env);
     assert.equal(writer.status, 0, writer.stderr);
 
-    const reader = runModule(`
+    const reader = await runModule(`
       const traces = await import(${JSON.stringify(evidenceTraceUrl)});
       const trace = await traces.getAgentEvidenceTraceByRunId('run-persisted-trace', ['quality_manager'], ${JSON.stringify(identity)});
       process.stdout.write(JSON.stringify({ id: trace?.id, status: trace?.status, eventCount: trace?.eventCount, integrity: trace?.integrity }));

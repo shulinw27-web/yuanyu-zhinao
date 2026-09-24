@@ -8,8 +8,8 @@ if (!process.argv.includes('--live-synthetic')) {
   const out = resolve('output/anomaly-assistant', new Date().toISOString().replace(/[:.]/g, '-'));
   await mkdir(out, { recursive: true }); const checks = [];
   try {
-    Object.assign(process.env, { NODE_ENV: 'test', RUNTIME_STORE_DRIVER: 'memory', AGENT_MODEL_CONFIG_SOURCE: 'environment', AGENT_RUNTIME_MODE: 'ark', ANOMALY_MODEL_ALLOWED_MODES: 'ark' });
-    loadArkFileConfig();
+    Object.assign(process.env, { NODE_ENV: 'test', RUNTIME_STORE_DRIVER: 'memory', AGENT_MODEL_CONFIG_SOURCE: 'environment', AGENT_RUNTIME_MODE: process.env.AGENT_RUNTIME_MODE || 'ark', ANOMALY_MODEL_ALLOWED_MODES: process.env.ANOMALY_MODEL_ALLOWED_MODES || 'ark' });
+    if (process.env.AGENT_RUNTIME_MODE === 'ark') loadArkFileConfig();
     const { changeAnomalyReport, extractAnomalyReport, anomalyPolicy } = await import('../backend/src/services/anomaly-assistant-service.js');
     const context = { identityScope: { tenantId: 'synthetic-anomaly', subjectId: 'synthetic-reporter' }, roleId: 'executive' };
     const canRead = () => true; const active = anomalyPolicy();
@@ -27,7 +27,7 @@ if (!process.argv.includes('--live-synthetic')) {
         code: result.error || null, diagnostics: result.diagnostics, fields: result.report?.fields || null, understanding: result.report?.understanding || null, status: result.report?.status || null, execution: result.execution || 'none' };
       checks.push(row); console.log(JSON.stringify({ name: row.name, passed: row.passed, code: row.code, milliseconds: row.milliseconds }));
     }
-  } catch { checks.push({ name: 'configuration_or_transport', passed: false }); }
+  } catch (error) { checks.push({ name: 'configuration_or_transport', passed: false, code: error && /^[A-Z_][A-Z0-9_:.-]{0,80}$/.test(error.message) ? error.message : 'HARNESS_OR_TRANSPORT_FAILURE' }); }
   const report = { syntheticOnly: true, browserTest: false, imageOrAudioTest: false, downstreamWrite: false, checks, passed: checks.filter(c => c.passed).length, total: checks.length };
   await writeFile(resolve(out, 'assessment.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ passed: report.passed, total: report.total, out })); if (report.passed !== report.total) process.exitCode = 1;

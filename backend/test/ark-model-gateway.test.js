@@ -1,7 +1,7 @@
 import test from 'node:test';
 import { createSemanticOperationsTask } from '../src/services/semantic-operations-task-service.js';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { generateModelSummary, getLocalModelRuntime, getModelConnectionConfiguration, configureModelConnection, getModelGatewayObservability, resetModelGatewayObservability } from '../src/services/local-model-gateway.js';
 import { getModelGovernanceObservability, resetModelGovernanceForTest } from '../src/services/model-governance-service.js';
 import { ARK_DEFAULT_BASE_URL, getArkRequestOptions, isAllowedArkEndpoint } from '../src/services/ark-model-config.js';
@@ -488,8 +488,18 @@ test('Ark environment-managed launch overrides a saved local selection and refus
   });
 });
 
-test('Ark preflight fails honestly without credentials and does not start a server', () => {
-  const result = spawnSync(process.execPath, ['scripts/ark-runtime.mjs', '--check'], { env: { ...process.env, ARK_API_KEY: '', ARK_MODEL: '' }, encoding: 'utf8' });
+// 同步 spawnSync 在部分 Windows 环境（受控沙箱/文件锁）会以 EBUSY 失败；
+// 改用异步 spawn 等价封装，保持真实子进程检查与退出码/输出断言不变。
+test('Ark preflight fails honestly without credentials and does not start a server', async () => {
+  const result = await new Promise((resolvePromise) => {
+    const child = spawn(process.execPath, ['scripts/ark-runtime.mjs', '--check'], { env: { ...process.env, ARK_API_KEY: '', ARK_MODEL: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('close', (code, signal) => resolvePromise({ status: signal ? null : code, stdout, stderr }));
+    child.on('error', () => resolvePromise({ status: null, stdout, stderr }));
+  });
   assert.equal(result.status, 2);
   const output = JSON.parse(result.stderr.trim());
   assert.equal(output.status, 'blocked');

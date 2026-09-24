@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { resetRuntimeState } from '../src/repositories/runtime-state-repository.js';
 import { listDomainEvents } from '../src/domains/events/domain-event-outbox.js';
 import { listAnomalyReports, changeAnomalyReport, extractAnomalyReport, anomalyPolicy } from '../src/services/anomaly-assistant-service.js';
-import { parseAnomalyFields } from '../src/services/anomaly-report-contract.js';
+import { parseAnomalyFields, parseAnomalyUnderstanding } from '../src/services/anomaly-report-contract.js';
 import { validateModelSummaryEnvelope } from '../src/services/local-model-gateway.js';
 import { handleAnomalyRoutes } from '../src/routes/anomaly-routes.js';
 import { createAnomalyClient } from '../../packages/client-runtime/src/anomaly-client.js';
@@ -120,6 +120,17 @@ test('anomaly: schema envelope cannot claim execution and empty fields are legit
   assert.equal(validateModelSummaryEnvelope(JSON.stringify(envelope), { answerContract: 'anomaly_report' }).safe, true);
   assert.equal(validateModelSummaryEnvelope(JSON.stringify({ ...envelope, claimsExecution: true }), { answerContract: 'anomaly_report' }).safe, false);
   assert.deepEqual(parseAnomalyFields('{"fields":[]}', []), {});
+});
+test('anomaly: punctuation-normalized quotes recover the original source slice; fabricated quotes rejected', () => {
+  const sources = [{ id: 'src-1', kind: 'mock_group', text: source.text }];
+  const fields = parseAnomalyFields(JSON.stringify({ fields: [{ field: 'location', source: 1, quote: '二车间3号灌装机漏液,批次B240914' }] }), sources);
+  assert.equal(fields.location.value, '二车间3号灌装机漏液，批次B240914');
+  assert.equal(fields.location.sourceId, 'src-1');
+  assert.equal(fields.location.verification, 'unverified_report');
+  assert.equal(parseAnomalyFields(JSON.stringify({ fields: [{ field: 'location', source: 1, quote: '原文中不存在的内容' }] }), sources), null);
+  const parsed = parseAnomalyUnderstanding(JSON.stringify({ fields: [], insights: [{ kind: 'understanding', text: '提报人报告漏液并估计了影响数量。', evidence: [{ source: 1, quote: '估计二十多箱受影响,员工报告已停机。' }] }], questions: ['现场是否已隔离？'] }), sources, () => true);
+  assert.equal(parsed.understanding.insights[0].evidence[0].quote, '估计二十多箱受影响，员工报告已停机。');
+  assert.equal(parseAnomalyUnderstanding(JSON.stringify({ fields: [], insights: [{ kind: 'understanding', text: '编造证据。', evidence: [{ source: 1, quote: '原文里没有这句话' }] }], questions: [] }), sources, () => true), null);
 });
 
 test('anomaly: AI interpretation, mention preview, reporter reply and reconfirmation preserve version provenance', async () => {

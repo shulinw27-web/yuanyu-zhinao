@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { readWorkBuddyCloudConfiguration } from './workbuddy-cloud-config.js';
 
 const DEFAULT_ALLOWLIST = Object.freeze({
   mock: ['deterministic-demo'],
@@ -6,9 +7,11 @@ const DEFAULT_ALLOWLIST = Object.freeze({
   openai: ['gpt-5.6-sol'],
   deepseek: ['deepseek-v4-pro'],
   compatible: [],
-  ark: []
+  ark: [],
+  workbuddy: []
 });
-const DEFAULT_COST_PER_MILLION_INPUT_TOKENS_USD = Object.freeze({ mock: 0, local: 0, openai: 2, deepseek: 0.5, compatible: 0, ark: 0 });
+// WorkBuddy 云服务按积分计量（非 USD 输入单价），此处保持 0，不计入成本估算口径。
+const DEFAULT_COST_PER_MILLION_INPUT_TOKENS_USD = Object.freeze({ mock: 0, local: 0, openai: 2, deepseek: 0.5, compatible: 0, ark: 0, workbuddy: 0 });
 const activeLeases = new Map();
 const subjectUsage = new Map();
 const telemetry = { acceptedCalls: 0, rejectedSelection: 0, rejectedConcurrency: 0, rejectedQuota: 0, estimatedInputTokens: 0, estimatedReservedOutputTokens: 0, estimatedCostUsd: 0, lastRejectionAt: null, lastRejectionReason: null };
@@ -29,6 +32,12 @@ export function getModelGovernancePolicy(env = process.env) {
   const hasConfiguredAllowlist = Boolean(String(env.MODEL_ALLOWLIST_JSON || '').trim());
   const configuredAllowlist = parseObject(env.MODEL_ALLOWLIST_JSON, hasConfiguredAllowlist ? {} : DEFAULT_ALLOWLIST);
   const allowlist = Object.fromEntries(Object.entries(DEFAULT_ALLOWLIST).map(([provider, defaults]) => [provider, [...new Set((Array.isArray(configuredAllowlist[provider]) ? configuredAllowlist[provider] : (hasConfiguredAllowlist ? [] : defaults)).map(String).filter(Boolean))]]));
+  // WorkBuddy 云服务：环境完全未声明模型白名单时，以配置文件固定的精确模型版本作为准入；
+  // 一旦环境显式提供 MODEL_ALLOWLIST_JSON，就完全按环境执行（未声明 workbuddy 即视为拒绝）。
+  if (!hasConfiguredAllowlist) {
+    const workBuddyConfig = readWorkBuddyCloudConfiguration(env);
+    if (workBuddyConfig) allowlist.workbuddy = [...workBuddyConfig.allowedModels];
+  }
   const configuredCosts = parseObject(env.MODEL_INPUT_COST_PER_MILLION_USD_JSON, DEFAULT_COST_PER_MILLION_INPUT_TOKENS_USD);
   return {
     allowlist,

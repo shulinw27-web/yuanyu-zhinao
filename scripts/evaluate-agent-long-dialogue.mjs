@@ -1,7 +1,7 @@
 import { loadArkFileConfig } from './ark-file-config.mjs';
 process.env.NODE_ENV = 'test'; process.env.RUNTIME_STORE_DRIVER = 'memory';
-process.env.AGENT_RUNTIME_MODE = 'ark'; process.env.AGENT_MODEL_CONFIG_SOURCE = 'environment';
-process.env.ENTERPRISE_CONNECTORS_CONFIG_JSON = '{}'; loadArkFileConfig();
+process.env.AGENT_RUNTIME_MODE = process.env.AGENT_RUNTIME_MODE || 'ark'; process.env.AGENT_MODEL_CONFIG_SOURCE = 'environment';
+process.env.ENTERPRISE_CONNECTORS_CONFIG_JSON = '{}'; if (process.env.AGENT_RUNTIME_MODE === 'ark') loadArkFileConfig();
 const { runPrivateAgent } = await import('../backend/src/services/private-agent-service.js');
 const { getRole } = await import('../backend/src/services/authorization-service.js');
 const { createAgentConversation, recordAgentConversationExchange, getAgentConversationContext } = await import('../backend/src/services/agent-conversation-service.js');
@@ -34,7 +34,7 @@ let failures = 0;
 for (const [index, input] of prompts.entries()) {
   const context = await getAgentConversationContext(conversation.id, identity);
   const response = await runPrivateAgent({ text: input }, role, identity, { conversationContext: context });
-  const passed = response.agent.inferenceSource === 'ark' && !response.command && response.evidence.length === 0
+  const passed = response.agent.inferenceSource === (process.env.AGENT_RUNTIME_MODE || 'ark') && !response.command && response.evidence.length === 0
     && (index !== 19 || /青禾/.test(response.text) && /周五|星期五/.test(response.text) && /十点|10[:：]00|10点/.test(response.text) && /650/.test(response.text));
   if (!passed) failures += 1;
   console.log(JSON.stringify({ turn: index + 1, input, source: response.agent.inferenceSource, answer: response.text, passed }));
@@ -42,7 +42,7 @@ for (const [index, input] of prompts.entries()) {
 }
 const isolated = await createAgentConversation({ roleId: role.id, identityScope: identity });
 const response = await runPrivateAgent({ text: '这个新任务中，我的项目代号和截止时间是什么？如果我没有提供就直说，不要猜测。' }, role, identity, { conversationContext: await getAgentConversationContext(isolated.id, identity) });
-const isolatedPassed = response.agent.inferenceSource === 'ark' && !/青禾|蓝杉|650/.test(response.text) && !response.command;
+const isolatedPassed = response.agent.inferenceSource === (process.env.AGENT_RUNTIME_MODE || 'ark') && !/青禾|蓝杉|650/.test(response.text) && !response.command;
 console.log(JSON.stringify({ turn: 'new_window_isolation', answer: response.text, passed: isolatedPassed }));
 if (!isolatedPassed) failures += 1;
 console.log(JSON.stringify({ type: 'summary', actualModelTurns: 21, failures, note: 'Final corrected facts and no tool actions asserted; intermediate prose requires manual review.' }));

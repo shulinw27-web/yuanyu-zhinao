@@ -49,7 +49,7 @@ export class PostgresAgentLongTaskRepository {
     const result = await this.pool.query('SELECT version FROM platform_schema_migrations ORDER BY version');
     const latest = Number(result.rows.at(-1)?.version || 0);
     if (latest < 3) throw new Error('PostgreSQL agent runtime schema is not initialized. Run migrate:postgres first.');
-    if (latest > 4) throw new Error(`PostgreSQL agent runtime schema ${latest} is newer than supported version 4.`);
+    if (latest > 5) throw new Error(`PostgreSQL agent runtime schema ${latest} is newer than supported version 5.`);
     return { driver: 'postgres', persistence: 'durable_distributed', schemaVersion: 3 };
   }
 

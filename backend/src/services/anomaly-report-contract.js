@@ -11,6 +11,17 @@ export const ANOMALY_ANSWER_SCHEMA = {
 };
 
 // Extractive values only. A matching quote proves provenance, not truth or correct classification.
+// Some models normalize full-width punctuation inside otherwise verbatim quotes. Locate the
+// quote after punctuation-only normalization and return the ORIGINAL source slice, so stored
+// values stay verbatim extractive text; normalization is a strict 1:1 character mapping, so
+// fabricated quotes that are absent from the source still fail.
+const PUNCTUATION_EQUIVALENTS = { '，': ',', '。': '.', '、': ',', '：': ':', '；': ';', '？': '?', '！': '!', '（': '(', '）': ')', '“': '"', '”': '"', '‘': "'", '’': "'", '\u3000': ' ' };
+const normalizeQuotePunctuation = text => String(text ?? '').replace(/[，。、：；？！（）”“‘’\u3000]/g, ch => PUNCTUATION_EQUIVALENTS[ch]);
+function locateVerbatimQuote(sourceText, quote) {
+  if (sourceText.includes(quote)) return quote;
+  const index = normalizeQuotePunctuation(sourceText).indexOf(normalizeQuotePunctuation(quote));
+  return index >= 0 ? sourceText.slice(index, index + quote.length) : null;
+}
 export function parseAnomalyFields(text, sources) {
   let answer; try { answer = JSON.parse(text); } catch { return null; }
   if (!answer || Array.isArray(answer) || Object.keys(answer).length !== 1 || !Array.isArray(answer.fields) || answer.fields.length > 7) return null;
@@ -20,9 +31,10 @@ export function parseAnomalyFields(text, sources) {
       || !Object.hasOwn(ANOMALY_FIELDS, item.field) || seen.has(item.field) || !Number.isInteger(item.source)
       || typeof item.quote !== 'string' || !item.quote.trim() || item.quote.length > 300) return null;
     const source = sources[item.source - 1];
-    if (!source || !source.text.includes(item.quote)) return null;
+    const verbatim = source && locateVerbatimQuote(source.text, item.quote);
+    if (!verbatim) return null;
     seen.add(item.field);
-    fields[item.field] = { value: item.quote, sourceId: source.id, origin: source.kind, verification: 'unverified_report' };
+    fields[item.field] = { value: verbatim, sourceId: source.id, origin: source.kind, verification: 'unverified_report' };
   }
   return fields;
 }
@@ -41,9 +53,11 @@ export function parseAnomalyUnderstanding(text, sources, isSafe) {
       || !bounded(item.text, 600) || !Array.isArray(item.evidence) || !item.evidence.length || item.evidence.length > 3) return null;
     const evidence = [];
     for (const ref of item.evidence) {
-      if (!ref || Object.keys(ref).sort().join(',') !== 'quote,source' || !Number.isInteger(ref.source) || !bounded(ref.quote, 300)
-        || !sources[ref.source - 1]?.text.includes(ref.quote)) return null;
-      evidence.push({ sourceId: sources[ref.source - 1].id, quote: ref.quote });
+      if (!ref || Object.keys(ref).sort().join(',') !== 'quote,source' || !Number.isInteger(ref.source) || !bounded(ref.quote, 300)) return null;
+      const source = sources[ref.source - 1];
+      const verbatim = source && locateVerbatimQuote(source.text, ref.quote);
+      if (!verbatim) return null;
+      evidence.push({ sourceId: source.id, quote: verbatim });
     }
     insights.push({ kind: item.kind, text: item.text.trim(), evidence, verification: 'ai_interpretation_unverified' });
   }

@@ -6,9 +6,9 @@ if (!process.argv.includes('--live-synthetic')) {
   process.exit(0);
 }
 process.env.NODE_ENV = 'test'; process.env.RUNTIME_STORE_DRIVER = 'memory';
-process.env.AGENT_RUNTIME_MODE = 'ark'; process.env.AGENT_MODEL_CONFIG_SOURCE = 'environment';
-process.env.KNOWLEDGE_MODEL_ALLOWED_MODES = 'ark';
-try { loadArkFileConfig(); } catch { console.error('ARK_CONFIG_UNAVAILABLE: contents withheld'); process.exit(2); }
+process.env.AGENT_RUNTIME_MODE = process.env.AGENT_RUNTIME_MODE || 'ark'; process.env.AGENT_MODEL_CONFIG_SOURCE = 'environment';
+process.env.KNOWLEDGE_MODEL_ALLOWED_MODES = process.env.KNOWLEDGE_MODEL_ALLOWED_MODES || 'ark';
+if (process.env.AGENT_RUNTIME_MODE === 'ark') { try { loadArkFileConfig(); } catch { console.error('ARK_CONFIG_UNAVAILABLE: contents withheld'); process.exit(2); } }
 const { saveLibraryDocument } = await import('../backend/src/services/knowledge-library-service.js');
 const { createLocalKnowledgeProvider, buildKnowledgeBrief } = await import('../backend/src/services/knowledge-evidence-service.js');
 const { answerKnowledgeQuestion, knowledgeAnswerPolicy } = await import('../backend/src/services/knowledge-answer-service.js');

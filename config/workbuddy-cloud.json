@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "resourceId": "wbcs_Hnub2xAEvWK3rt6sf4psin",
+  "applicationId": "wbapp_KOdAc23kJ5rFaXw296T3v4",
+  "endpoint": "https://yuanyu-zhinao.app.workbuddy.host",
+  "publishableKey": "wbpk_KOdAc23kJ5rFaXw296T3v4_0LPlZ3WGB8AY5jiVJAemEQAdbgDj7D9l",
+  "model": "deepseek-v4-pro",
+  "allowedModels": ["deepseek-v4-pro", "glm-5.3"],
+  "note": "WorkBuddy 云服务免密钥 LLM 接入。publishableKey 为应用级公开凭据，不带业务权限；endpoint 随应用发布域绑定。模型为精确版本固定（auto 自动路由属动态版本，不符合治理精确固定要求，不入白名单）；如需更换请同步更新 model 与 allowedModels。"
+}

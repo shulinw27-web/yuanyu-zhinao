@@ -73,7 +73,7 @@ export async function planSemanticOperationsRequest({ request, authoritativeInte
     fallback: JSON.stringify(fallback),
     safetyIdentifier: `semantic-operations-${createHash('sha256').update(`${identityScope?.tenantId || 'demo'}:${identityScope?.subjectId || 'anonymous'}`).digest('hex').slice(0, 16)}`
   });
-  const advice = ['local', 'openai', 'deepseek', 'compatible', 'ark'].includes(generated.source) ? parseAdvice(generated.text) : null;
+  const advice = ['local', 'openai', 'deepseek', 'compatible', 'ark', 'workbuddy'].includes(generated.source) ? parseAdvice(generated.text) : null;
   const selected = advice || fallback;
   const { systems: permittedSystems, systemConflict } = resolveSemanticOperationsPlanSystems({ authoritativeIntent, requestedSystems: fallback.systems, discoveredSystems: authoritativeSystems, suggestedSystems: selected.systems || [] });
   return {

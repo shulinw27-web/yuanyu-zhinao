@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const docsRoot = path.join(root, 'docs');
-const ignored = new Set(['node_modules', 'dist', 'release', 'target', 'coverage', '.git', '.runtime', '.data', 'runtime-data', 'output', 'tmp', '.playwright-cli', '__pycache__']);
+const ignored = new Set(['node_modules', 'dist', 'release', 'target', 'coverage', '.git', '.runtime', '.data', 'runtime-data', 'output', 'tmp', '.playwright-cli', '__pycache__', '.workbuddy']);
 const issues = [];
 const markdownFiles = [];
 let checkedLinks = 0;

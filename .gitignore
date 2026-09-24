@@ -17,6 +17,10 @@ tmp/
 .playwright-cli/
 *.log
 
+# Tool-local state (workbuddy memory/logs, packaged app artifacts)
+.workbuddy/
+*.genie
+
 # Private configuration; keep committed templates
 .env
 .env.*

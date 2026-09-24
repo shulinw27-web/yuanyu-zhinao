@@ -16,7 +16,7 @@ if (!process.argv.includes('--live-synthetic')) {
   const root = resolve(import.meta.dirname, '..'); const children = []; const rows = []; const checks = [];
   const out = resolve(root, 'output/dual-agent-weknora', new Date().toISOString().replace(/[:.]/g, '-'));
   await mkdir(out, { recursive: true });
-  let connector; let fault = ''; let queries = 0; let privateDir; let privateFile; let env;
+  let connector; let fault = ''; let queries = 0; let privateDir; let privateFile; let env; let policy;
   const sanitize = value => JSON.parse(JSON.stringify(value, (key, item) => /token|sessionId|apiKey|secret/i.test(key) ? '[REDACTED]' : item));
   const persist = (name, data) => writeFile(join(out, `${name}.json`), JSON.stringify(sanitize(data), null, 2));
   const check = (id, passed, details = {}) => { checks.push({ id, passed: !!passed, ...details }); console.log(JSON.stringify({ check: id, passed: !!passed })); };
@@ -61,11 +61,11 @@ if (!process.argv.includes('--live-synthetic')) {
     Object.assign(env, { NODE_ENV: 'test', RUNTIME_STORE_DRIVER: 'memory', AGENT_RUNTIME_TASK_STORE_DRIVER: 'sqlite', RUNTIME_SQLITE_PATH: join(out, 'isolated-runtime.sqlite'), EVENT_BROKER_TYPE: 'projection',
       API_HOST: '127.0.0.1', PORT: String(apiPort), DEMO_ALLOW_ROLE_HEADER: 'false', OA_AUTH_MODE: 'mock', DEMO_OA_PASSWORD: 'synthetic-evaluation-only',
       IDENTITY_PROVIDERS_FILE: '', DINGTALK_ENABLED: 'false', CONNECTOR_MOCK_MODE: 'disabled',
-      AGENT_RUNTIME_MODE: 'ark', AGENT_MODEL_CONFIG_SOURCE: 'environment', KNOWLEDGE_MODEL_ALLOWED_MODES: 'ark', WEKNORA_CONFIG_FILE: privateFile,
+      AGENT_RUNTIME_MODE: process.env.AGENT_RUNTIME_MODE || 'ark', AGENT_MODEL_CONFIG_SOURCE: 'environment', KNOWLEDGE_MODEL_ALLOWED_MODES: process.env.KNOWLEDGE_MODEL_ALLOWED_MODES || 'ark', WEKNORA_CONFIG_FILE: privateFile,
       SEMANTICA_DEMO_BRIDGE_ENABLED: 'true', SEMANTIC_CONTEXT_ENDPOINT: `http://127.0.0.1:${semanticPort}`, SEMANTIC_CONTEXT_PORT: String(semanticPort), PYTHONIOENCODING: 'utf-8',
       ENTERPRISE_CONNECTORS_CONFIG_JSON: JSON.stringify(Object.fromEntries(['ERP','WMS','OMS','QMS','OA','MES'].map(s => [s.toLowerCase(), { endpoint: `http://127.0.0.1:${connectorPort}`, path: `/${s.toLowerCase()}` }]))),
       ONTOLOGY_RUNTIME_GRANTS_JSON: JSON.stringify({ 'demo-enterprise': { executive: { metadata: true, objects: Object.fromEntries(dictionary.tables.map(t => [t.name, { system: t.system, fields: t.fields.map(f => f.name), classifications: ['internal'] }])) } } }) });
-    loadArkFileConfig(env);
+    if (env.AGENT_RUNTIME_MODE === 'ark') loadArkFileConfig(env);
     const launch = (name, exe, args) => {
       const child = spawn(exe, args, { cwd: root, env, windowsHide: true, stdio: 'ignore' }); children.push(child);
       child.on('error', () => {}); return { child, name };
@@ -104,7 +104,7 @@ if (!process.argv.includes('--live-synthetic')) {
     const picked = selected.map(doc => [...allEvidence.values()].find(hit => hit.citation.documentId === doc.id && hit.excerpt.includes(doc.mustContain))).filter(Boolean);
     if (picked.length !== 4) throw new Error('REQUIRED_SOURCE_EVIDENCE_MISSING');
     const citations = picked.map(hit => hit.citation);
-    const providers = await call('model-policy', '/api/agent/knowledge-library/providers'); const policy = providers.answerPolicy;
+    const providers = await call('model-policy', '/api/agent/knowledge-library/providers'); policy = providers.answerPolicy;
     const consent = { provider: policy.provider, model: policy.model, confirmed: true };
     if (process.argv.includes('--retrieval-only')) {
       check('retrieval_only_no_business_queries', queries === 0);
@@ -260,8 +260,8 @@ if (!process.argv.includes('--live-synthetic')) {
     for (const child of children) if (child.exitCode === null) { const stopped = once(child, 'exit'); child.kill(); await Promise.race([stopped, delay(5000)]); }
     if (connector) { connector.closeAllConnections(); await new Promise(r => connector.close(r)); }
     if (privateFile) await unlink(privateFile); if (privateDir) await rmdir(privateDir);
-    const report = { syntheticOnly: true, proposalProbe: process.argv.includes('--proposal-probe'), complexProposal: process.argv.includes('--complex-proposal'), supplementProbe: process.argv.includes('--supplement-probe'), businessOnly: process.argv.includes('--business-only'), withAnalysis: process.argv.includes('--with-analysis'), approvalProbe: process.argv.includes('--approval-probe'), focusedProbes: process.argv.includes('--focused-probes'), retrievalOnly: process.argv.includes('--retrieval-only'), hybridRequested: process.argv.includes('--hybrid'), model: env?.ARK_MODEL, checks, passed: checks.filter(c => c.passed).length, total: checks.length,
-      scope: 'real_weknora_real_ark_real_semantica_isolated_http_mock_business_not_browser_not_production',
+    const report = { syntheticOnly: true, proposalProbe: process.argv.includes('--proposal-probe'), complexProposal: process.argv.includes('--complex-proposal'), supplementProbe: process.argv.includes('--supplement-probe'), businessOnly: process.argv.includes('--business-only'), withAnalysis: process.argv.includes('--with-analysis'), approvalProbe: process.argv.includes('--approval-probe'), focusedProbes: process.argv.includes('--focused-probes'), retrievalOnly: process.argv.includes('--retrieval-only'), hybridRequested: process.argv.includes('--hybrid'), modelProvider: env?.AGENT_RUNTIME_MODE, model: policy?.model || env?.ARK_MODEL, checks, passed: checks.filter(c => c.passed).length, total: checks.length,
+      scope: `real_weknora_real_${env?.AGENT_RUNTIME_MODE === 'workbuddy' ? 'workbuddy_cloud' : 'ark'}_real_semantica_isolated_http_mock_business_not_browser_not_production`,
       humanControlIsNotAutomaticAgentAcceptance: true, naturalLanguageNeedsHumanReview: true,
       rows: rows.map(({ data, ...row }) => ({ ...row, code: data.code })), privateTemporaryConfigRemoved: true, permanentConfigUnchanged: true };
     await persist('assessment', report);

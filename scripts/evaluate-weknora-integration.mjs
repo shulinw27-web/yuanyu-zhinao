@@ -7,7 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
 
 if (!process.argv.includes('--live-synthetic')) {
-  console.log('No requests made. Use --live-synthetic for approved local synthetic data; --hybrid requests embeddings; --answer sends selected synthetic excerpts to the configured Ark model.');
+  console.log('No requests made. Use --live-synthetic for approved local synthetic data; --hybrid requests embeddings; --answer sends selected synthetic excerpts to the configured model.');
 } else {
   const rows = []; let child; let answerRequests = 0;
   const answers = process.argv.includes('--answer');
@@ -27,7 +27,7 @@ if (!process.argv.includes('--live-synthetic')) {
     child = spawn(process.execPath, [answers ? 'scripts/ark-runtime.mjs' : 'backend/src/app.js'], { windowsHide: true, stdio: 'ignore',
       env: { ...process.env, WEKNORA_CONFIG_FILE: file, NODE_ENV: 'development', RUNTIME_STORE_DRIVER: 'memory',
         DEMO_ALLOW_ROLE_HEADER: 'false', OA_AUTH_MODE: 'mock', DEMO_OA_PASSWORD: 'synthetic-evaluation-only',
-        IDENTITY_PROVIDERS_FILE: '', API_HOST: '127.0.0.1', PORT: String(port), AGENT_RUNTIME_MODE: answers ? 'ark' : 'mock', KNOWLEDGE_MODEL_ALLOWED_MODES: answers ? 'ark' : '' } });
+        IDENTITY_PROVIDERS_FILE: '', API_HOST: '127.0.0.1', PORT: String(port), AGENT_RUNTIME_MODE: answers ? (process.env.AGENT_RUNTIME_MODE || 'ark') : 'mock', KNOWLEDGE_MODEL_ALLOWED_MODES: answers ? (process.env.KNOWLEDGE_MODEL_ALLOWED_MODES || 'ark') : '' } });
     const base = `http://127.0.0.1:${port}`;
     const deadline = Date.now() + 15000;
     while (true) {
@@ -74,7 +74,7 @@ if (!process.argv.includes('--live-synthetic')) {
             answerRequests++;
             const answer = await call(`${route}/answer`, session, { question, history: [...history], citations: evidence.map(item => item.citation),
               consent: { provider: policy.provider, model: policy.model, confirmed: true } });
-            const valid = answer.status === 200 && answer.data.modelCalled === true && answer.data.model?.provider === 'ark'
+            const valid = answer.status === 200 && answer.data.modelCalled === true && answer.data.model?.provider === (process.env.AGENT_RUNTIME_MODE || 'ark')
               && answer.data.execution === 'none' && answer.data.published === false;
             check(`${surface}:answer_round_${history.length + 1}`, valid, { http: answer.status, error: answer.data.code || null,
               elapsedMs: answer.elapsedMs, syntheticExplanation: answer.data.claims?.map(item => item.text), unknowns: answer.data.unknowns });

@@ -23,7 +23,6 @@ import { resolveQualityDraftTarget } from './agent-target-binding-service.js';
 import { retrieveAgentSystemEvidenceAsync } from './system-integration-service.js';
 import { createMemoryDecision, partitionUntrustedContent } from './prompt-security-service.js';
 import { recordAgentSecurityEvent } from './agent-security-audit-service.js';
-import { hasButtonPermission } from './access-control-service.js';
 import { buildDesktopCommandForInput, createDesktopExecutionDispatch, validateDesktopExecutionReceipt } from './desktop-tool-registry.js';
 import { recordApprovedWorkflowSignal } from './agent-learning-governance-service.js';
 import { assessAgentAnswer } from './agent-answer-governance-service.js';
@@ -47,82 +46,23 @@ import {
   normalizeEvidenceSnapshots,
   setAgentEvidenceTraceStatus
 } from './agent-evidence-trace-service.js';
+// 拆分出的两个关注点模块（见 docs/architecture/adr/ADR-005）。
+import { buildConversationFallback, getConversationUserContext, isConversationFollowUp } from './agent-conversation-intent.js';
+import {
+  AGENT_COMMAND_PERMISSION,
+  AGENT_PROMPT_PERMISSION,
+  canOwnExecutableAgentRun,
+  commandContextForRole,
+  lifecycle,
+  procurementActionIntentPattern,
+  workflowCommandBySkill,
+  workflowWriteIntentPattern
+} from './agent-command-authorization.js';
 
-// 仅出现“采购”是一个主题，不是授权创建采购申请的意图。
-const procurementActionIntentPattern = /(?:请|帮我|需要|我要|发起|创建|生成|准备).{0,18}(?:采购|购买|订购|下单|补货)|(?:采购|购买|订购|下单|补货).{0,18}(?:申请|需求|计划|协同|下单|发起|创建|生成)/i;
-const workflowWriteIntentPattern = /(?:创建|发起|提交|生成|登记|开立).{0,18}(?:草稿|调查|响应|复核|工单|流程|事项)|\b(?:create|launch|submit|open)\b.{0,24}\b(?:draft|investigation|response|review|workflow|case)\b/i;
+export { getConversationUserContext };
+
+// 仅在本服务内部用于“已识别动作”的二次判定，不参与对外契约。
 const discussesWriteOnly = (input) => /不要|不用|别(?:再|帮我)?|禁止|暂不|不需要|无需|怎么|如何|能否|是否|为什么|吗[？?]?|\b(?:do not|don't|never|how|whether)\b/i.test(input);
-const workflowCommandBySkill = {
-  production_risk_analysis: 'create_quality_investigation',
-  market_complaint_insight: 'create_market_response_draft',
-  internal_budget_review: 'create_budget_review_draft'
-};
-const AGENT_PROMPT_PERMISSION = 'agent.prompt.run';
-const AGENT_COMMAND_PERMISSION = 'agent.command.execute';
-
-const lifecycle = (state, label, { dataAccess = 'not_requested', businessWrite = 'not_requested' } = {}) => ({
-  state,
-  label,
-  dataAccess,
-  businessWrite
-});
-
-const conversationReferencePattern = /(?:^|[，。；：\s])(?:继续|接着|刚才|刚刚|上面|前面|之前|此前|上述|前述)|(?:这个|那个|该|它|其)(?:事项|问题|告警|任务|计划|流程|申请|风险)?(?:怎么|如何|为什么|能否|是否|继续|处理|分析|推进)?/;
-// Short requests such as “给我一个处理方案” are usually a follow-up to the
-// immediately preceding task even though they contain no pronoun. We only
-// inherit prior *user* goals from the same authorized conversation; previous
-// model prose is never treated as a business fact or an execution instruction.
-const conversationFollowUpPattern = /(?:^(?:那|然后|再|继续|麻烦|请|帮我|给我|针对|根据|就).{0,28}(?:方案|建议|计划|步骤|措施|结论|明细|优先级|怎么办|怎么做|怎么处理|如何处理|下一步|继续|展开|细化)|(?:给我|给出|提供|补充|展开|细化|制定).{0,12}(?:方案|建议|计划|步骤|措施|结论|明细|优先级)|(?:下一步|怎么办|怎么做|怎么处理|如何处理|继续|展开|细化)[。！!？?]*$)/;
-
-export const getConversationUserContext = (input, conversationContext) => {
-  if (!isExplanationFollowUp(input) && !conversationReferencePattern.test(input) && !conversationFollowUpPattern.test(String(input || '').trim())) return '';
-  const goal = String(conversationContext?.taskGoal || '').slice(0, 8000);
-  const targets = extractQueryBusinessIds(goal);
-  const notes = String(conversationContext?.userPrompt || '').split('\n').filter((line) => {
-    const ids = extractQueryBusinessIds(line);
-    return !targets.length || ids.every((id) => targets.includes(id));
-  }).join('\n').slice(-4000);
-  return [goal, notes].filter(Boolean).join('\n');
-};
-
-// A local model can be temporarily unavailable while it is starting or being
-// upgraded. The controlled fallback must still acknowledge the actual request;
-// a single generic sentence makes a healthy-looking Agent appear unresponsive.
-const buildConversationFallback = ({ input, priorContext, hasAttachments }) => {
-  const request = String(input || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 180) || '这项诉求';
-  const contextHint = priorContext ? '我会把它与当前会话中已明确的目标衔接起来，但不会把历史内容当作新的授权。' : '';
-  const attachmentHint = hasAttachments ? '已收到附件；如需据此读取企业数据或触发流程，我会先说明范围并等待确认。' : '';
-  if (/[？?]|(?:怎么|如何|为什么|能否|是否|是什么|哪些)/u.test(request)) {
-    return `我理解你在问“${request}”。我可以先基于通用业务方法帮你拆解问题、列出判断依据和下一步；如需结合企业数据分析，我会先说明要访问的系统与数据范围。${contextHint}${attachmentHint}`;
-  }
-  return `我已收到“${request}”。在不读取企业数据、不创建业务动作的前提下，我可以先帮你梳理目标、约束和可选方案；涉及查询、任务创建或审批时，会逐步展示权限范围并等待你的确认。${contextHint}${attachmentHint}`;
-};
-
-const canOwnExecutableAgentRun = (role) => Boolean(
-  role?.id
-  && hasButtonPermission(role.id, AGENT_PROMPT_PERMISSION)
-  && hasButtonPermission(role.id, AGENT_COMMAND_PERMISSION)
-);
-
-const commandContextForRole = ({ candidateRole, command, route, isProcurement, fallbackAuthorization }) => {
-  if (!canOwnExecutableAgentRun(candidateRole)) return null;
-  const candidateAuthorization = candidateRole.id === fallbackAuthorization?.user?.id
-    ? fallbackAuthorization
-    : authorizeZhiNaoTask({ role: candidateRole, route, isProcurement });
-  if (candidateAuthorization.decision !== 'ALLOW_BY_POLICY') return null;
-  const definition = getWorkflowDefinitions()[command.id];
-  if (definition && !definition.roles.includes(candidateRole.id)) return null;
-  const coreBindings = command.control?.coreObjectValidation?.bindings || getDemoCoreBindingsForAction(command.id);
-  const businessControl = evaluateBusinessAction({
-    role: candidateRole,
-    zhiNaoGrant: candidateAuthorization,
-    action: command.id,
-    coreBindings
-  });
-  return businessControl.allowed
-    ? { role: candidateRole, authorization: candidateAuthorization, businessControl }
-    : null;
-};
 
 export async function getPrivateAgentStatus(roleId, identityScope) {
   const model = getLocalModelRuntime();
@@ -293,7 +233,7 @@ export async function runPrivateAgent(request, role, identityScope, options = {}
   }
   const explanationFollowUp = isExplanationFollowUp(input);
   const conversationUserContext = getConversationUserContext(input, options.conversationContext);
-  const longTermFollowUp = conversationReferencePattern.test(input) || conversationFollowUpPattern.test(input);
+  const longTermFollowUp = isConversationFollowUp(input);
   const availableGoalMemories = !explanationFollowUp && !conversationUserContext && longTermFollowUp
     ? await getAgentLongTermMemory(role.id, identityScope)
     : [];
@@ -388,7 +328,7 @@ export async function runPrivateAgent(request, role, identityScope, options = {}
       safetyIdentifier: `role-${role.id}`,
       attachments: multimodal.attachments
     });
-    const modelFailed = !goalAcknowledgement && !['ark', 'local', 'openai', 'deepseek', 'compatible', 'mock'].includes(summary.source);
+    const modelFailed = !goalAcknowledgement && !['ark', 'local', 'openai', 'deepseek', 'compatible', 'workbuddy', 'mock'].includes(summary.source);
     appendAgentEvidenceEvent(traceId, {
       type: goalAcknowledgement ? 'goal_statement_acknowledged' : 'model_inference_completed', stage: goalAcknowledgement ? 'routing' : 'model_inference', status: modelFailed ? 'failed' : 'completed', actor: { type: 'service', id: goalAcknowledgement ? 'intent-policy' : 'model-gateway' },
       summary: goalAcknowledgement ? '已确认讨论型目标陈述；未调用模型、读取业务数据或固定长期记忆。' : modelFailed ? '模型未返回可用回答，已显示备用说明，可重试。' : '自然语言对话回复已生成。', details: { source: summary.source, responseFingerprint: createMemoryDecision(summary.text).assessment.fingerprint }

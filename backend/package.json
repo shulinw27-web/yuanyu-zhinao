@@ -13,6 +13,7 @@
   "dependencies": {
     "@healthcare-ai/api-contracts": "*",
     "@napi-rs/canvas": "0.1.100",
+    "@tencent-ai/workbuddy-cloud-sdk": "^0.1.2-dev.1b37f73.202609222026",
     "amqplib": "^2.0.1",
     "jose": "^6.2.10",
     "jszip": "^3.10.1",

@@ -1,10 +1,10 @@
 import { loadArkFileConfig } from './ark-file-config.mjs';
 process.env.NODE_ENV = 'test';
 process.env.RUNTIME_STORE_DRIVER = 'memory';
-process.env.AGENT_RUNTIME_MODE = 'ark';
+process.env.AGENT_RUNTIME_MODE = process.env.AGENT_RUNTIME_MODE || 'ark';
 process.env.AGENT_MODEL_CONFIG_SOURCE = 'environment';
 process.env.ENTERPRISE_CONNECTORS_CONFIG_JSON = '{}';
-loadArkFileConfig();
+if (process.env.AGENT_RUNTIME_MODE === 'ark') loadArkFileConfig();
 const { runPrivateAgent } = await import('../backend/src/services/private-agent-service.js');
 const { getRole } = await import('../backend/src/services/authorization-service.js');
 const { createAgentConversation, recordAgentConversationExchange, getAgentConversationContext } = await import('../backend/src/services/agent-conversation-service.js');
@@ -20,7 +20,7 @@ async function brainCases(cases) {
     const context = await getAgentConversationContext(conversation.id, identity);
     const start = Date.now();
     const response = await runPrivateAgent({ text }, role, identity, { conversationContext: context });
-    const row = { id, input: text, source: response.agent.inferenceSource, answer: response.text, state: response.lifecycle?.state, milliseconds: Date.now() - start, passed: response.agent.inferenceSource === 'ark' && !response.command && accepts(response.text) && (id !== 'B2' || response.evidence.length > 0), evidenceCount: response.evidence.length };
+    const row = { id, input: text, source: response.agent.inferenceSource, answer: response.text, state: response.lifecycle?.state, milliseconds: Date.now() - start, passed: response.agent.inferenceSource === (process.env.AGENT_RUNTIME_MODE || 'ark') && !response.command && accepts(response.text) && (id !== 'B2' || response.evidence.length > 0), evidenceCount: response.evidence.length };
     if (id === 'B3' && !results.find(result => result.id === 'B2')?.passed) row.passed = false;
     results.push(row); console.log(JSON.stringify(row));
     await recordAgentConversationExchange({ conversationId: conversation.id, identityScope: identity, roleId: role.id, userText: text, response });
@@ -49,7 +49,7 @@ for (const [id, text, accepts, fresh] of [
 ]) {
   const start = Date.now();
   const task = await createSemanticOperationsTask({ body: { text, ...(!fresh && parent ? { parentTaskId: parent.id } : {}) }, role, identityScope: identity });
-  const row = { id, input: text, source: task.routing?.source, intent: task.intent, answer: task.response || task.error, milliseconds: Date.now() - start, state: task.status, passed: task.routing?.source === 'ark' && Boolean(accepts(task)), proposal: task.proposal ? { objects: task.proposal.objectTypes.map(object => ({ id: object.id, key: object.key, fields: object.fields })), relations: task.proposal.relationshipTypes, critic: task.proposal.critic.status } : null };
+  const row = { id, input: text, source: task.routing?.source, intent: task.intent, answer: task.response || task.error, milliseconds: Date.now() - start, state: task.status, passed: task.routing?.source === (process.env.AGENT_RUNTIME_MODE || 'ark') && Boolean(accepts(task)), proposal: task.proposal ? { objects: task.proposal.objectTypes.map(object => ({ id: object.id, key: object.key, fields: object.fields })), relations: task.proposal.relationshipTypes, critic: task.proposal.critic.status } : null };
   results.push(row); console.log(JSON.stringify(row)); parent = task;
 }
 console.log(JSON.stringify({ type: 'summary', passed: results.filter(result => result.passed).length, total: results.length, syntheticOnly: true, executedWrites: 0, note: 'Assertions cover named acceptance properties, not a universal intelligence score. Inspect answers manually.' }));

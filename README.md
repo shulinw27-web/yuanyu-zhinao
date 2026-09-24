@@ -216,7 +216,7 @@ flowchart TB
 | 多端交互 | Vue 3、Vite；Electron 双桌面端；移动与钉钉 H5；保留 Tauri 工程入口 |
 | 平台 API | Node.js 原生 HTTP、模块化路由、领域服务与共享接口契约 |
 | Agent Runtime | JavaScript 工具注册与编排、任务/会话状态、证据链、确认与执行控制 |
-| 模型接入 | Mock、本地 OpenAI-compatible 接口、火山方舟专用网关 |
+| 模型接入 | Mock、本地 OpenAI-compatible 接口、火山方舟专用网关、WorkBuddy 云服务免密钥模型（流式聚合，精确版本固定） |
 | 语义服务 | Python、Semantica ContextGraph、定义校验与受控图投影 |
 | 状态与异步协作 | SQLite 单机运行；PostgreSQL 适配与迁移工具；Outbox、Worker 及消息适配边界 |
 | 身份与凭据 | OIDC/JWKS、钉钉身份适配、平台 IAM、独立 Key Center 与凭据引用 |
