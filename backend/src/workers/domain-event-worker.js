@@ -1,4 +1,4 @@
-import { acknowledgeDomainEvent, claimDomainEvents, failDomainEvent } from '../domains/events/domain-event-outbox.js';
+import { acknowledgeDomainEvent, claimDomainEvents, failDomainEvent } from '../infrastructure/domain-events/domain-event-outbox.js';
 import { listState, mutateState, readState } from '../repositories/runtime-state-repository.js';
 
 const NAMESPACE = 'domain_event_consumers';

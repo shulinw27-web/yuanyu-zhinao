@@ -1,7 +1,7 @@
 import { processDomainEventBatch } from '../../backend/src/workers/domain-event-worker.js';
 import { createConfiguredWorkerBroker } from './worker-config.js';
 import { createPostgresRuntimeStateRepository } from '../../backend/src/repositories/postgres-runtime-state-repository.js';
-import { PostgresDomainEventStore } from '../../backend/src/domains/events/postgres-domain-event-store.js';
+import { PostgresDomainEventStore } from '../../backend/src/infrastructure/domain-events/postgres-domain-event-store.js';
 
 const intervalMs = Math.max(500, Number(process.env.EVENT_WORKER_INTERVAL_MS) || 2000);
 const broker = createConfiguredWorkerBroker();

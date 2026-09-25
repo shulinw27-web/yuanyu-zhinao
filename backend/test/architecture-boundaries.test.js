@@ -110,7 +110,13 @@ test('核心实体投影表与运行时 JSON 存储保持字段一致，且不�
 
 // 扫描工作区包（packages/* 与 apps/*）之间的相对路径 import。
 // 只做静态文本扫描，不解析 TS/别名，因此对被测代码没有额外依赖。
-const WORKSPACE_IMPORT_EXTENSIONS = new Set(['.js', '.mjs', '.ts', '.vue']);
+//
+// 2026-09-25 扩大扫描面（诚实修正）：初版只收 .js/.mjs/.ts/.vue，漏掉了
+//   - .cjs（Electron 主进程、测试基础设施实际使用的扩展名）
+//   - .css（`@import '../...'` 同样会物理穿透包边界）
+// 实测这两类里存在 3 处真实穿透（语义运营端 2 处测试、1 处 examples 样例），
+// 即审计的「8 处」在扩大扫描面前并不完整。现全部纳入守护。
+const WORKSPACE_IMPORT_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.ts', '.vue', '.css']);
 const SKIPPED_DIRECTORIES = new Set(['node_modules', 'dist', 'release', 'build', '.git']);
 
 const collectWorkspaceSources = async (root) => {

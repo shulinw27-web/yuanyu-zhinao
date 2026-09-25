@@ -17,11 +17,22 @@ export const DOMAIN_EXPORT_CEILING = {
   platform: 13,
   procurement: 5,
   risk: 7,
-  simulation: 14
+  simulation: 14,
+  // 2026-09-25 新增领域：系统接入。未并入 governance 是因为该域导出已达冻结上限 92，
+  // 塞进去只能靠抬高基线来实现，反而削弱棘轮；架构测试本身给出的合法路径就是「拆分领域」。
+  // 初始上限刻意压到 4（边界声明 + 总览 + 详情 + 探测），不预留增长空间。
+  'system-onboarding': 4
 };
 
 // 领域目录中不作为业务边界、不要求 public-api 的基础设施目录。
-export const INFRASTRUCTURE_DOMAINS = new Set(['events']);
+//
+// 2026-09-26（模块化审计第 3 项完成）：原为 `new Set(['events'])`——`domains/events` 是
+// 事件出箱 / 存储这类**基础设施**，被放在 `domains/` 下造成概念错位：它被 services 反向依赖，
+// 于是「领域层依赖基础设施」看起来像分层反转，实际上只是它站错了目录。
+// 现已迁到 `backend/src/infrastructure/domain-events/`，因此这个集合为空——
+// 也就是说 `domains/` 下**每一个**目录都必须是带 public-api 的业务边界，不再有例外。
+// 保留该集合（而非删掉）是为了让「允许基础设施目录混进 domains/」这件事一旦复发就立刻可见。
+export const INFRASTRUCTURE_DOMAINS = new Set([]);
 
 // 服务之间已存在的跨领域直接依赖（未走对方 public-api）。
 // 现在冻结为基线；目标是逐条收敛为经 public-api 的调用。
@@ -30,7 +41,29 @@ export const INFRASTRUCTURE_DOMAINS = new Set(['events']);
 // 新增 6 条边 —— 两个抽取模块各自的新领域依赖，以及宿主服务到抽取模块的依赖。
 // 这些边是把「单一 1206 行服务文件内的隐式依赖」显化为「模块间的显式依赖」，
 // 不是新增领域耦合；后续拆解应继续复现同样的模式（先登记，再收敛）。
+//
+// 2026-09-25 变更（单一系统事实源：收敛 5 处重复的系统清单定义）：
+// 新增 3 条边，全部指向新的 system-registry-service.js（系统注册表）。
+// 这是一次**净收敛**：此前 5 个模块各自维护一份系统清单，成员与属性互不一致；
+// 现在改为共同依赖注册表这**一个**模块。系统注册表的存在意义就是被依赖——
+// 不应把它当成新的领域耦合，也不应通过「让消费者各自再抄一份」来消除这几条边。
+//   1) semantic-source-discovery-service.js -> system-registry-service.js（别名表与文本识别）
+//   2) world-model-template-service.js     -> system-registry-service.js（连接目标清单）
+//   3) system-registry-service.js          -> semantic-tenant-context.js（接入状态按租户隔离）
+// 第 3 条方向相反：注册表要读写租户级接入状态，必须依赖既有的租户上下文设施。
+//
+// 2026-09-25 变更（阶段 2：系统接入模块迁到元域智营端）：
+// 新增 2 条边，均来自新的 system-access-service.js（系统接入视图与探测）。
+// 它不复制任何系统定义（定义仍只有注册表一处），只是把注册表 + 连接器目录 + 合成数据字典
+// 组装成面向运营的视图，因此这两条边是**组装依赖**而非新的领域耦合：
+//   1) system-access-service.js -> mock-onboarding-source-service.js（连通性探测读取内置合成数据源）
+//   2) system-access-service.js -> semantic-tenant-context.js（探测结果按租户隔离存储）
+// 刻意**未**新增 system-access-service.js -> world-model-template-service.js：
+// 「元模型连接模板」与「映射草稿」仍属 governance 域，由路由层组合两个域的 public-api，
+// 而不是让本服务横向直连治理域内部文件。
 export const CROSS_DOMAIN_EDGE_BASELINE = new Set([
+  'system-access-service.js -> mock-onboarding-source-service.js',
+  'system-access-service.js -> semantic-tenant-context.js',
   'agent-command-authorization.js -> business-control-service.js',
   'agent-command-authorization.js -> core-meta-object-service.js',
   'agent-command-authorization.js -> zhinao-authorization-service.js',
@@ -205,6 +238,7 @@ export const CROSS_DOMAIN_EDGE_BASELINE = new Set([
   'semantic-read-plan-proposal-service.js -> read-plan-expression-codec.js',
   'semantic-read-plan-proposal-service.js -> read-plan-type-check.js',
   'semantic-source-discovery-service.js -> system-integration-service.js',
+  'semantic-source-discovery-service.js -> system-registry-service.js',
   'semantica-demo-bridge-service.js -> mock-scenario-service.js',
   'semantica-demo-bridge-service.js -> semantic-instance-transport.js',
   'semantica-demo-bridge-service.js -> semantic-model-fingerprint.js',
@@ -213,6 +247,7 @@ export const CROSS_DOMAIN_EDGE_BASELINE = new Set([
   'system-integration-service.js -> agent-query-service.js',
   'system-integration-service.js -> mock-scenario-service.js',
   'system-integration-service.js -> semantic-record-contract-service.js',
+  'system-registry-service.js -> semantic-tenant-context.js',
   'temporal-relation-service.js -> semantic-record-contract-service.js',
   'tenant-enrollment-contract.js -> iam-workspace-model.js',
   'tenant-execution-context.js -> iam-store.js',
@@ -225,7 +260,8 @@ export const CROSS_DOMAIN_EDGE_BASELINE = new Set([
   'weknora-knowledge-provider.js -> knowledge-evidence-service.js',
   'weknora-knowledge-provider.js -> prompt-security-service.js',
   'weknora-runtime-config.js -> knowledge-evidence-service.js',
-  'world-model-template-service.js -> semantic-tenant-context.js'
+  'world-model-template-service.js -> semantic-tenant-context.js',
+  'world-model-template-service.js -> system-registry-service.js'
 ]);
 
 // 服务文件按前缀归域的判定依据（与仓库既有命名一致）。
@@ -251,25 +287,19 @@ export const SERVICE_FILE_LINE_CEILING = {
 // 原因：穿透会绕过 npm workspace 解析，使被依赖方的 private:true 与 exports 失效，
 // 且依赖方的 package.json 与实际依赖不符；任何目录调整都会在构建期才暴露。
 //
-// 本基线冻结 2026-09-24 实测的存量违规（8 处，全部指向 frontend 的源码/样式），只允许下降。
-// 收敛方向：把被引用的组件与样式提升为 packages/agent-ui 并改为声明式依赖。
+// 本基线 2026-09-24 冻结存量违规 8 处；2026-09-25 全部清偿，基线归零（下行棘轮）。
+// 收敛方式：把被引用的组件与样式提升为 packages/agent-ui 并改为声明式依赖（ADR-010）。
 // 详见 docs/architecture/MODULARIZATION_AUDIT.md。
-export const CROSS_PACKAGE_IMPORT_BASELINE = new Set([
-  'apps/semantic-operations-console/src/App.vue -> ../../../frontend/src/features/knowledge/KnowledgeLibraryPanel.vue',
-  'apps/semantic-operations-console/src/App.vue -> ../../../frontend/src/features/meta-model/OAMetaModelStudio.vue',
-  'apps/semantic-operations-console/src/App.vue -> ../../../frontend/src/features/meta-model/ontology-scenario.js',
-  'apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/main.css',
-  'apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/meta-model.css',
-  'packages/agent-workbench/src/AgentWorkbench.vue -> ../../../frontend/src/features/agent/AnomalyAssistantPanel.vue',
-  'packages/agent-workbench/src/AgentWorkbench.vue -> ../../../frontend/src/features/knowledge/KnowledgeLibraryPanel.vue',
-  'packages/agent-workbench/src/AgentWorkbench.vue -> ../../../frontend/src/features/knowledge/MemoryReviewPanel.vue'
-]);
+export const CROSS_PACKAGE_IMPORT_BASELINE = new Set([]);
 
-// 允许跨顶层区引用的「内容投放」白名单：非源码资产，由消费方显式打包，
-// 且没有可用的包声明机制（packages exports 不适用于 JSON 内容包）。
+// 允许跨顶层区引用的「内容投放」白名单：非源码资产，由消费方显式读取，
+// 且没有可用的包声明机制（packages exports 不适用于纯数据/内容文件）。
 // 这不是边界违规，故不进入基线；新增此类需在此显式登记并说明理由。
 export const CROSS_PACKAGE_CONTENT_ALLOWLIST = new Set([
   // 官网显式打包的公开文档内容，见 docs/guides/PRODUCT_PORTAL.md：
   // 「公开文档的受控来源…由官网显式打包，不向浏览器暴露整个 docs 目录」。
-  'apps/product-portal/src/components/DocsCenter.vue -> ../../../../docs/public/product-docs.json'
+  'apps/product-portal/src/components/DocsCenter.vue -> ../../../../docs/public/product-docs.json',
+  // 端到端样例 schema：仓库级 examples/ 是跨包共用的只读样例数据，
+  // 非任何包的私有源码，且不参与构建产物。语义运营端用它与本体导入解析做契约对照。
+  'apps/semantic-operations-console/test/read-plan-import.test.cjs -> ../../../examples/semantic-schemas/cross-channel-fulfillment/read-plan.mjs'
 ]);

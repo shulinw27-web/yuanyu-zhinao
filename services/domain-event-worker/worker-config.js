@@ -1,4 +1,4 @@
-import { createDomainEventBroker } from '../../backend/src/domains/events/brokers/domain-event-broker.js';
+import { createDomainEventBroker } from '../../backend/src/infrastructure/domain-events/brokers/domain-event-broker.js';
 
 export function createConfiguredWorkerBroker(env = process.env, dependencies = {}) {
   const type = String(env.EVENT_BROKER_TYPE || 'projection').trim().toLowerCase();

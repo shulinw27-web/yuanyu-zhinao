@@ -16,15 +16,15 @@ import {
   mutateWithDomainEvent,
   publishDomainEvent,
   replayDeadLetterEvent
-} from '../src/domains/events/domain-event-outbox.js';
-import { createDomainEventBroker } from '../src/domains/events/brokers/domain-event-broker.js';
+} from '../src/infrastructure/domain-events/domain-event-outbox.js';
+import { createDomainEventBroker } from '../src/infrastructure/domain-events/brokers/domain-event-broker.js';
 import { getDomainEventConsumerCheckpoint, listDomainEventConsumerMetrics, processDomainEventBatch } from '../src/workers/domain-event-worker.js';
 import { dispatchAlert } from '../src/domains/alerting/alerting-service.js';
 import { publishOAMetaModel, simulateBuildOAMetaModel } from '../src/services/meta-model-service.js';
 import { createWorldModelDraft, publishWorldModelDraft, validateWorldModelDraft } from '../src/services/world-model-template-service.js';
 import { claimAgentExecution, createAgentRun, recordAgentExecution } from '../src/services/agent-runtime-store.js';
 import { getPlatformLiveness, getPlatformReadiness, getSystemCapabilities } from '../src/domains/platform/platform-health-service.js';
-import { getDomainEventContractCatalog, validateDomainEventContract } from '../src/domains/events/domain-event-contracts.js';
+import { getDomainEventContractCatalog, validateDomainEventContract } from '../src/infrastructure/domain-events/domain-event-contracts.js';
 import { createHmac } from 'node:crypto';
 import { createConfiguredWorkerBroker } from '../../services/domain-event-worker/worker-config.js';
 
