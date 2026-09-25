@@ -1,4 +1,5 @@
 import { connectedSystems } from '../data/seed.js';
+import { getRecordSurfaceSystemIds } from './system-registry-service.js';
 import { getMockConnectorCatalog, getMockSystemRecords } from './mock-scenario-service.js';
 import { createHash } from 'node:crypto';
 import { businessIdDomains, extractQueryBusinessIds, matchingQueryBusinessIds, MAX_QUERY_BUSINESS_IDS, validateAgentReadInput } from './agent-query-service.js';
@@ -33,13 +34,9 @@ const connectorTelemetry = new Map();
 const connectorRuntimeState = new Map();
 const lifecycleStates = new Set(['active', 'inactive', 'deleted', 'reversed', 'returned', 'recalled', 'cancelled', 'superseded', 'unknown']);
 
-const roleSystems = {
-  executive: ['lims', 'mes', 'erp', 'wms', 'qms', 'oms'],
-  quality_manager: ['lims', 'mes', 'erp', 'wms', 'qms'],
-  production_manager: ['lims', 'mes', 'erp', 'wms', 'qms'],
-  procurement_manager: ['lims', 'erp', 'wms', 'qms'],
-  marketing_manager: ['oms']
-};
+// 角色可见的系统 id 已收敛到系统注册表（data/system-catalog.js:ROLE_RECORD_SYSTEMS）。
+// 该策略与连接器目录的数据域策略刻意不同，理由见注册表内注释（ADR-009 待决项）。
+const visibleSystemIds = (roleId) => getRecordSurfaceSystemIds(roleId);
 
 const intentSystemRules = [
   { systems: ['lims', 'qms', 'mes'], pattern: /检验|质量|放行|异常|偏差|capa|批次|原料|报警|告警|预警/i },
@@ -49,7 +46,6 @@ const intentSystemRules = [
   { systems: ['mes', 'qms', 'lims'], pattern: /生产|设备|工艺|校准|维护/i }
 ];
 
-const visibleSystemIds = (roleId) => roleSystems[roleId] || [];
 const publicRecord = (record) => ({ ...record, payload: structuredClone(record.payload) });
 const isPromiseLike = (value) => value && typeof value.then === 'function';
 const resolveValues = (values, callback) => values.some(isPromiseLike) ? Promise.all(values).then(callback) : callback(values);

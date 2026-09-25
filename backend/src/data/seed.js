@@ -1,3 +1,5 @@
+import { getDemoConnectedSystems } from './system-catalog.js';
+
 export const roles = {
   executive: {
     id: 'executive', name: '管理层', team: '总控视图', color: '#6d5ce8',
@@ -27,14 +29,11 @@ export const modules = [
   { id: 'internal', name: '内务协同', description: '供应商、合同、预算与内部流程', status: '规划中', model: '内务子模型' }
 ];
 
-export const connectedSystems = [
-  { id: 'lims', name: 'LIMS 实验室管理系统', code: 'LIMS', domain: '质量与合规', mode: '事件订阅', status: '正常', health: 99.98, lastSync: '09:48:22', objects: ['TestResult', 'Specification', 'Sample'], events: 100, color: '#1677c8' },
-  { id: 'mes', name: 'MES 制造执行系统', code: 'MES', domain: '生产运营', mode: 'CDC + API', status: '正常', health: 99.96, lastSync: '09:48:19', objects: ['ProductionBatch', 'ProcessStep', 'Deviation'], events: 100, color: '#0c9a73' },
-  { id: 'erp', name: 'ERP 供应链与库存系统', code: 'ERP', domain: '供应链', mode: 'CDC', status: '延迟', health: 96.40, lastSync: '09:42:06', objects: ['Inventory', 'PurchaseOrder', 'Supplier'], events: 100, color: '#cf7a12', alert: '库存分配事件延迟 6 分钟' },
-  { id: 'wms', name: 'WMS 仓储管理系统', code: 'WMS', domain: '仓储物流', mode: 'CDC + API', status: '正常', health: 99.92, lastSync: '09:48:16', objects: ['InventoryLot', 'Warehouse', 'InboundReceipt', 'OutboundShipment'], events: 100, color: '#2c9bd4' },
-  { id: 'qms', name: 'QMS 质量管理系统', code: 'QMS', domain: '质量与合规', mode: '事件订阅', status: '正常', health: 99.94, lastSync: '09:48:11', objects: ['CAPA', 'ChangeControl', 'QualityEvent'], events: 100, color: '#2f7fd3' },
-  { id: 'oms', name: 'OMS 订单与门店运营系统', code: 'OMS', domain: '市场运营', mode: 'Webhook', status: '正常', health: 99.91, lastSync: '09:47:54', objects: ['Store', 'Order', 'Fulfillment', 'ReturnOrder'], events: 100, color: '#7b67c9' }
-];
+// 系统清单已收敛到唯一事实源 data/system-catalog.js。
+// 此处保留同名导出以维持既有消费方（platform/public-api、simulation/public-api、
+// frontend 的 /api/systems 消费）不变；返回的是 demo 接入样例视图，
+// 字段与顺序与历史完全一致。系统类型定义的修改请一律在 system-catalog.js 内进行。
+export const connectedSystems = getDemoConnectedSystems();
 
 export const platformStatus = {
   worldModel: '运行中', monitoring: true, monitoringMode: '7 × 24 事件监控', eventStream: '正常', totalEvents: 600,

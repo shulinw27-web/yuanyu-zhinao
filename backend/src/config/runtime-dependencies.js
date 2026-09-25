@@ -10,7 +10,7 @@ import { configureAgentOrchestrationRepository } from '../services/agent-orchest
 import { configureIAMRepository } from '../services/iam-store.js';
 import { configureTenantRuntimeControl } from '../services/tenant-runtime-control-service.js';
 import { configureRiskProcurementRepository } from '../services/risk-procurement-store.js';
-import { configureDomainEventRepository } from '../domains/events/domain-event-outbox.js';
+import { configureDomainEventRepository } from '../infrastructure/domain-events/domain-event-outbox.js';
 import { configureDomainEventConsumerRepository } from '../workers/domain-event-worker.js';
 import { configureAlertingRepository } from '../domains/alerting/alerting-store.js';
 import { configureSimulationRepository } from '../services/mock-scenario-service.js';

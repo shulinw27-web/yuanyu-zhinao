@@ -1,0 +1,468 @@
+<script setup>
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { WorldModelTemplateConfig } from '@healthcare-ai/agent-ui/system-access';
+
+// 系统接入视图（阶段 2）。
+//
+// 定位：元域智营端的「系统接入」取代原「企业接入」的主视角，材料准备降为同页次级标签。
+// 数据来源：/api/semantic-operations/systems*（后端 system-onboarding 域）。
+//
+// 权限分界（与后端一致，不在此处放宽）：
+//   canProbe          → meta_model.draft.save：连通性探测是接入侧写入
+//   canConfigureMapping → world.draft.create：映射草稿仍是受治理的世界模型机制
+//   canReadMapping    → page.world.view：读取连接模板/目标/草稿的页面门槛
+const props = defineProps({
+  client: { type: Object, required: true },
+  role: { type: String, default: '' },
+  buttonPermissionIds: { type: Array, default: () => [] },
+  canProbe: { type: Boolean, default: false },
+  canConfigureMapping: { type: Boolean, default: false },
+  canReadMapping: { type: Boolean, default: false }
+});
+const emit = defineEmits(['open-agent']);
+
+const filters = [
+  { id: 'all', label: '全部' },
+  { id: 'connected', label: '已连通' },
+  { id: 'pending', label: '待接入' },
+  { id: 'unregistered', label: '未登记' },
+  { id: 'probeable', label: '可探测' },
+  { id: 'unauthorized', label: '未授权' }
+];
+
+const overview = ref(null);
+const detail = ref(null);
+const templates = ref([]);
+const targets = ref([]);
+const drafts = ref([]);
+const selectedCode = ref('');
+const filter = ref('all');
+const faultMode = ref('none');
+const mappingMessage = ref('');
+const loading = ref(false);
+const detailLoading = ref(false);
+const probing = ref(false);
+const creatingDraft = ref(false);
+const error = ref('');
+const detailError = ref('');
+const probeError = ref('');
+const notice = ref('');
+let disposed = false;
+let overviewGeneration = 0;
+let detailGeneration = 0;
+
+const systems = computed(() => overview.value?.systems || []);
+const faults = computed(() => detail.value?.faults || []);
+const selected = computed(() => systems.value.find((item) => item.code === selectedCode.value) || null);
+const selectedTarget = computed(() => targets.value.find((item) => item.id === selected?.value?.id) || null);
+const selectedTemplate = computed(() => templates.value.find((item) => item.targets?.includes(selected.value?.id)) || null);
+const selectedDraft = computed(() => drafts.value.find((item) => item.targetId === selected.value?.id && item.status !== 'published')
+  || drafts.value.find((item) => item.targetId === selected.value?.id) || null);
+const canProbeSelected = computed(() => props.canProbe && selected.value?.probe?.supported === true && !probing.value);
+const probeDisabledReason = computed(() => {
+  if (!props.canProbe) return '当前营运身份没有 meta_model.draft.save 权限，接入侧写入（含连通性探测）被拒绝。';
+  if (!selected.value) return '请先选择一个系统。';
+  if (!selected.value.connector) return '该系统尚未登记受控连接器，不能探测。';
+  if (!selected.value.authorized) return '当前身份未获该系统所属数据域授权，探测被显式阻断。';
+  if (!selected.value.probe.supported) return '本次演示环境没有该系统的本地合成数据源，无法探测。';
+  return '';
+});
+const visibleSystems = computed(() => systems.value.filter((item) => {
+  if (filter.value === 'connected') return item.lifecycleState === 'connected';
+  if (filter.value === 'pending') return item.lifecycleState === 'registered' || item.lifecycleState === 'authorized';
+  if (filter.value === 'unregistered') return item.lifecycleState === 'draft';
+  if (filter.value === 'probeable') return item.probe.supported;
+  if (filter.value === 'unauthorized') return item.authorized === false;
+  return true;
+}));
+
+const displayTime = (value) => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString('zh-CN') : '—';
+const healthLabel = (item) => item?.health ? `${item.health.status} · ${item.health.health}%` : '—';
+const probeStatusLabel = (probe) => ({
+  verified: '连通性已验证（合成数据源）', schema_drift: '连通但字段目录漂移', failed: '连通性未通过',
+  no_local_dataset: '无本地合成数据源'
+})[probe?.status] || probe?.status || '尚未探测';
+const errorMessage = (err, fallback) => {
+  if (err?.status === 401 || err?.status === 403) return '当前身份没有执行此操作的权限，请重新登录或联系管理员。';
+  if (err?.status === 404) return '系统不存在或当前身份无权访问，请刷新接入总览。';
+  return err?.message || fallback;
+};
+
+async function loadMappingSurface() {
+  if (!props.canReadMapping) { templates.value = []; targets.value = []; drafts.value = []; return; }
+  try {
+    const [templateResult, targetResult, draftResult] = await Promise.all([
+      props.client.systemAccessMappingTemplates(), props.client.systemAccessConnectionTargets(), props.client.systemAccessMappingDrafts()
+    ]);
+    if (disposed) return;
+    templates.value = templateResult.templates || [];
+    targets.value = targetResult.targets || [];
+    drafts.value = draftResult.drafts || [];
+  } catch (err) {
+    if (!disposed) mappingMessage.value = errorMessage(err, '元模型连接模板加载失败。');
+  }
+}
+
+async function loadOverview() {
+  const generation = ++overviewGeneration;
+  loading.value = true;
+  error.value = '';
+  try {
+    const result = await props.client.systemAccess();
+    if (disposed || generation !== overviewGeneration) return;
+    overview.value = result;
+    const codes = (result.systems || []).map((item) => item.code);
+    if (!codes.includes(selectedCode.value)) selectedCode.value = codes[0] || '';
+    if (selectedCode.value) await selectSystem(selectedCode.value);
+  } catch (err) {
+    if (!disposed && generation === overviewGeneration) error.value = errorMessage(err, '系统接入总览加载失败，请重试。');
+  } finally {
+    if (!disposed && generation === overviewGeneration) loading.value = false;
+  }
+}
+
+async function selectSystem(code) {
+  if (!code) return;
+  const generation = ++detailGeneration;
+  selectedCode.value = code;
+  detailLoading.value = true;
+  detailError.value = '';
+  probeError.value = '';
+  notice.value = '';
+  try {
+    const result = await props.client.systemAccessDetail(code);
+    if (disposed || generation !== detailGeneration || selectedCode.value !== code) return;
+    detail.value = result;
+    faultMode.value = 'none';
+  } catch (err) {
+    if (!disposed && generation === detailGeneration) { detail.value = null; detailError.value = errorMessage(err, '系统详情加载失败。'); }
+  } finally {
+    if (!disposed && generation === detailGeneration) detailLoading.value = false;
+  }
+}
+
+async function probe() {
+  if (!canProbeSelected.value) return;
+  const code = selectedCode.value;
+  const generation = detailGeneration;
+  probing.value = true;
+  probeError.value = '';
+  notice.value = '';
+  try {
+    const result = await props.client.probeSystemConnection(code, { faultMode: faultMode.value });
+    if (disposed || generation !== detailGeneration) return;
+    notice.value = result.status === 'verified'
+      ? `已完成一次真实的分页只读读取：${result.requests} 次请求 / ${result.pageCount} 页 / ${result.recordCount} 条记录。这是内置合成数据源，不等于真实企业系统已接入。`
+      : `连通性探测未通过（${probeStatusLabel(result)}）。结果已记录，未被当作成功。`;
+    await selectSystem(code);
+  } catch (err) {
+    if (!disposed && generation === detailGeneration) probeError.value = errorMessage(err, '连通性探测请求失败。');
+  } finally {
+    if (!disposed) probing.value = false;
+  }
+}
+
+async function createMappingDraft() {
+  if (!props.canConfigureMapping || !selectedTemplate.value || creatingDraft.value) return;
+  const code = selectedCode.value;
+  const generation = detailGeneration;
+  creatingDraft.value = true;
+  mappingMessage.value = '';
+  try {
+    const result = await props.client.createSystemMappingDraft(code);
+    if (disposed || generation !== detailGeneration) return;
+    mappingMessage.value = result.reused
+      ? '该目标系统已存在同一模板的未发布草稿，已定位到既有草稿（未产生第二份）。'
+      : `已基于「${result.draft.templateName}」生成映射草稿；请继续执行字段与关系校验，尚未发布。`;
+    await loadMappingSurface();
+  } catch (err) {
+    if (!disposed) mappingMessage.value = errorMessage(err, '映射草稿创建失败。');
+  } finally {
+    if (!disposed) creatingDraft.value = false;
+  }
+}
+
+// 校验 / 发布沿用既有世界模型治理链路（world.draft.validate / world.draft.publish）。
+// 这里不做任何本地「假装通过」：状态与校验结论都由服务端返回后重新拉取草稿列表得到。
+async function governMappingDraft(action, draftId) {
+  const code = selectedCode.value;
+  const generation = detailGeneration;
+  creatingDraft.value = true;
+  mappingMessage.value = '';
+  try {
+    const result = action === 'validate'
+      ? await props.client.validateSystemMappingDraft(code, draftId)
+      : await props.client.publishSystemMappingDraft(code, draftId);
+    if (disposed || generation !== detailGeneration) return;
+    if (action === 'validate') {
+      mappingMessage.value = result.draft.validation.status === 'passed'
+        ? '映射校验通过，已具备提交发布的条件。'
+        : '映射校验未通过，请补齐主键、字段、关系或数据分级。';
+    } else {
+      mappingMessage.value = `世界模型版本 ${result.draft.version} 已发布（Demo 模拟，未写入真实系统）。`;
+    }
+    await loadMappingSurface();
+  } catch (err) {
+    if (!disposed) mappingMessage.value = errorMessage(err, '映射草稿治理操作失败。');
+  } finally {
+    if (!disposed) creatingDraft.value = false;
+  }
+}
+
+function sendToAgent() {
+  if (!detail.value) return;
+  const objectTypes = detail.value.fieldCatalog.objectTypes.slice(0, 6).join('、') || '该系统的字段目录';
+  emit('open-agent', `依据 ${detail.value.system.code}（${detail.value.system.name}）的 ${objectTypes} 建立语义模型。`);
+}
+
+onMounted(async () => { await Promise.all([loadOverview(), loadMappingSurface()]); });
+onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; detailGeneration += 1; });
+</script>
+
+<template>
+  <section class="system-access" aria-label="系统接入">
+    <div class="sa-heading">
+      <div><span class="eyebrow">SYSTEM ONBOARDING · TENANT SCOPED</span><h2>以系统为基石管理接入</h2><p>系统类型来自平台目录，接入生命周期与探测结果按当前租户隔离；每个系统都可单独查看连接配置、字段目录与映射。</p></div>
+      <span class="sa-badge">合成模拟环境</span>
+    </div>
+    <p class="sa-boundary">{{ overview?.boundary || '系统接入视图：接入状态按租户隔离；连通性探测读取内置合成模拟数据源，不连接任何真实企业系统。' }}</p>
+
+    <p v-if="error" class="sa-error" role="alert">{{ error }}<button type="button" :disabled="loading" @click="loadOverview">重试加载</button></p>
+    <p v-if="loading && !overview" class="sa-loading" role="status">正在加载系统接入总览…</p>
+
+    <template v-if="overview">
+      <div class="sa-summary">
+        <article><span>系统总数</span><b>{{ overview.summary.total }}</b></article>
+        <article><span>已连通</span><b>{{ overview.summary.connected }}</b></article>
+        <article><span>待接入</span><b>{{ overview.summary.pending }}</b></article>
+        <article><span>未登记</span><b>{{ overview.summary.notRegistered }}</b></article>
+        <article><span>本角色已授权</span><b>{{ overview.summary.authorized }}</b></article>
+        <article><span>可探测</span><b>{{ overview.summary.probeable }}</b></article>
+        <article><span>已配置映射</span><b>{{ overview.summary.mappedObjects }}</b></article>
+      </div>
+
+      <div class="sa-filters" role="tablist" aria-label="系统筛选">
+        <button v-for="item in filters" :key="item.id" type="button" role="tab" :aria-selected="filter === item.id" :class="{ active: filter === item.id }" @click="filter = item.id">{{ item.label }}</button>
+        <button type="button" class="sa-refresh" :disabled="loading" @click="loadOverview">刷新</button>
+      </div>
+
+      <div class="sa-layout">
+        <aside class="sa-list" aria-label="系统清单">
+          <p v-if="!visibleSystems.length" class="sa-empty">当前筛选下没有系统。</p>
+          <button v-for="item in visibleSystems" :key="item.code" type="button" class="sa-card" :class="{ selected: selectedCode === item.code }" :aria-pressed="selectedCode === item.code" @click="selectSystem(item.code)">
+            <div class="sa-card-top"><i :style="{ background: item.health?.color || (item.connector ? '#2f7fd3' : '#4a5b6b') }">{{ item.code }}</i><span :class="item.lifecycleState">{{ item.lifecycleLabel }}</span></div>
+            <strong>{{ item.name }}</strong>
+            <small>{{ item.domain }} · {{ item.authorized ? '已授权' : '未授权' }}</small>
+            <dl>
+              <div><dt>健康 / 同步</dt><dd>{{ healthLabel(item) }} · {{ item.health?.lastSync || '—' }}</dd></div>
+              <div><dt>对象目录</dt><dd>{{ item.objects.length }} 个连接器对象 / {{ item.worldObjectTypes.length }} 个建模对象</dd></div>
+              <div><dt>映射数</dt><dd>{{ item.mappingCount }}</dd></div>
+              <div><dt>责任人</dt><dd>{{ item.owner || '未指定' }}</dd></div>
+            </dl>
+            <em v-if="item.blockedReason">{{ item.blockedReason }}</em>
+          </button>
+        </aside>
+
+        <div class="sa-detail">
+          <p v-if="detailLoading" class="sa-loading" role="status">正在加载系统详情…</p>
+          <p v-if="detailError" class="sa-error" role="alert">{{ detailError }}<button type="button" @click="selectSystem(selectedCode)">重试</button></p>
+          <template v-if="detail && !detailLoading">
+            <div class="sa-detail-head">
+              <div><span class="eyebrow">{{ detail.system.connector?.displayName || detail.system.code }} · TENANT {{ detail.tenantId }}</span><h3>{{ detail.system.name }}</h3><p>{{ detail.system.domain }} · 生命周期：{{ detail.lifecycle.label }}<template v-if="detail.lifecycle.updatedAt"> · 更新于 {{ displayTime(detail.lifecycle.updatedAt) }}（{{ detail.lifecycle.updatedBy }}）</template></p></div>
+              <button type="button" class="sa-outline" @click="sendToAgent">交给 Agent 建模</button>
+            </div>
+            <p v-if="detail.system.blockedReason" class="sa-blocked">{{ detail.system.blockedReason }}</p>
+
+            <section class="sa-panel">
+              <div class="sa-panel-head"><div><span class="eyebrow">CONNECTION</span><h4>连接配置</h4></div><span class="sa-src" :class="{ demo: detail.connectionConfiguration.source === 'demo_seed' }">{{ detail.connectionConfiguration.source === 'demo_seed' ? '来源：demo 种子样例' : '无配置' }}</span></div>
+              <div class="sa-grid">
+                <div><span>配置责任人</span><b>{{ detail.connectionConfiguration.owner || '未指定' }}</b></div>
+                <div><span>同步频率</span><b>{{ detail.connectionConfiguration.syncInterval || '—' }}</b></div>
+                <div><span>启用状态</span><b>{{ detail.connectionConfiguration.enabled === null ? '—' : detail.connectionConfiguration.enabled ? '已启用' : '已停用' }}</b></div>
+                <div><span>传输方式</span><b>{{ detail.connectionConfiguration.transport || '—' }}</b></div>
+                <div><span>数据分级</span><b>{{ detail.connectionConfiguration.classification || '—' }}</b></div>
+                <div><span>写入模式</span><b>{{ detail.connectionConfiguration.writeMode || '—' }}</b></div>
+                <div class="wide"><span>凭据引用</span><b class="sa-credential">{{ detail.connectionConfiguration.credentialRef || '—' }}</b></div>
+                <div class="wide"><span>受控工具</span><b>{{ detail.connectionConfiguration.tools.length ? detail.connectionConfiguration.tools.join(' / ') : '—' }}</b></div>
+              </div>
+            </section>
+
+            <section class="sa-panel">
+              <div class="sa-panel-head"><div><span class="eyebrow">CONNECTIVITY PROBE</span><h4>连通性测试</h4></div><span class="sa-src">合成数据源 · 非生产</span></div>
+              <p class="sa-help">探测会对内置的合成模拟 HTTP 数据源做一次真实的分页只读读取，并校验响应契约与分页完整性。它不连接任何真实企业系统，也不代表接入验收通过。</p>
+              <div class="sa-probe-actions">
+                <label>响应模式<select v-model="faultMode" :disabled="!canProbeSelected"><option v-for="mode in faults" :key="mode" :value="mode">{{ mode }}</option></select></label>
+                <button type="button" class="sa-primary" :disabled="!canProbeSelected" @click="probe">{{ probing ? '正在探测…' : '开始连通性测试' }}</button>
+              </div>
+              <p v-if="probeDisabledReason" class="sa-help sa-blocked-inline">{{ probeDisabledReason }}</p>
+              <p v-if="probeError" class="sa-error" role="alert">{{ probeError }}</p>
+              <p v-if="notice" class="sa-notice" role="status">{{ notice }}</p>
+              <div v-if="detail.lastProbe" class="sa-probe-result" :class="detail.lastProbe.status">
+                <strong>{{ probeStatusLabel(detail.lastProbe) }}</strong>
+                <small>{{ displayTime(detail.lastProbe.checkedAt) }} · 场景 {{ detail.lastProbe.scenarioId }} · 模式 {{ detail.lastProbe.faultMode }}</small>
+                <dl>
+                  <div><dt>HTTP 请求 / 分页</dt><dd>{{ detail.lastProbe.requests }} / {{ detail.lastProbe.pageCount }}</dd></div>
+                  <div><dt>该系统记录数</dt><dd>{{ detail.lastProbe.recordCount }}<template v-if="detail.lastProbe.readableRecords">（整批 {{ detail.lastProbe.readableRecords }}）</template></dd></div>
+                  <div class="wide"><dt>读到的对象</dt><dd>{{ detail.lastProbe.objectTypes.length ? detail.lastProbe.objectTypes.join(' / ') : '—' }}</dd></div>
+                </dl>
+                <p v-if="detail.lastProbe.issue" class="sa-issue">{{ detail.lastProbe.issue.message }}<small>{{ detail.lastProbe.issue.code }}<template v-if="detail.lastProbe.issue.detail?.length"> · {{ detail.lastProbe.issue.detail.join('、') }}</template></small></p>
+              </div>
+              <p v-else class="sa-help">尚无探测记录。修改或切换响应模式不会改变系统状态。</p>
+            </section>
+
+            <section class="sa-panel">
+              <div class="sa-panel-head"><div><span class="eyebrow">FIELD CATALOG</span><h4>字段目录</h4></div><span class="sa-src">{{ detail.fieldCatalog.objectTypes.length }} 个对象 · 探测读取 {{ detail.fieldCatalog.readScenarioId || '无本地场景' }}</span></div>
+              <p v-if="!detail.fieldCatalog.available" class="sa-help">{{ detail.fieldCatalog.unavailableReason }}</p>
+              <template v-else>
+                <p class="sa-help">目录是本地合成场景声明的并集（{{ detail.fieldCatalog.scenarioIds.join(' / ') }}）；探测只读取其中 {{ detail.fieldCatalog.readScenarioId }}，因此目录里的对象不保证都在同一次探测中可见。</p>
+                <p v-if="detail.fieldCatalog.conflicts?.length" class="sa-issue">存在 {{ detail.fieldCatalog.conflicts.length }} 处跨场景字段声明冲突，未做自动合并。<small v-for="conflict in detail.fieldCatalog.conflicts" :key="conflict.objectType">{{ conflict.objectType }}：{{ conflict.scenarioIds.join(' / ') }}</small></p>
+                <div class="sa-scroll">
+                  <table>
+                    <caption>字段目录来自合成数据字典，主键与引用为字典显式声明；同一对象被多个场景声明时按名字归并</caption>
+                    <thead><tr><th scope="col">对象</th><th scope="col">粒度</th><th scope="col">主键</th><th scope="col">字段</th></tr></thead>
+                    <tbody>
+                      <tr v-for="table in detail.fieldCatalog.tables" :key="table.name">
+                        <td><b>{{ table.name }}</b><small>{{ table.label }}</small><small v-if="table.scenarioIds?.length > 1" class="sa-scenario">来源场景 {{ table.scenarioIds.join(' / ') }}</small></td>
+                        <td>{{ table.granularity }}</td>
+                        <td><code>{{ table.primaryKey }}</code></td>
+                        <td><span v-for="field in table.fields" :key="field.name" class="sa-field" :class="{ key: field.primaryKey }">{{ field.name }}<small>{{ field.type }}{{ field.required ? ' · 必填' : '' }}{{ field.reference ? ` → ${field.reference}` : '' }}</small></span></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </template>
+            </section>
+
+            <section class="sa-panel">
+              <div class="sa-panel-head"><div><span class="eyebrow">FIELD → META MODEL OBJECT</span><h4>字段 → 元模型对象映射</h4></div><span class="sa-src">{{ detail.mappings.length }} 条生效映射</span></div>
+              <p class="sa-help">已发布映射以版本形式进入世界模型，随后才允许被 Agent 用作受控上下文。生成草稿不会自动校验或发布。</p>
+              <div v-if="detail.mappings.length" class="sa-scroll">
+                <table>
+                  <thead><tr><th scope="col">源表 / Topic</th><th scope="col">元模型对象</th><th scope="col">业务事件</th><th scope="col">映射字段</th></tr></thead>
+                  <tbody><tr v-for="item in detail.mappings" :key="item.source"><td><code>{{ item.source }}</code></td><td><b>{{ item.object }}</b></td><td><span class="sa-chip">{{ item.event }}</span></td><td><small>{{ item.fields }}</small></td></tr></tbody>
+                </table>
+              </div>
+              <p v-else class="sa-help">该系统尚无生效映射。</p>
+              <div class="sa-mapping-actions">
+                <button type="button" class="sa-outline" :disabled="!canConfigureMapping || !selectedTemplate || creatingDraft" @click="createMappingDraft">{{ creatingDraft ? '正在生成…' : selectedDraft ? '查看 / 复用映射草稿' : '生成映射草稿' }}</button>
+                <span v-if="!canReadMapping" class="sa-help">当前身份没有模型页面读取权限，连接模板与草稿不在此展示。</span>
+                <span v-else-if="!selectedTemplate" class="sa-help">该系统尚无元模型连接模板，不能生成映射草稿。</span>
+                <span v-else-if="!canConfigureMapping" class="sa-help">生成映射草稿需要 world.draft.create 权限（本阶段沿用既有世界模型权限，合并属阶段 6）。</span>
+              </div>
+              <p v-if="mappingMessage" class="sa-notice" role="status">{{ mappingMessage }}</p>
+              <WorldModelTemplateConfig
+                v-if="canReadMapping && selectedTarget && selectedTemplate"
+                :templates="templates" :targets="[selectedTarget]" :drafts="drafts" :role="role"
+                :message="''" :button-permission-ids="buttonPermissionIds"
+                @create="createMappingDraft"
+                @validate="(id) => governMappingDraft('validate', id)"
+                @publish="(id) => governMappingDraft('publish', id)" />
+            </section>
+          </template>
+          <p v-else-if="!detailLoading && !detailError" class="sa-empty">从左侧选择一个系统查看连接配置、字段目录与映射。</p>
+        </div>
+      </div>
+    </template>
+  </section>
+</template>
+
+<style scoped>
+.system-access { color: #ddecf5; min-width: 0; font-size: 13px; line-height: 1.65; }
+.system-access :is(h2,h3,h4,p,dl,dd,dt) { margin: 0; }
+.system-access :is(input,select,button) { font: inherit; }
+.system-access button { cursor: pointer; border: 1px solid #36556b; border-radius: 7px; background: #102637; color: #cfdfeb; padding: 8px 12px; }
+.system-access button:hover:not(:disabled) { border-color: #67c8c8; background: #18394a; }
+.system-access button:disabled { cursor: not-allowed; opacity: .48; }
+.system-access select { display: block; width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid #345268; border-radius: 7px; background: #081927; color: #e2eef5; margin-top: 5px; }
+.system-access :is(button,select):focus-visible { outline: 2px solid #7cddda; outline-offset: 3px; }
+.system-access label { color: #b6ccda; min-width: 0; }
+.sa-heading,.sa-panel-head,.sa-detail-head,.sa-probe-actions,.sa-mapping-actions { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.sa-heading { margin-bottom: 14px; }
+.sa-heading h2 { font-size: 22px; font-weight: 600; margin: 5px 0; }
+.sa-heading p { color: #91abba; }
+.eyebrow { color: #83becb; font-size: 10px; letter-spacing: .12em; }
+.sa-badge,.sa-src { border: 1px solid #856c37; background: #332c1d; color: #e8c884; font-size: 11px; white-space: nowrap; padding: 4px 9px; border-radius: 20px; }
+.sa-src { border-color: #3a5b70; background: #12293a; color: #9dc4d8; }
+.sa-src.demo { border-color: #7a5c2f; background: #2c2519; color: #e0c288; }
+.sa-boundary,.sa-blocked,.sa-error,.sa-notice,.sa-blocked-inline { padding: 11px 14px; border-radius: 8px; margin-bottom: 14px; overflow-wrap: anywhere; }
+.sa-boundary { color: #d8c89f; border: 1px solid #665737; background: #2a261c; }
+.sa-blocked,.sa-blocked-inline { color: #e8c09d; border: 1px solid #7a5c2f; background: #30251a; }
+.sa-error { color: #f3c2ad; background: #392925; border: 1px solid #835948; }
+.sa-error button { margin-left: 10px; }
+.sa-notice { color: #b6dce3; background: #14303d; border: 1px solid #365e6c; }
+.sa-loading,.sa-empty { padding: 14px; color: #9dcbd8; }
+.sa-summary { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(120px,100%),1fr)); gap: 10px; margin-bottom: 14px; }
+.sa-summary article { border: 1px solid #2c4354; border-radius: 8px; background: #0c2131; padding: 11px 13px; min-width: 0; }
+.sa-summary span { display: block; color: #8ea9ba; font-size: 11px; }
+.sa-summary b { color: #e6f4fb; font-size: 18px; }
+.sa-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.sa-filters button { font-size: 11px; padding: 5px 10px; }
+.sa-filters button.active { border-color: #62a5b2; background: #143647; color: #eaf7fb; }
+.sa-refresh { margin-left: auto; }
+.sa-layout { display: grid; grid-template-columns: 320px minmax(0,1fr); gap: 16px; align-items: start; }
+.sa-list { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.sa-card { display: block; width: 100%; text-align: left; padding: 13px; border: 1px solid #2a4354; border-radius: 9px; background: #0a1b29; min-width: 0; overflow-wrap: anywhere; }
+.sa-card.selected { border-color: #62a5b2; background: #143647; }
+.sa-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sa-card-top i { font-style: normal; font-size: 10px; font-weight: 700; color: #fff; padding: 3px 7px; border-radius: 5px; }
+.sa-card-top span { font-size: 10px; color: #8fbec8; }
+.sa-card-top span.draft { color: #c9a978; }
+.sa-card-top span.connected { color: #85dbb9; }
+.sa-card-top span.suspended { color: #f0ad8e; }
+.sa-card strong { display: block; font-size: 13px; margin: 7px 0 3px; }
+.sa-card > small { color: #93b0c1; font-size: 11px; }
+.sa-card dl { margin: 9px 0 0; }
+.sa-card dl div { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; padding: 3px 0; border-top: 1px solid #1f3546; }
+.sa-card dt { color: #7f9eaf; }
+.sa-card dd { color: #cfe2ec; text-align: right; min-width: 0; overflow-wrap: anywhere; }
+.sa-card em { display: block; margin-top: 8px; font-style: normal; font-size: 10px; color: #c9a978; }
+.sa-detail { min-width: 0; }
+.sa-detail-head { margin-bottom: 12px; align-items: flex-start; }
+.sa-detail-head div { min-width: 0; }
+.sa-detail-head h3 { font-size: 19px; margin: 5px 0 3px; overflow-wrap: anywhere; }
+.sa-detail-head p { color: #91abba; font-size: 12px; }
+.sa-outline { flex: 0 0 auto; }
+.sa-primary { background: #286b78; border-color: #468f99; color: #f0ffff; }
+.sa-panel { border: 1px solid #2c4759; border-radius: 10px; background: #0b1d2b; padding: 16px; margin-bottom: 14px; min-width: 0; }
+.sa-panel-head { align-items: center; margin-bottom: 10px; }
+.sa-panel-head h4 { font-size: 15px; margin-top: 3px; }
+.sa-help { color: #a3becc; font-size: 12px; margin-bottom: 10px; overflow-wrap: anywhere; }
+.sa-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(180px,100%),1fr)); gap: 10px; }
+.sa-grid div { border: 1px solid #243c4d; border-radius: 7px; background: #0d2534; padding: 10px 12px; min-width: 0; }
+.sa-grid div.wide { grid-column: 1 / -1; }
+.sa-grid span { display: block; color: #8ea9ba; font-size: 10px; }
+.sa-grid b { display: block; font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
+.sa-credential { color: #7fd2e8 !important; font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-size: 11px !important; }
+.sa-probe-actions { justify-content: flex-start; align-items: flex-end; }
+.sa-probe-actions label { flex: 0 1 200px; }
+.sa-probe-result { border: 1px solid #396c65; background: #122f32; border-radius: 8px; padding: 13px; overflow-wrap: anywhere; }
+.sa-probe-result.failed { border-color: #805e49; background: #302721; }
+.sa-probe-result.schema_drift { border-color: #8a7333; background: #322c18; }
+.sa-probe-result > strong { display: block; font-size: 13px; color: #99d8c3; }
+.sa-probe-result.failed > strong { color: #e8c09d; }
+.sa-probe-result.schema_drift > strong { color: #e6d08d; }
+.sa-probe-result > small { display: block; color: #a0b8c5; font-size: 10px; margin-top: 5px; }
+.sa-probe-result dl { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(170px,100%),1fr)); gap: 10px; margin: 12px 0 0; }
+.sa-probe-result dl div.wide { grid-column: 1 / -1; }
+.sa-probe-result dt { color: #93aebc; font-size: 10px; }
+.sa-probe-result dd { color: #d1e3eb; font-size: 12px; overflow-wrap: anywhere; }
+.sa-issue { margin-top: 12px; color: #f2bda4; font-size: 12px; }
+.sa-issue small { display: block; color: #caa18d; font-size: 10px; margin-top: 3px; }
+.sa-scroll { overflow-x: auto; max-width: 100%; border: 1px solid #355468; border-radius: 7px; }
+.sa-scroll:focus-visible { outline: 2px solid #7cddda; outline-offset: 3px; }
+.sa-scroll table { border-collapse: collapse; min-width: 100%; text-align: left; font-size: 11px; }
+.sa-scroll caption { text-align: left; padding: 9px 12px; color: #91bbcb; background: #102b3d; }
+.sa-scroll th { background: #153447; color: #d0e4ef; font-weight: 500; }
+.sa-scroll :is(th,td) { padding: 9px 12px; border-bottom: 1px solid #294658; min-width: 110px; max-width: 340px; overflow-wrap: anywhere; vertical-align: top; }
+.sa-scroll td small { display: block; color: #93b0c1; font-size: 10px; margin-top: 3px; }
+.sa-scenario { color: #7fb6a6 !important; }
+.sa-scroll code { color: #7fd2e8; font-size: 10px; }
+.sa-chip { display: inline-block; padding: 3px 6px; border-radius: 4px; background: #2b2a4a; color: #c6b8f2; font-size: 10px; }
+.sa-field { display: inline-block; margin: 0 6px 6px 0; padding: 3px 7px; border-radius: 5px; border: 1px solid #2f5266; background: #0f2a3b; color: #cfe3ec; font-size: 10px; }
+.sa-field.key { border-color: #4e8b7c; background: #123128; }
+.sa-field small { color: #8fa9b8; margin-left: 4px; }
+.sa-mapping-actions { justify-content: flex-start; align-items: center; margin-top: 12px; }
+.sa-mapping-actions .sa-help { margin: 0; }
+@media (max-width: 1180px) { .sa-layout { grid-template-columns: minmax(0,1fr); } .sa-list { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(260px,100%),1fr)); } }
+@media (max-width: 600px) { .sa-heading h2 { font-size: 18px; } .sa-panel { padding: 13px; } .sa-probe-actions { align-items: stretch; flex-direction: column; } .sa-probe-actions label { flex: 1 1 auto; } .sa-summary article { padding: 9px 11px; } }
+</style>

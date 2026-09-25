@@ -1,7 +1,7 @@
-import { connectedSystems } from '../data/seed.js';
 import { mutateState, readState } from '../repositories/runtime-state-repository.js';
-import { mutateWithDomainEvent } from '../domains/events/domain-event-outbox.js';
+import { mutateWithDomainEvent } from '../infrastructure/domain-events/domain-event-outbox.js';
 import { semanticTenantStateKey, currentSemanticTenant } from './semantic-tenant-context.js';
+import { getConnectionTargets } from './system-registry-service.js';
 
 const templates = [
   {
@@ -95,11 +95,9 @@ const templates = [
   }
 ];
 
-const connectionTargets = [
-  ...connectedSystems.map((item) => ({ id: item.id, name: item.name, code: item.code, status: '已接入', domain: item.domain })),
-  { id: 'srm', name: 'SRM 供应商管理系统', code: 'SRM', status: '待接入', domain: '供应链' },
-  { id: 'oa', name: 'OA / BPM 审批系统', code: 'OA', status: '待接入', domain: '内务协同' }
-];
+// 连接目标清单已收敛到系统注册表；此处的 6 个已接入 + SRM/OA 待接入由目录派生，
+// 不再自行维护第二份系统清单。
+export const getWorldModelConnectionTargets = () => getConnectionTargets();
 
 const WORLD_NAMESPACE = 'world_model_runtime';
 const WORLD_KEY = 'drafts';
@@ -122,8 +120,6 @@ const buildDraft = (template, target, actor) => ({
 
 export const getWorldModelTemplates = () => templates.map((template) => ({ ...template, mappingCount: template.mappings.length, relationshipCount: template.relationships.length, ruleCount: template.rules.length }));
 export const getWorldModelTemplate = (id) => templateById(id) || null;
-export const getWorldModelConnectionTargets = () => connectionTargets;
-
 export const getWorldModelDrafts = (roleId) => {
   const visibleCategories = {
     quality_manager: ['质量与合规', '生产运营', '供应链'],
@@ -136,7 +132,7 @@ export const getWorldModelDrafts = (roleId) => {
 export const createWorldModelDraft = ({ templateId, targetId }, role) => {
   if (!canConfigure(role)) return { error: '当前角色无权创建世界模型配置草稿。' };
   const template = templateById(templateId);
-  const target = connectionTargets.find((item) => item.id === targetId);
+  const target = getConnectionTargets().find((item) => item.id === targetId);
   if (!template || !target) return { error: '模板或目标系统不存在。' };
   return mutateState(WORLD_NAMESPACE, semanticTenantStateKey(WORLD_KEY), initialWorldDrafts, (drafts) => {
     const existing = drafts.find((item) => item.templateId === templateId && item.targetId === targetId && item.status !== 'published');

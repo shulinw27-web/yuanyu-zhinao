@@ -2,7 +2,7 @@
   "name": "@healthcare-ai/semantic-operations-console",
   "private": true,
   "version": "0.2.0",
-  "description": "元域智脑独立语义运营 Agent Web 与 Electron 桌面工作台",
+  "description": "元域智脑独立元域智营 Agent Web 与 Electron 桌面工作台",
   "author": "Yuanyuan Health AI Platform Team",
   "type": "module",
   "main": "electron/main.cjs",
@@ -19,6 +19,7 @@
     "test": "node --test test/*.test.cjs"
   },
   "dependencies": {
+    "@healthcare-ai/agent-ui": "*",
     "@healthcare-ai/api-contracts": "*",
     "@healthcare-ai/semantic-operations-sdk": "*",
     "vue": "^3.5.13"
@@ -32,7 +33,7 @@
   },
   "build": {
     "appId": "com.yuanyuanhealth.semanticoperations",
-    "productName": "元域语义运营 Agent",
+    "productName": "元域智营 Agent",
     "asar": true,
     "directories": {
       "output": "release/v0.2.0"
@@ -61,7 +62,7 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "元域语义运营 Agent"
+      "shortcutName": "元域智营 Agent"
     },
     "portable": {
       "artifactName": "Yuanyu-Semantic-Ops-Portable-${version}-${arch}.${ext}"

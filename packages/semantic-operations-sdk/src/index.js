@@ -45,7 +45,7 @@ export function createSemanticOperationsClient({ baseUrl, platform = 'semantic-w
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const error = new Error(payload.message || payload.error || '语义运营请求失败。');
+      const error = new Error(payload.message || payload.error || '元域智营请求失败。');
       error.status = response.status;
       error.code = payload.code || null;
       error.payload = payload;
@@ -106,6 +106,27 @@ export function createSemanticOperationsClient({ baseUrl, platform = 'semantic-w
     saveOnboardingAlignment: (id, payload) => post(`/semantic-operations/onboarding/${encodeURIComponent(id)}/alignment`, payload),
     onboardingCalculations: id => request(`/semantic-operations/onboarding/${encodeURIComponent(id)}/calculations`),
     previewOnboardingCalculation: (id, payload) => post(`/semantic-operations/onboarding/${encodeURIComponent(id)}/calculations`, payload),
+    // ── 系统接入（阶段 2：从管理 Web config 页迁出的入口） ─────────────────────
+    // 「元模型连接模板 / 映射草稿」仍是既有的受治理世界模型机制，本阶段只换入口与命名空间；
+    // 旧端点 /api/world-model/* 保留一个版本周期，本端不再直接调用。
+    systemAccess: () => request('/semantic-operations/systems'),
+    systemAccessDetail: (code) => request(`/semantic-operations/systems/${encodeURIComponent(code)}`),
+    systemAccessMappingTemplates: () => request('/semantic-operations/systems/mapping-templates'),
+    systemAccessConnectionTargets: () => request('/semantic-operations/systems/connection-targets'),
+    systemAccessMappingDrafts: () => request('/semantic-operations/systems/mapping-drafts'),
+    probeSystemConnection: (code, payload) => post(`/semantic-operations/systems/${encodeURIComponent(code)}/probe`, payload),
+    createSystemMappingDraft: (code) => post(`/semantic-operations/systems/${encodeURIComponent(code)}/mapping-drafts`),
+    validateSystemMappingDraft: (code, draftId) => post(`/semantic-operations/systems/${encodeURIComponent(code)}/mapping-drafts/${encodeURIComponent(draftId)}/validate`),
+    publishSystemMappingDraft: (code, draftId) => post(`/semantic-operations/systems/${encodeURIComponent(code)}/mapping-drafts/${encodeURIComponent(draftId)}/publish`),
+    // ── 建模来源范围（阶段 3：范围必须是显式选择） ─────────────────────────────
+    // scope=all_registered 是**显式**请求「全部已登记系统」，用于系统多选面板列清单；
+    // 不是「没给范围就默认全量」——该回落行为已删除（selectionSource 会如实标注范围来源）。
+    semanticSources: ({ query = '', scope = '' } = {}) => {
+      const params = new URLSearchParams();
+      if (query) params.set('query', query);
+      if (scope) params.set('scope', scope);
+      return request(`/semantic-operations/sources${params.size ? `?${params}` : ''}`);
+    },
     roles: () => request('/roles'),
     authoringProfile: () => request('/meta-models/oa-governance/authoring-profile'),
     draft: () => request('/meta-models/oa-governance/draft'),

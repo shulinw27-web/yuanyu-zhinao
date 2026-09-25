@@ -29,10 +29,42 @@ export function observeMockOnboardingPortsForTest(observer) {
   return () => { testPortObserver = previous; };
 }
 
+async function loadScenarioSource(scenarioId) {
+  if (scenarioId === 'fulfillment') return import('../../../examples/knowledge/dual-agent-mock/input-materials.mjs');
+  if (scenarioId === 'quality_incident') return import('../../../examples/semantic-schemas/supply-chain-incident/scenario.mjs');
+  throw failure('CONTRACT_INVALID');
+}
+
+/**
+ * 只读场景字典：返回合成数据字典的表/字段清单与涉及系统，**不启动监听、不发任何请求**。
+ * 系统接入视图需要「字段目录」用于展示与探测校验，而字段目录的本质是字典而非一次读取，
+ * 因此单独开这个入口，避免为了拿字典去跑一遍完整分页读取。
+ */
+export async function readMockScenarioDictionary(scenarioId) {
+  const source = await loadScenarioSource(scenarioId);
+  return {
+    tables: source.dictionary.tables.map((table) => ({ ...table, fields: table.fields.map((field) => ({ ...field })) })),
+    systems: [...new Set(source.dictionary.tables.map((table) => table.system))].sort()
+  };
+}
+
+/**
+ * 场景里**实际存在数据的**系统清单。
+ *
+ * 与 mock-onboarding-catalog.js 的 scenario.systems 不同：后者是「材料准备阶段声明的场景范围」，
+ * 用于圈定人工准备的证据边界，**不保证每条记录都齐备**；前者由真实记录与字典推导。
+ * 连通性探测必须以「有没有数据可读」为判据，否则会把有数据的系统误报为不可探测。
+ */
+export async function readMockScenarioSystems(scenarioId) {
+  const source = await loadScenarioSource(scenarioId);
+  return {
+    recordSystems: [...new Set((source.samples?.records || []).map((row) => row.system))].sort(),
+    dictionarySystems: [...new Set(source.dictionary.tables.map((table) => table.system))].sort()
+  };
+}
+
 async function fixture(scenarioId, tenantId) {
-  const source = scenarioId === 'fulfillment'
-    ? await import('../../../examples/knowledge/dual-agent-mock/input-materials.mjs')
-    : await import('../../../examples/semantic-schemas/supply-chain-incident/scenario.mjs');
+  const source = await loadScenarioSource(scenarioId);
   const seen = new Set();
   const records = structuredClone(source.samples.records).filter(row => {
     const key = JSON.stringify(row);

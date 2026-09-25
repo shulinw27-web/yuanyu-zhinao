@@ -59,6 +59,11 @@ import {
   validateOAMetaModelDraft,
   validateWorldModelDraft
 } from '../domains/governance/public-api.js';
+import {
+  getSystemAccessOverview,
+  getSystemAccessDetail,
+  probeSystemConnection
+} from '../domains/system-onboarding/public-api.js';
 
 export function handleGovernanceRoutes(context) {
   // Unrelated public routes may have no authenticated identity.
@@ -88,6 +93,74 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
         : action === 'materials' ? await saveMockOnboardingMaterial({ ...options, id: decodeURIComponent(encodedId), body }) : await createMockOnboardingProject({ ...options, body });
     }
     send(res, result.error ? result.status || 400 : req.method === 'POST' && !action ? 201 : 200, result.error ? { message: result.error, code: result.code } : result);
+    return true;
+  }
+  // ── 系统接入（阶段 2：从管理 Web config 页迁出，命名空间统一到元域智营端） ──────
+  // 权限分界（有意的，不是遗漏）：
+  //   * 系统接入自身的写入（连通性探测）走 meta_model.draft.save —— 与建模侧同一把闸门。
+  //   * 「元模型连接模板 / 映射草稿」仍然走 world.draft.*：它们是既有的受治理世界模型
+  //     机制，本阶段只迁移入口，权限合并属阶段 6（否则会在阶段 2 提前改变权限矩阵）。
+  // 旧端点 /api/world-model/* 本阶段保留一个版本周期，但管理 Web 已无入口。
+  //
+  // 为什么把 validate / publish 也一并搬过来：管理 Web 上这三个按钮原本都是有处理器的，
+  // 只搬「生成草稿」会让另外两个退化成新的空按钮——那正是本阶段要消除的问题。
+  const systemAccessRootMatch = url.pathname.match(/^\/api\/semantic-operations\/systems(?:\/([^/]+))?$/u);
+  const systemAccessActionMatch = url.pathname.match(/^\/api\/semantic-operations\/systems\/([^/]+)\/(probe|mapping-drafts)$/u);
+  const systemAccessDraftMatch = url.pathname.match(/^\/api\/semantic-operations\/systems\/([^/]+)\/mapping-drafts\/([^/]+)\/(validate|publish)$/u);
+  const canReadWorldModel = Boolean(effectiveAccess?.pagePermissionIds?.includes('page.world.view'));
+  const templateFor = (code) => getWorldModelTemplates().find((template) => template.targets.includes(String(code || '').toLowerCase()));
+  if (systemAccessRootMatch && ['GET', 'POST'].includes(req.method)) {
+    const segment = systemAccessRootMatch[1] ? decodeURIComponent(systemAccessRootMatch[1]) : null;
+    if (req.method === 'GET' && !segment) {
+      send(res, 200, await getSystemAccessOverview({ roleId: role }));
+      return true;
+    }
+    if (req.method === 'GET' && (segment === 'mapping-templates' || segment === 'connection-targets' || segment === 'mapping-drafts')) {
+      if (!canReadWorldModel) { denyButton('page.world.view'); return true; }
+      const payload = segment === 'mapping-templates' ? { templates: getWorldModelTemplates() }
+        : segment === 'connection-targets' ? { targets: getWorldModelConnectionTargets() }
+          : { drafts: getWorldModelDrafts(role) };
+      send(res, 200, payload);
+      return true;
+    }
+    if (req.method === 'GET' && segment) {
+      const result = await getSystemAccessDetail({ code: segment, roleId: role });
+      send(res, result.error ? result.status || 404 : 200, result.error ? { message: result.error, code: result.code } : result);
+      return true;
+    }
+    send(res, 405, { message: '不支持的接入操作。', code: 'SYSTEM_ACCESS_METHOD_NOT_ALLOWED' });
+    return true;
+  }
+  if (systemAccessActionMatch && req.method === 'POST') {
+    const code = decodeURIComponent(systemAccessActionMatch[1]);
+    const action = systemAccessActionMatch[2];
+    if (action === 'probe') {
+      const actionRole = selectActionRole('meta_model.draft.save');
+      if (!actionRole) { denyButton('meta_model.draft.save'); return true; }
+      const body = await readBody(req);
+      const result = await probeSystemConnection({ code, faultMode: body?.faultMode || 'none', roleId: actionRole.id || actionRole, identityScope: agentIdentity });
+      send(res, result.error ? result.status || 400 : 200, result.error ? { message: result.error, code: result.code } : result);
+      return true;
+    }
+    const actionRole = selectActionRole('world.draft.create');
+    if (!actionRole) { denyButton('world.draft.create'); return true; }
+    const template = templateFor(code);
+    if (!template) {
+      send(res, 409, { message: `系统 ${code.toUpperCase()} 尚无元模型连接模板，不能生成映射草稿。`, code: 'SYSTEM_MAPPING_TEMPLATE_MISSING' });
+      return true;
+    }
+    const result = createWorldModelDraft({ templateId: template.id, targetId: String(code).toLowerCase() }, actionRole);
+    send(res, result.error ? 409 : 200, result.error ? { message: result.error, code: 'SYSTEM_MAPPING_DRAFT_REJECTED' } : result);
+    return true;
+  }
+  if (systemAccessDraftMatch && req.method === 'POST') {
+    const draftId = decodeURIComponent(systemAccessDraftMatch[2]);
+    const action = systemAccessDraftMatch[3];
+    const permissionId = action === 'validate' ? 'world.draft.validate' : 'world.draft.publish';
+    const actionRole = selectActionRole(permissionId);
+    if (!actionRole) { denyButton(permissionId); return true; }
+    const result = action === 'validate' ? validateWorldModelDraft(draftId, actionRole) : publishWorldModelDraft(draftId, actionRole);
+    send(res, result.error ? 409 : 200, result.error ? { message: result.error, code: 'SYSTEM_MAPPING_DRAFT_REJECTED' } : result);
     return true;
   }
   if (req.method === 'POST' && url.pathname === '/api/meta-models/oa-governance/read-plan-replay') {
@@ -126,7 +199,15 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
     send(res, result?.error ? 404 : 200, result?.error ? { message: result.error, code: result.code } : result); return true;
   }
   if (req.method === 'GET' && url.pathname === '/api/semantic-operations/sources') {
-    send(res, 200, discoverSemanticSources({ request: url.searchParams.get('query') || '', role: getRole(role) }));
+    // 只读来源清单：给查询词时走文本识别（selectionSource=text_inference，属推断）；
+    // 不给查询词时**显式**请求全部已登记系统，而不是回落——回落会让「没给范围」和
+    // 「要看全部」产生同一个响应，调用方无法区分（阶段 3）。
+    const query = url.searchParams.get('query') || '';
+    send(res, 200, discoverSemanticSources({
+      request: query,
+      role: getRole(role),
+      includeAllRegistered: !query || url.searchParams.get('scope') === 'all_registered'
+    }));
     return true;
   }
   if (req.method === 'GET' && url.pathname === '/api/semantic-operations/tasks') {
@@ -142,14 +223,16 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
   }
   if (req.method === 'POST' && url.pathname === '/api/semantic-operations/tasks') {
     const result = await createSemanticOperationsTask({ body: await readBody(req), role: getRole(role), identityScope: agentIdentity });
-    send(res, result.error ? (result.status || 400) : 201, result.error ? { message: result.error } : result);
+    // code 必须透出：范围门禁（空选择 / 未登记 / 越权）要能被客户端与审计区分，
+    // 只返回一句中文提示会让前端只能靠文本匹配来决定怎么补救。
+    send(res, result.error ? (result.status || 400) : 201, result.error ? { message: result.error, ...(result.code ? { code: result.code } : {}) } : result);
     return true;
   }
   const semanticTaskTraceMatch = url.pathname.match(/^\/api\/semantic-operations\/tasks\/([^/]+)\/trace$/);
   const semanticTaskDetailMatch = url.pathname.match(/^\/api\/semantic-operations\/tasks\/([^/]+)$/);
   if (req.method === 'GET' && semanticTaskDetailMatch) {
     const task = await getSemanticOperationsTask({ taskId: decodeURIComponent(semanticTaskDetailMatch[1]), identityScope: agentIdentity, accessContext: effectiveAccess });
-    send(res, task ? 200 : 404, task ? { task } : { message: '未找到当前身份可见的语义运营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' });
+    send(res, task ? 200 : 404, task ? { task } : { message: '未找到当前身份可见的元域智营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' });
     return true;
   }
   if (req.method === 'GET' && semanticTaskTraceMatch) {
@@ -167,7 +250,7 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
   if (req.method === 'POST' && semanticTaskConfirmationMatch) {
     const taskId = decodeURIComponent(semanticTaskConfirmationMatch[1]);
     const task = await getSemanticOperationsTask({ taskId, identityScope: agentIdentity, accessContext: effectiveAccess });
-    if (!task) { send(res, 404, { message: '未找到属于当前身份的语义运营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' }); return true; }
+    if (!task) { send(res, 404, { message: '未找到属于当前身份的元域智营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' }); return true; }
     const actionRole = selectActionRole(task.requiredPermission);
     if (!actionRole) { denyButton(task.requiredPermission); return true; }
     const result = await issueSemanticOperationsTaskConfirmation({ taskId, identityScope: agentIdentity });
@@ -184,7 +267,7 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
   if (req.method === 'POST' && semanticTaskExecuteMatch) {
     const taskId = decodeURIComponent(semanticTaskExecuteMatch[1]);
     const task = await getSemanticOperationsTask({ taskId, identityScope: agentIdentity, accessContext: effectiveAccess });
-    if (!task) { send(res, 404, { message: '未找到属于当前身份的语义运营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' }); return true; }
+    if (!task) { send(res, 404, { message: '未找到属于当前身份的元域智营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' }); return true; }
     const actionRole = selectActionRole(task.requiredPermission);
     if (!actionRole) { denyButton(task.requiredPermission); return true; }
     const body = await readBody(req);
@@ -209,7 +292,7 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
   }
   const semanticProposalApplyMatch = url.pathname.match(/^\/api\/semantic-operations\/proposals\/([^/]+)\/apply$/);
   if (req.method === 'POST' && semanticProposalApplyMatch) {
-    send(res, 409, { message: '提案不能绕过任务审阅直接采纳。请从语义运营任务签发一次性确认凭证后执行。', code: 'SEMANTIC_PROPOSAL_TASK_CONFIRMATION_REQUIRED' });
+    send(res, 409, { message: '提案不能绕过任务审阅直接采纳。请从元域智营任务签发一次性确认凭证后执行。', code: 'SEMANTIC_PROPOSAL_TASK_CONFIRMATION_REQUIRED' });
     return true;
   }
   if (req.method === 'GET' && url.pathname === '/api/semantic-operations/snapshots') {

@@ -4,9 +4,9 @@ import { createSemanticOperationsClient } from '@healthcare-ai/semantic-operatio
 import SemanticAgentWorkspace from './components/SemanticAgentWorkspace.vue';
 import SemanticOperationsCenter from './components/SemanticOperationsCenter.vue';
 import SemanticOnboardingWorkspace from './components/SemanticOnboardingWorkspace.vue';
-import OAMetaModelStudio from '../../../frontend/src/features/meta-model/OAMetaModelStudio.vue';
-import KnowledgeLibraryPanel from '../../../frontend/src/features/knowledge/KnowledgeLibraryPanel.vue';
-import { semanticSimulationMessage } from '../../../frontend/src/features/meta-model/ontology-scenario.js';
+import SystemAccessWorkspace from './components/SystemAccessWorkspace.vue';
+import { OAMetaModelStudio, semanticSimulationMessage } from '@healthcare-ai/agent-ui/meta-model';
+import { KnowledgeLibraryPanel } from '@healthcare-ai/agent-ui/knowledge';
 
 const runtimePlatform = globalThis.semanticOperationsDesktop?.runtime === 'electron' ? 'semantic-electron' : 'semantic-web';
 const client = createSemanticOperationsClient({ platform: runtimePlatform, appVersion: '0.2.0' });
@@ -29,6 +29,8 @@ const rollbackTarget = ref(null);
 const rollbackPhrase = ref('');
 const agentPanel = ref(null);
 const activeView = ref('agent');
+const accessTab = ref('systems');
+const onboardingMounted = ref(false);
 const onboardingTaskId = ref('');
 const loading = ref(true);
 const refreshingStatus = ref(false);
@@ -90,7 +92,7 @@ async function loadWorkspace({ preserveMessage = false } = {}) {
     semanticContext.value = contextValue;
     snapshots.value = snapshotValue.snapshots || [];
   } catch (err) {
-    if (generation === loadGeneration) error.value = err.message || '语义运营端加载失败。';
+    if (generation === loadGeneration) error.value = err.message || '元域智营端加载失败。';
   } finally {
     if (generation === loadGeneration) loading.value = false;
   }
@@ -99,6 +101,12 @@ async function loadWorkspace({ preserveMessage = false } = {}) {
 async function refreshAfterAgent(result) {
   message.value = result?.message || '语义层草稿已更新。';
   await loadWorkspace({ preserveMessage: true });
+}
+
+// 系统接入 → Agent 的交接：把选中系统的上下文写成一句可编辑的诉求填进输入框，
+// 由运营人员核对后再自行发送；不自动建模、不自动发布。
+async function openSystemInAgent(input) {
+  await prepareKnowledgeModelCandidate(input);
 }
 
 async function prepareKnowledgeModelCandidate(input) {
@@ -162,11 +170,11 @@ onMounted(async () => {
   <div class="semantic-console">
     <section v-if="!authenticated" class="semantic-auth">
       <form @submit.prevent="login">
-        <span>SEMANTIC OPERATIONS IDENTITY</span><h1>登录语义运营端</h1>
+        <span>SEMANTIC OPERATIONS IDENTITY</span><h1>登录元域智营端</h1>
         <p>运营权限由企业身份和设备会话共同确定，界面不再允许手动切换角色。</p>
         <div class="auth-mode"><button type="button" :class="{ active: authMode === 'local' }" @click="authMode = 'local'">平台账号</button><button type="button" :class="{ active: authMode === 'oa' }" @click="authMode = 'oa'">OA 账号</button></div>
         <label>账号<input v-model="account" autocomplete="username" /></label><label>密码<input v-model="password" type="password" autocomplete="current-password" /></label>
-        <div v-if="error" class="ops-error">{{ error }}</div><button class="auth-submit" :disabled="authenticating">{{ authenticating ? '正在校验身份与设备…' : '进入语义运营工作台' }}</button>
+        <div v-if="error" class="ops-error">{{ error }}</div><button class="auth-submit" :disabled="authenticating">{{ authenticating ? '正在校验身份与设备…' : '进入元域智营工作台' }}</button>
       </form>
     </section>
     <template v-else>
@@ -174,7 +182,7 @@ onMounted(async () => {
       <div class="ops-brand"><span>Σ</span><div><b>元域智脑</b><small>SEMANTIC OPERATIONS</small></div></div>
       <div class="ops-boundary"><i/><div><b>独立运营端</b><small>不属于业务端智脑</small></div></div>
       <nav>
-        <button :class="{ active: activeView === 'onboarding' }" @click="activeView = 'onboarding'"><span>＋</span><div><b>企业接入</b><small>模拟项目与材料准备</small></div></button>
+        <button :class="{ active: activeView === 'system-access' }" @click="activeView = 'system-access'"><span>＋</span><div><b>系统接入</b><small>系统清单、连接配置与接入准备</small></div></button>
         <button :class="{ active: activeView === 'agent' }" @click="activeView = 'agent'"><span>01</span><div><b>Agent 工作台</b><small>自然语言与多模态建模</small></div></button>
         <button :class="{ active: activeView === 'model' }" @click="activeView = 'model'"><span>02</span><div><b>模型校对</b><small>人工可视化精调</small></div></button>
         <button :class="{ active: activeView === 'versions' }" @click="activeView = 'versions'"><span>03</span><div><b>版本与回滚</b><small>Diff、快照和恢复</small></div></button>
@@ -185,14 +193,28 @@ onMounted(async () => {
     </aside>
 
     <main>
-      <header class="ops-topbar"><div><span>SEMANTIC CONTROL PLANE</span><h1>{{ activeView === 'onboarding' ? '企业接入与材料准备' : activeView === 'knowledge' ? '知识资料与来源校对' : activeView === 'agent' ? '语义运营 Agent 工作台' : activeView === 'model' ? '语义模型人工校对' : '模型版本与恢复' }}</h1></div><div class="ops-top-actions"><div v-if="activeView !== 'onboarding'" :class="['ops-live', deploymentDrift]"><i/>Semantica · {{ semanticaStatus }} · {{ deploymentDriftLabel }}</div><button v-if="activeView !== 'onboarding'" class="ops-logout" :disabled="refreshingStatus" @click="refreshSemanticStatus">{{ refreshingStatus ? '刷新中…' : '刷新服务状态' }}</button><label>已认证运营身份<strong>{{ currentUser?.name || currentUser?.account }}</strong><small>{{ roles.find(item => item.id === role)?.name || role }} · {{ client.deviceId.slice(-8) }}</small></label><button class="ops-logout" @click="logout">退出</button></div></header>
+      <header class="ops-topbar"><div><span>SEMANTIC CONTROL PLANE</span><h1>{{ activeView === 'system-access' ? (accessTab === 'systems' ? '系统接入与生命周期' : '接入材料与场景准备') : activeView === 'knowledge' ? '知识资料与来源校对' : activeView === 'agent' ? '元域智营 Agent 工作台' : activeView === 'model' ? '语义模型人工校对' : '模型版本与恢复' }}</h1></div><div class="ops-top-actions"><div v-if="activeView !== 'system-access'" :class="['ops-live', deploymentDrift]"><i/>Semantica · {{ semanticaStatus }} · {{ deploymentDriftLabel }}</div><button v-if="activeView !== 'system-access'" class="ops-logout" :disabled="refreshingStatus" @click="refreshSemanticStatus">{{ refreshingStatus ? '刷新中…' : '刷新服务状态' }}</button><label>已认证运营身份<strong>{{ currentUser?.name || currentUser?.account }}</strong><small>{{ roles.find(item => item.id === role)?.name || role }} · {{ client.deviceId.slice(-8) }}</small></label><button class="ops-logout" @click="logout">退出</button></div></header>
 
-      <div v-if="error && activeView !== 'onboarding'" class="ops-error">{{ error }}<button @click="loadWorkspace">重新加载</button></div>
-      <div v-if="message && activeView !== 'onboarding'" class="ops-message">{{ message }}</div>
-      <div v-if="loading && activeView !== 'onboarding'" class="ops-loading">正在校验身份、装载语义模型与Semantica状态…</div>
+      <div v-if="error && activeView !== 'system-access'" class="ops-error">{{ error }}<button @click="loadWorkspace">重新加载</button></div>
+      <div v-if="message && activeView !== 'system-access'" class="ops-message">{{ message }}</div>
+      <div v-if="loading && activeView !== 'system-access'" class="ops-loading">正在校验身份、装载语义模型与Semantica状态…</div>
 
-      <div v-if="activeView === 'onboarding'" class="ops-onboarding-pane">
-        <SemanticOnboardingWorkspace :client="client" :can-write="buttonPermissionIds.includes('meta_model.draft.save')" @open-agent="onboardingTaskId = $event; activeView = 'agent'" @open-model="activeView = 'model'" />
+      <div v-if="activeView === 'system-access'" class="ops-onboarding-pane">
+        <div class="ops-subtabs" role="tablist" aria-label="接入视图">
+          <button type="button" role="tab" :aria-selected="accessTab === 'systems'" :class="{ active: accessTab === 'systems' }" @click="accessTab = 'systems'">系统接入</button>
+          <button type="button" role="tab" :aria-selected="accessTab === 'materials'" :class="{ active: accessTab === 'materials' }" @click="accessTab = 'materials'; onboardingMounted = true">材料与场景准备</button>
+        </div>
+        <SystemAccessWorkspace
+          v-show="accessTab === 'systems'"
+          :client="client" :role="role" :button-permission-ids="buttonPermissionIds"
+          :can-probe="buttonPermissionIds.includes('meta_model.draft.save')"
+          :can-configure-mapping="buttonPermissionIds.includes('world.draft.create')"
+          :can-read-mapping="buttonPermissionIds.includes('page.world.view')"
+          @open-agent="openSystemInAgent" />
+        <SemanticOnboardingWorkspace
+          v-if="onboardingMounted" v-show="accessTab === 'materials'"
+          :client="client" :can-write="buttonPermissionIds.includes('meta_model.draft.save')"
+          @open-agent="onboardingTaskId = $event; activeView = 'agent'" @open-model="activeView = 'model'" />
       </div>
       <div v-else-if="!error && !loading" class="ops-workspace">
         <section class="ops-main-pane">
@@ -230,5 +252,8 @@ onMounted(async () => {
 
 <style scoped>
 .ops-onboarding-pane { min-width: 0; padding: 24px; }
+.ops-subtabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.ops-subtabs button { font-size: 12px; padding: 7px 13px; border: 1px solid #36556b; border-radius: 7px; background: #102637; color: #cfdfeb; cursor: pointer; }
+.ops-subtabs button.active { border-color: #62a5b2; background: #143647; color: #eaf7fb; }
 @media (max-width: 760px) { .ops-onboarding-pane { padding: 14px; } }
 </style>

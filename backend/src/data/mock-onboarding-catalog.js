@@ -1,6 +1,16 @@
+import { systemDefinitions } from './system-catalog.js';
+
+// 场景所引用的系统码必须存在于系统注册表。此前这里是两处硬编码的系统三元组，
+// 系统改名或删除后不会报错，只会静默产出错误的来源标注——现在改为加载期快速失败。
+const registeredCodes = new Set(systemDefinitions.map((item) => item.code));
+const registeredSystems = (scenarioId, codes) => codes.map((code) => {
+  if (!registeredCodes.has(code)) throw new Error(`模拟接入场景 ${scenarioId} 引用了未登记的系统码：${code}`);
+  return code;
+});
+
 export const mockOnboardingScenarios = [
-  { id: 'fulfillment', label: '订单履约', description: '梳理订单、库存和发运材料，确认跨系统履约问题所需的证据。', systems: ['OMS', 'ERP', 'WMS'], questions: ['哪些订单存在缺货或延迟风险？', '订单与库存、发运记录通过哪些字段关联？'] },
-  { id: 'quality_incident', label: '批次异常', description: '梳理质量事件、批次和库存材料，确认异常追溯所需的证据。', systems: ['QMS', 'MES', 'WMS'], questions: ['异常涉及哪些批次与库存？', '质量事件与批次通过哪些字段关联？'] }
+  { id: 'fulfillment', label: '订单履约', description: '梳理订单、库存和发运材料，确认跨系统履约问题所需的证据。', systems: registeredSystems('fulfillment', ['OMS', 'ERP', 'WMS']), questions: ['哪些订单存在缺货或延迟风险？', '订单与库存、发运记录通过哪些字段关联？'] },
+  { id: 'quality_incident', label: '批次异常', description: '梳理质量事件、批次和库存材料，确认异常追溯所需的证据。', systems: registeredSystems('quality_incident', ['QMS', 'MES', 'WMS']), questions: ['异常涉及哪些批次与库存？', '质量事件与批次通过哪些字段关联？'] }
 ];
 
 export const mockOnboardingMaterialKinds = [

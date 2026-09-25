@@ -18,7 +18,7 @@ tags:
   - { name: Procurement, description: 采购协同受控动作 }
   - { name: Simulation, description: Mock 场景、连接器故障与系统数据 }
   - { name: Governance, description: 元模型与世界模型治理 }
-  - { name: SemanticOperations, description: 独立语义运营任务、证据、巡检、通知与受控报告 }
+  - { name: SemanticOperations, description: 独立元域智营任务、证据、巡检、通知与受控报告 }
   - { name: Platform, description: 平台运行状态与配置 }
 paths:
   /agent/anomalies:
@@ -1418,7 +1418,7 @@ paths:
     get:
       tags: [SemanticOperations]
       operationId: listSemanticOperationsNotifications
-      responses: { '200': { description: 当前身份的语义运营通知, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } } }
+      responses: { '200': { description: 当前身份的元域智营通知, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } } }
   /semantic-operations/tasks/{id}/report-export:
     post:
       tags: [SemanticOperations, Evidence]
