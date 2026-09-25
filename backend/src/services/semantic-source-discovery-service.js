@@ -1,21 +1,11 @@
 import { connectedSystems, systemConfigurations } from '../data/seed.js';
 import { getMcpConnectors } from './mcp-connector-service.js';
 import { getEnterpriseConnectorReadiness } from './system-integration-service.js';
+import { detectDeclaredSystemCodes as registryDeclaredSystemCodes, detectSystemCodesInText, getSystemByCode } from './system-registry-service.js';
 
-const systemAliases = {
-  OA: ['oa', 'bpm', '审批', '组织', '流程'],
-  ERP: ['erp', '采购', '供应商', '财务', '库存'],
-  WMS: ['wms', '仓储', '仓库', '库位', '入库', '出库'],
-  MES: ['mes', '生产', '制造', '工单', '设备'],
-  LIMS: ['lims', '实验室', '检验', '检测', '样品'],
-  QMS: ['qms', '质量', '偏差', 'capa', '放行'],
-  OMS: ['oms', '销售订单', '客户订单', '门店订单', '门店', '履约', '退货'],
-  SRM: ['srm', '供应商协同'],
-  MDM: ['mdm', '主数据'],
-  PLM: ['plm', '产品生命周期'],
-  EAM: ['eam', '资产管理'],
-  IOT: ['iot', '物联网', '传感器']
-};
+// 系统别名表已收敛到唯一事实源（data/system-catalog.js 的 definitions[].aliases）。
+// 历史问题：此处曾独立维护 12 个系统的别名，与 seed.js / 连接器目录 / 连接目标
+// 三处的成员都不一致。
 
 const schemaAssets = [
   '接口或数据库只读访问说明',
@@ -37,16 +27,33 @@ const connectorContract = (code, objects = []) => ({
   prohibited: ['browser_held_secret', 'unscoped_bulk_read', 'direct_model_credential_access']
 });
 
-const normalize = (value) => String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
-
+/**
+ * 从自由文本推断用户提到了哪些系统。语义与实现均已委托给系统注册表，
+ * 本处保留原函数名以维持既有调用方与测试契约不变。
+ *
+ * 重要：返回值只表示「文本里提到了什么」，**不得**作为数据授权范围或建模范围的依据。
+ * 范围只能由 `discoverSemanticSources` 的 `systemCodes` / `includeAllRegistered` 显式给定；
+ * 本函数在建模任务里已降级为「文本提到了 X 但未选择」的提示素材（阶段 3）。
+ */
 export function detectRequestedSemanticSystems(request = '') {
-  const text = normalize(request);
-  const explicitSystems = Object.keys(systemAliases).filter((code) => new RegExp(`(?:^|[^a-z0-9])${code.toLowerCase()}(?:$|[^a-z0-9])`, 'i').test(text));
-  if (explicitSystems.length) return explicitSystems;
-  return Object.entries(systemAliases)
-    .filter(([, aliases]) => aliases.some((alias) => text.includes(alias)))
-    .map(([code]) => code);
+  return detectSystemCodesInText(request);
 }
+
+/**
+ * 归属判定专用的系统识别（阶段 4c 第二段 / ADR-017）。转发自系统注册表，理由与上一处完全相同：
+ * 语义域接触系统注册表只经**本文件**一处（`semantic-*-service.js -> system-registry-service.js`
+ * 这条跨域边已在架构基线登记），新增消费者不应各自再开一条边。
+ *
+ * 与 `detectRequestedSemanticSystems` 的关键区别：它**不认业务词别名**。
+ * 「采购订单表 purchase_order」用于「这段文本提到了什么系统」可以命中 ERP，
+ * 用于「这张表属于哪个系统」则是彻头彻尾的猜测。
+ */
+export function detectDeclaredSystemCodes(text = '') {
+  return registryDeclaredSystemCodes(text);
+}
+
+/** 目标系统编码是否已在系统注册表中（归属确认的合法性前提）。同样经本文件中转，不新开跨域边。 */
+export const isRegisteredSystemCode = (code) => Boolean(getSystemByCode(code));
 
 const registeredSystem = (code) => connectedSystems.find((item) => item.code === code);
 const configuredMappings = (code) => {
@@ -54,26 +61,60 @@ const configuredMappings = (code) => {
   return systemConfigurations.find((item) => item.systemId === system?.id)?.mapping || [];
 };
 
-export function discoverSemanticSources({ request = '', role }) {
+/**
+ * 解析本次来源范围。范围只能来自两个**显式**入口，二者都没有时返回空范围，
+ * 绝不回落到「全部可访问连接器」。
+ *
+ * 历史行为（阶段 3 删除）：`requestedSystems.length ? requestedSystems : 全部 accessible`。
+ * 它把「文本里提到了 ERP」当成范围，又在什么都没提到时把范围放大到整个角色可见面——
+ * 两者都会让一次建模任务的实际覆盖范围超出运营人员的选择，且界面上看不出来。
+ *
+ * @param {object} options
+ * @param {string[]|null} options.systemCodes 运营人员显式勾选的系统（空数组＝显式选择为空）
+ * @param {boolean} options.includeAllRegistered 是否显式请求「全部已登记系统」（巡检/来源清单预览）
+ */
+function resolveSelectionScope({ requestedSystems, knownCodes, systemCodes, includeAllRegistered }) {
+  const explicitCodes = Array.isArray(systemCodes)
+    ? [...new Set(systemCodes.map((code) => String(code || '').toUpperCase()).filter(Boolean))]
+    : null;
+  if (includeAllRegistered) return { selectionSource: 'all_registered', selectedCodes: [...knownCodes].sort(), explicitCodes };
+  if (explicitCodes) return { selectionSource: explicitCodes.length ? 'explicit' : 'explicit_empty', selectedCodes: explicitCodes, explicitCodes };
+  return { selectionSource: requestedSystems.length ? 'text_inference' : 'unspecified', selectedCodes: requestedSystems, explicitCodes: null };
+}
+
+const SCOPE_NOTICE = Object.freeze({
+  explicit_empty: '本次未选择任何来源系统，范围为空；不会自动扩大到全部可访问连接器。',
+  unspecified: '本次既未显式选择来源系统，也未在文本中识别到系统名，范围为空；不会自动扩大到全部可访问连接器。',
+  text_inference: '当前范围来自文本中出现的系统名，属于推断而非显式选择；写入草稿前需要运营人员显式确认范围。'
+});
+
+export function discoverSemanticSources({ request = '', role, systemCodes = null, includeAllRegistered = false }) {
   const roleId = role?.id || role;
   const requestedSystems = detectRequestedSemanticSystems(request);
   const readiness = new Map(getEnterpriseConnectorReadiness(roleId).map((item) => [item.code, item]));
   const connectorCatalog = getMcpConnectors(roleId).connectors;
   const connectorByCode = new Map(connectorCatalog.map((item) => [item.system, item]));
   const knownCodes = new Set(connectorCatalog.map((item) => item.system));
-  const selectedCodes = requestedSystems.length
-    ? requestedSystems
-    : connectorCatalog.filter((item) => item.accessible).map((item) => item.system);
+  const { selectionSource, selectedCodes, explicitCodes } = resolveSelectionScope({ requestedSystems, knownCodes, systemCodes, includeAllRegistered });
+  // 文本提到但未被选中：降级为提示素材，不作为范围依据（阶段 3）。
+  const mentionedNotSelected = explicitCodes ? requestedSystems.filter((code) => !selectedCodes.includes(code)) : [];
 
   const sources = selectedCodes.map((code) => {
     const connector = connectorByCode.get(code);
+    // registryKnown 区分两种「不可用」：编码根本不在系统注册表里（拼错/不存在），
+    // 与登记了系统类型但没有受控连接器（如 SRM）。二者对运营人员是不同的问题，
+    // 调用方需要据此给出不同提示，所以由本模块统一判定，不要求调用方各自查注册表。
+    const definition = getSystemByCode(code);
     if (!connector) return {
       code,
-      name: `${code} 待登记系统`,
+      name: definition?.name || `${code} 待登记系统`,
+      registryKnown: Boolean(definition),
       authorized: false,
       status: 'not_registered',
       mode: 'unavailable',
-      message: '该系统尚未进入受控连接器目录，不能据此读取数据或发布来源映射。',
+      message: definition
+        ? '该系统类型已登记，但尚未进入受控连接器目录，不能据此读取数据或发布来源映射。'
+        : '系统编码不在系统注册表中，无法作为来源范围。',
       objects: [],
       mappings: [],
       requiredAssets: schemaAssets
@@ -90,6 +131,7 @@ export function discoverSemanticSources({ request = '', role }) {
     return {
       code,
       name: connector.name,
+      registryKnown: true,
       authorized: access,
       status: access ? state.status : 'forbidden',
       mode: access ? state.mode : 'policy_denied',
@@ -118,6 +160,14 @@ export function discoverSemanticSources({ request = '', role }) {
   return {
     requestedSystems,
     registeredSystems: [...knownCodes].sort(),
+    // 范围来源必须可审计：selectionSource 说明这次范围是怎么来的，
+    // selectedSystemCodes 是实际生效的范围，explicitSystemCodes 是运营人员的原始勾选（未指定时为 null）。
+    selectionSource,
+    selectedSystemCodes: [...selectedCodes],
+    explicitSystemCodes: explicitCodes,
+    includeAllRegistered: Boolean(includeAllRegistered),
+    mentionedNotSelected,
+    scopeNotice: SCOPE_NOTICE[selectionSource] || null,
     sources,
     blockers,
     warnings,

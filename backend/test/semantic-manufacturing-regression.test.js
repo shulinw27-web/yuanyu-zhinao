@@ -49,14 +49,27 @@ test('SM06: complete structured parsing is independent of truncated LLM context'
 
 test('SM04/05: dictionary survives dialogue and samples; split upload equals full modeling', async () => {
   const before = semanticFingerprint(await getOAMetaModelDraft());
+  // 阶段 3：来源范围必须显式。data-dictionary.json 声明了六个系统，因此本轮的显式范围就是这六个。
+  const allSystems = ['ERP', 'WMS', 'LIMS', 'QMS', 'MES', 'OA'];
   const first = await createSemanticOperationsTask({ body: { text: '你好', attachments: [attachment('data-dictionary.json')] }, role, identityScope });
   const middle = await createSemanticOperationsTask({ body: { text: '只讨论业务，不建模。', parentTaskId: first.id, attachments: [attachment('sample-events.json')] }, role, identityScope });
-  const last = await createSemanticOperationsTask({ body: { text: '根据前面完整材料生成候选模型。', parentTaskId: middle.id }, role, identityScope });
+  // 承接上文也必须重新给出范围：范围不得靠继承静默生效。
+  const unScoped = await createSemanticOperationsTask({ body: { text: '根据前面完整材料生成候选模型。', parentTaskId: middle.id }, role, identityScope });
+  assert.equal(unScoped.code, 'SEMANTIC_SYSTEM_SCOPE_REQUIRED');
+  assert.equal(unScoped.status, 400);
+  const last = await createSemanticOperationsTask({ body: { text: '根据前面完整材料生成候选模型。', parentTaskId: middle.id, systemCodes: allSystems }, role, identityScope });
   assertFull(last.proposal);
-  const batch = await createSemanticOperationsTask({ body: { text: '建立 ERP WMS 模型', attachments: ['erp', 'wms'].map(system => attachment(`${system}-openapi.json`)) }, role, identityScope });
+  assert.deepEqual(last.systemScope.selected, allSystems);
+  // 六个系统各自都要有对象覆盖，未覆盖系统必须显式出现在列表里而不是消失。
+  assert.deepEqual(last.systemScope.covered, ['ERP', 'LIMS', 'MES', 'OA', 'QMS', 'WMS']);
+  assert.deepEqual(last.systemScope.uncovered, []);
+  assert.deepEqual(last.systemScope.unassignedObjects, []);
+  const batch = await createSemanticOperationsTask({ body: { text: '建立 ERP WMS 模型', systemCodes: ['ERP', 'WMS'], attachments: ['erp', 'wms'].map(system => attachment(`${system}-openapi.json`)) }, role, identityScope });
   assert.equal(batch.proposal.objectTypes.length, 8);
-  const merged = await createSemanticOperationsTask({ body: { text: '继续建模，合并前面的 ERP WMS 和本次四个系统。', parentTaskId: batch.id, attachments: ['lims', 'qms', 'mes', 'oa'].map(system => attachment(`${system}-openapi.json`)) }, role, identityScope });
+  assert.deepEqual(batch.systemScope.covered, ['ERP', 'WMS']);
+  const merged = await createSemanticOperationsTask({ body: { text: '继续建模，合并前面的 ERP WMS 和本次四个系统。', parentTaskId: batch.id, systemCodes: allSystems, attachments: ['lims', 'qms', 'mes', 'oa'].map(system => attachment(`${system}-openapi.json`)) }, role, identityScope });
   assertFull(merged.proposal);
+  assert.deepEqual(merged.systemScope.uncovered, []);
   assert.equal(semanticFingerprint(await getOAMetaModelDraft()), before);
 });
 

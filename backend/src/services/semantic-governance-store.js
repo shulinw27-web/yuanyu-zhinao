@@ -1,5 +1,5 @@
 import { getRuntimeStoreInfo, mutateState, mutateStates, readState } from '../repositories/runtime-state-repository.js';
-import { appendDomainEventToWorkspace, DOMAIN_EVENT_NAMESPACE, DOMAIN_EVENT_WORKSPACE_KEY, initialDomainEventWorkspace, mutateWithDomainEvent } from '../domains/events/domain-event-outbox.js';
+import { appendDomainEventToWorkspace, DOMAIN_EVENT_NAMESPACE, DOMAIN_EVENT_WORKSPACE_KEY, initialDomainEventWorkspace, mutateWithDomainEvent } from '../infrastructure/domain-events/domain-event-outbox.js';
 import { semanticTenantStateKey } from './semantic-tenant-context.js';
 
 let postgresRepository = null;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { qualityScenarioDraft } from '../../frontend/src/features/meta-model/ontology-scenario.js';
+import { qualityScenarioDraft } from '@healthcare-ai/agent-ui/ontology-scenario';
 import { evaluateTemporalRelations } from '../src/services/temporal-relation-service.js';
 import { replayDecisionCases } from '../src/services/decision-binding-service.js';
 import { resetRuntimeState } from '../src/repositories/runtime-state-repository.js';

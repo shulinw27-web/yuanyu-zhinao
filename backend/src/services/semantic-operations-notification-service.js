@@ -13,7 +13,7 @@ const mutateIndex = (callback) => mutateSemanticGovernanceState(NAMESPACE, KEY, 
 // notification in the same repository transaction.
 export function buildSemanticOperationsNotification({ identityScope, severity = 'info', title, message, sourceType, sourceId, action = null, createdAt = now() }) {
   const owner = semanticOperationsPrincipalKey(identityScope);
-  return { id: `semantic-notice-${randomUUID()}`, owner, severity, title: String(title || '语义运营提醒').slice(0, 120), message: String(message || '').slice(0, 800), sourceType: sourceType || 'system', sourceId: sourceId || null, action, createdAt, readAt: null };
+  return { id: `semantic-notice-${randomUUID()}`, owner, severity, title: String(title || '元域智营提醒').slice(0, 120), message: String(message || '').slice(0, 800), sourceType: sourceType || 'system', sourceId: sourceId || null, action, createdAt, readAt: null };
 }
 
 export function insertSemanticOperationsNotification(index, notification) {

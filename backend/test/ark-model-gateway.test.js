@@ -307,10 +307,21 @@ test('semantic model advice cannot override current prohibitions or invent publi
     }
     globalThis.fetch = async () => { throw new Error('synthetic transport error'); };
     const failed = await createSemanticOperationsTask({ body: { text: '请解释主键和外键的区别' }, role: getRole('executive'), identityScope });
-    assert.equal(failed.status, 'failed');
+    // 契约变更（2026-09-25，与云模型接入同批）：模型传输失败不再把整轮直接判为 failed 终止，
+    // 而是回落服务端确定性分类 —— 否则任何一次模型波动都会让入口变成死路（曾被实测复现）。
+    // 但「回落」不等于「假装成功」：降级事实必须显式暴露，且不得因此获得任何执行能力。
+    assert.equal(failed.status, 'completed');
+    assert.equal(failed.modelUnavailable, true);
+    assert.equal(failed.routing.mode, 'server_rules_fallback');
+    assert.equal(failed.routing.degraded, true);
+    assert.equal(failed.routing.source, 'understanding_failed');
+    assert.ok(failed.routing.modelFailureCode, '降级必须带上可归因的失败码，不能只给一个布尔位');
+    assert.ok(failed.events.some(event => event.type === 'model_understanding_unavailable'));
+    // 安全不变量不因回落而放宽：不产生命令、不产生提案、不要求确认，也不发布。
     assert.equal(failed.command, null);
-    assert.ok(failed.events.some(event => event.type === 'conversation_failed'));
-    assert.ok(!failed.events.some(event => event.type === 'conversation_completed'));
+    assert.equal(failed.proposal, null);
+    assert.equal(failed.confirmationRequired, false);
+    assert.equal(failed.requiredPermission, null);
   });
 });
 

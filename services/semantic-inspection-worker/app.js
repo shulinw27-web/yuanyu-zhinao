@@ -12,7 +12,10 @@ export async function inspectSemanticReadOnly(schedule) {
   const findings = [];
   for (const check of schedule.checks) {
     if (check === 'source_readiness') {
-      const sources = discoverSemanticSources({ request: '检查全部已登记语义来源连接状态', role });
+      // 只读巡检的语义就是「检视全部已登记来源」，因此**显式**请求全量范围。
+      // 阶段 3 之后来源发现不再有「推断为空 → 回落全部可访问连接器」的行为，
+      // 全量必须由调用方声明，不能靠传一句包含系统名的文本碰巧命中。
+      const sources = discoverSemanticSources({ request: '', role, includeAllRegistered: true });
       findings.push({ check, status: sources.blockers.length ? 'warning' : 'passed', metric: `${sources.sources.length} sources / ${sources.blockers.length} blockers` });
     } else if (check === 'schema_integrity') {
       const draft = await getOAMetaModelDraft();

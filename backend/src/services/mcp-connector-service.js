@@ -1,23 +1,32 @@
-const connectorCatalog = [
-  { id: 'mcp-oa', name: 'OA / BPM', system: 'OA', status: 'connected_demo', transport: 'MCP over HTTPS', credentialRef: 'kms://identity/oa-service-principal', classification: '组织与审批受限', domains: ['internal'], objects: ['Person', 'Approval', 'Task'], tools: ['read_approval_context'], writeMode: 'approval_required' },
-  { id: 'mcp-erp', name: 'ERP 供应与库存', system: 'ERP', status: 'connected_demo', transport: 'MCP over HTTPS', credentialRef: 'kms://integration/erp-read-write', classification: '供应链受限', domains: ['production', 'internal'], objects: ['RawMaterial', 'Product', 'Supplier', 'Budget'], tools: ['read_inventory', 'create_procurement_draft'], writeMode: 'draft_and_approval' },
-  { id: 'mcp-wms', name: 'WMS 仓储与物流', system: 'WMS', status: 'connected_demo', transport: 'MCP over HTTPS', credentialRef: 'kms://integration/wms-readonly', classification: '仓储运营受限', domains: ['production', 'internal'], objects: ['InventoryLot', 'Warehouse', 'InboundReceipt', 'OutboundShipment'], tools: ['read_inventory_lot', 'read_inbound_receipt'], writeMode: 'read_only' },
-  { id: 'mcp-mes', name: 'MES 生产执行', system: 'MES', status: 'connected_demo', transport: 'MCP over HTTPS', credentialRef: 'kms://integration/mes-readonly', classification: '生产受限', domains: ['production'], objects: ['Equipment', 'Product', 'ProductionBatch'], tools: ['read_production_plan', 'read_equipment_status'], writeMode: 'read_only' },
-  { id: 'mcp-lims', name: 'LIMS 质量实验室', system: 'LIMS', status: 'connected_demo', transport: 'MCP over HTTPS', credentialRef: 'kms://integration/lims-readonly', classification: '质量受限', domains: ['production'], objects: ['RawMaterial', 'Product', 'QualityRecord'], tools: ['read_release_status', 'read_coa'], writeMode: 'read_only' },
-  { id: 'mcp-qms', name: 'QMS 质量管理', system: 'QMS', status: 'connected_demo', transport: 'MCP over HTTPS', credentialRef: 'kms://integration/qms-readonly', classification: '质量受限', domains: ['production'], objects: ['CAPA', 'ChangeControl', 'QualityEvent'], tools: ['read_capa_status', 'read_quality_event'], writeMode: 'read_only' },
-  { id: 'mcp-oms', name: 'OMS 订单与门店运营', system: 'OMS', status: 'connected_demo', transport: 'MCP over HTTPS', credentialRef: 'kms://integration/oms-desensitized', classification: '订单与门店运营受限', domains: ['marketing'], objects: ['Store', 'Order', 'Fulfillment', 'ReturnOrder'], tools: ['read_store_status', 'read_order_fulfillment'], writeMode: 'read_only' }
-];
+// 受控连接器目录。
+//
+// 目录成员与属性已收敛到唯一事实源（data/system-catalog.js）；本文件只负责
+// 「按角色数据域裁剪可见性」这一层策略，不再自行维护系统清单。
+// 历史问题：此处曾硬编码 7 个连接器，与 seed.js 的 6 个系统、systemAliases 的 12 个
+// 系统互不一致，且 OA 在此为 connected_demo、在连接目标中为「待接入」。
+// 现在 connector.status（受控连接器目录登记状态）与 onboardingStatus（租户接入进度）
+// 是两个明确分离的轴，见 system-catalog.js 的注释。
+import { getSystemDefinitions, getRoleDataDomains } from './system-registry-service.js';
+import { getKeyLeasePolicyForConnector } from './key-center/key-center-service.js';
 
-const roleDomains = {
-  executive: ['production', 'marketing', 'internal'],
-  quality_manager: ['production'],
-  production_manager: ['production'],
-  procurement_manager: ['production', 'internal'],
-  marketing_manager: ['marketing']
-};
+const connectorCatalog = getSystemDefinitions()
+  .filter((item) => item.connector)
+  .map((item) => ({
+    id: item.connector.id,
+    name: item.connector.displayName,
+    system: item.code,
+    status: item.connector.status,
+    transport: item.connector.transport,
+    credentialRef: item.connector.credentialRef,
+    classification: item.connector.classification,
+    domains: [...item.connector.dataDomains],
+    objects: [...item.connector.objects],
+    tools: [...item.connector.tools],
+    writeMode: item.connector.writeMode
+  }));
 
 export function getMcpConnectors(roleId) {
-  const allowedDomains = roleDomains[roleId] || [];
+  const allowedDomains = getRoleDataDomains(roleId);
   return {
     protocol: 'MCP',
     policy: '所有连接器调用均由智脑服务主体代发；连接器不向终端暴露密钥，写入动作必须先通过元对象、业务权限和审批门禁。',
@@ -30,4 +39,3 @@ export function getMcpConnectors(roleId) {
     }))
   };
 }
-import { getKeyLeasePolicyForConnector } from './key-center/key-center-service.js';

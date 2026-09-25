@@ -5,7 +5,7 @@ import { createSemanticOperationsClient } from '../../packages/semantic-operatio
 
 const factories = [
   ['智脑', createAgentClient, 'healthcare-ai-identity-session-web'],
-  ['语义运营', createSemanticOperationsClient, 'healthcare-ai-semantic-identity-session-web']
+  ['元域智营', createSemanticOperationsClient, 'healthcare-ai-semantic-identity-session-web']
 ];
 for (const [name, createClient, storageKey] of factories) {
   test(`${name}按身份源隔离缓存，Bearer 仅发送给选择的适配器且不持久化`, async () => {

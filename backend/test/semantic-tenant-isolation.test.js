@@ -10,7 +10,7 @@ import { readSemanticGovernanceState, mutateSemanticGovernanceState, mutateSeman
 import { getWorldModelTemplates, createWorldModelDraft, getWorldModelDrafts, validateWorldModelDraft } from '../src/services/world-model-template-service.js';
 import { getSemanticaModelDiscovery, getSemanticaModelDeployment, publishSemanticaModelDefinition, resetSemanticaDemoGraph } from '../src/services/semantica-demo-bridge-service.js';
 import { createSemanticInspectionSchedule, runSemanticInspectionCycle } from '../src/services/semantic-inspection-schedule-service.js';
-import { listDomainEvents } from '../src/domains/events/domain-event-outbox.js';
+import { listDomainEvents } from '../src/infrastructure/domain-events/domain-event-outbox.js';
 
 if (process.env.NODE_ENV !== 'test' || process.env.RUNTIME_STORE_DRIVER !== 'memory') throw new Error('Use the runtime-test-bootstrap memory store.');
 const role = getRole('executive');

@@ -84,7 +84,8 @@ export async function understandAgentTurn({ input, history = '', surface = 'busi
   const finish = result => ({ ...result, timing: { understandingMs: Date.now() - startedAt, modelAttempts, modelCalls } });
   material = boundedMaterial(material, 24000);
   const domain = surface === 'semantic'
-    ? '你是语义运营助手。可以直接解释建模方法、讨论字典的对象/主外键/关系基数/统计粒度，回答历史字段问题。只有用户要求实际形成候选提案时才选 build_model；只讨论方案选 dialogue。其他工具意图 discover_sources、inspect_status、validate_model、simulate_model、publish_model；询问发布方法、条件或明确不发布均不是发布指令。'
+    ? '你是元域智营助手。可以直接解释建模方法、讨论字典的对象/主外键/关系基数/统计粒度，回答历史字段问题。只有用户要求实际形成候选提案时才选 build_model；只讨论方案选 dialogue。其他工具意图 discover_sources、inspect_status、validate_model、simulate_model、publish_model；询问发布方法、条件或明确不发布均不是发布指令。'
+      + '路由判据（必须遵守）：用户明确要求“建立/建设/构建/建模/新增对象/生成候选模型/形成提案”，且诉求中已给出业务对象名或来源系统时，必须选 build_model。字段命名、主键组合、批次管理、是否强制关联等**实现细节尚未确认不构成澄清理由**：这些不确定项写进 answer 作为待确认清单，交后续人工复核处理，不要因此改选 dialogue 或置 needsClarification=true。仅当用户完全没有给出任何对象、来源系统或材料时，才置 needsClarification=true。'
     : '你是智能工作助手。日常交流、安排工作、解释前一答案、编号追问、更正事实、讨论方案、召回已告知信息选 dialogue；用户请求查询/分析当前数据（包括当前可访问的模拟数据）必须选 read_business，由后续服务器按权限读取，不能用一般性建议或假设代替真实工具结果。明确请求业务写入选 business_action；明确请求操作电脑或生成文件选 desktop_action。不要把普通工作安排或最新报告理解成数据库历史快照。报告范围不明时应问一个综合或专项范围问题并置 needsClarification=true；用户已选库存等专项则继续 read_business，不重复索取读取授权。';
   const allowed = surface === 'business' ? ['dialogue', 'read_business', 'business_action', 'desktop_action'] : ['dialogue', 'build_model', 'discover_sources', 'inspect_status', 'validate_model', 'simulate_model', 'publish_model'];
   const timeoutMs = turnUnderstandingTimeout({ input, history, material, publishedModel });

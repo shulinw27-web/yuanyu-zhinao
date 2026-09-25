@@ -1,5 +1,5 @@
 import { getRuntimeStoreInfo } from '../../repositories/runtime-state-repository.js';
-import { getDomainEventOutboxMetrics, getDomainEventStoreInfo, probeDomainEventStore } from '../events/domain-event-outbox.js';
+import { getDomainEventOutboxMetrics, getDomainEventStoreInfo, probeDomainEventStore } from '../../infrastructure/domain-events/domain-event-outbox.js';
 import { probeKmsAdapter } from '../../services/key-center/kms-adapter.js';
 import { getIdentitySessionStoreInfo, probeIdentitySessionStore } from '../../services/identity-session-service.js';
 import { getAgentLongTaskStoreInfo, probeAgentLongTaskStore } from '../../services/agent-long-task-store.js';

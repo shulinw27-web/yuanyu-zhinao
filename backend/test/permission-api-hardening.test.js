@@ -4,6 +4,13 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
 
+// 实测（2026-09-25 本机，生产配置 + RUNTIME_STORE_DRIVER=sqlite）：从 spawn 到
+// `/api/health` 就绪需 **1097–1519ms**，而这里原先的预算是 40 × 25ms = **1000ms**。
+// 也就是说这不是偶发竞态，而是**预算小于正常启动时间**——同一测试组会随机失败 0~3 项
+// （三次连跑分别失败 3 / 1 / 0 项），并让「启动慢」与「启动失败」在日志里无法区分。
+// 改为按时间计预算，并在失败信息里带上实际耗时与子进程日志。
+const API_STARTUP_TIMEOUT_MS = 8000;
+
 async function reservePort() {
   const probe = createServer();
   await new Promise((resolve, reject) => probe.once('error', reject).listen(0, '127.0.0.1', resolve));
@@ -56,14 +63,15 @@ test('HTTP page gates, multi-role business actions, and risk response redaction 
     return { status: response.status, payload: await response.json() };
   };
   const waitUntilReady = async () => {
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    const started = Date.now();
+    while (Date.now() - started < API_STARTUP_TIMEOUT_MS) {
       try {
         const response = await fetch(`${baseUrl}/health`);
         if (response.ok) return;
       } catch { /* API is still starting. */ }
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    throw new Error(`权限加固测试 API 未就绪：${serverLog}`);
+    throw new Error(`权限加固测试 API 未就绪（等待 ${Date.now() - started}ms）：${serverLog}`);
   };
 
   try {
@@ -240,12 +248,13 @@ test('production account center rejects anonymous requests before page authoriza
   child.stderr.on('data', (chunk) => { serverLog += chunk; });
   const baseUrl = `http://127.0.0.1:${port}/api`;
   try {
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    const started = Date.now();
+    while (Date.now() - started < API_STARTUP_TIMEOUT_MS) {
       try {
         if ((await fetch(`${baseUrl}/health`)).ok) break;
       } catch { /* API is still starting. */ }
-      if (attempt === 39) throw new Error(`生产权限测试 API 未就绪：${serverLog}`);
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      if (Date.now() - started >= API_STARTUP_TIMEOUT_MS) throw new Error(`生产权限测试 API 未就绪（等待 ${Date.now() - started}ms）：${serverLog}`);
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
     const response = await fetch(`${baseUrl}/account-center`);
     const payload = await response.json();

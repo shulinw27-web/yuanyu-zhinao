@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resetRuntimeState } from '../src/repositories/runtime-state-repository.js';
-import { listDomainEvents } from '../src/domains/events/domain-event-outbox.js';
+import { listDomainEvents } from '../src/infrastructure/domain-events/domain-event-outbox.js';
 import { listAnomalyReports, changeAnomalyReport, extractAnomalyReport, anomalyPolicy } from '../src/services/anomaly-assistant-service.js';
 import { parseAnomalyFields, parseAnomalyUnderstanding } from '../src/services/anomaly-report-contract.js';
 import { validateModelSummaryEnvelope } from '../src/services/local-model-gateway.js';

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { resetRuntimeState } from '../src/repositories/runtime-state-repository.js';
-import { listDomainEvents } from '../src/domains/events/domain-event-outbox.js';
+import { listDomainEvents } from '../src/infrastructure/domain-events/domain-event-outbox.js';
 import { previewKnowledgeChunks, rankKnowledgeChunks, fuseKnowledgeRanks } from '../src/services/knowledge-retrieval-engine.js';
 import { previewLibraryDocument, saveLibraryDocument, listLibraryDocuments, readLibraryDocument, searchLibraryDocuments, retractLibraryDocument } from '../src/services/knowledge-library-service.js';
 import { handleKnowledgeRoutes } from '../src/routes/knowledge-routes.js';

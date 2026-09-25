@@ -4,7 +4,7 @@ import {
   DOMAIN_EVENT_WORKSPACE_KEY,
   appendDomainEventToWorkspace,
   initialDomainEventWorkspace
-} from '../domains/events/domain-event-outbox.js';
+} from '../infrastructure/domain-events/domain-event-outbox.js';
 import {
   CURRENT_IAM_SCHEMA_VERSION,
   IAM_NAMESPACE,

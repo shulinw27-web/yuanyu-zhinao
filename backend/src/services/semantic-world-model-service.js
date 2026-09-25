@@ -65,12 +65,13 @@ export function preparePrimaryKeyCorrections({ discovery, draft, previous = [], 
   return { corrections: [...corrections.values()] };
 }
 
-export function validateProposalEvidence(draft, discovery, primaryKeyCorrections = []) {
+export function validateProposalEvidence(draft, discovery, primaryKeyCorrections = [], sourceAssignments = []) {
   if (!discovery?.schemas?.length) return [];
   const failures = [];
   const objects = new Map(draft.objectTypes.map(item => [item.id, item]));
   if (discovery.conflicts?.length) failures.push('材料版本存在未解决冲突');
   const corrected = new Set();
+  const assigned = new Set();
   for (const expected of discovery.objectTypes) {
     const actual = objects.get(expected.id);
     const correction = primaryKeyCorrections.find(item => item.objectId === expected.id && item.kind === 'human_missing_key_assertion'
@@ -78,8 +79,18 @@ export function validateProposalEvidence(draft, discovery, primaryKeyCorrections
       && expected.fieldDefinitions.some(field => field.name === item.field && ['string', 'integer', 'number'].includes(field.type)
         && actual.fieldDefinitions.some(mapped => mapped.name === field.name && mapped.sourceField === (field.sourceField || field.name) && ['mapped', 'manual'].includes(mapped.mappingStatus))));
     if (!expected.key && correction && !discovery.conflicts?.some(item => item.objectId === expected.id)) corrected.add(expected.id);
+    // 阶段 4c 第二段（ADR-017）：归属确认写的是 `sourceSystems`，而材料只声明了归属**候选**。
+    // 因此「与材料一致」必须包含「与该对象已记录的人工归属确认一致」——
+    // 否则人在界面上确认归属的那一刻，Critic 的这条检查会立刻失败，链路又断在最后一步。
+    // 口径与 `primaryKeyCorrections` 的人工补主键完全相同：有记录的人工断言被接受，但在 detail 里注明。
+    const assignment = sourceAssignments.find(item => item.objectId === expected.id);
+    const actualSources = JSON.stringify([...(actual?.sourceSystems || [])].sort());
+    const sourcesMatch = actual && (actualSources === JSON.stringify(expected.sourceSystems)
+      || (expected.candidateSourceSystems?.length && actualSources === JSON.stringify([...expected.candidateSourceSystems].sort()))
+      || (assignment && actualSources === JSON.stringify([assignment.system])));
+    if (assignment && actualSources !== JSON.stringify(expected.sourceSystems)) assigned.add(expected.id);
     if (!actual || (actual.key !== expected.key && !corrected.has(expected.id)) || actual.granularity !== expected.granularity
-      || JSON.stringify(actual.sourceSystems) !== JSON.stringify(expected.sourceSystems)
+      || !sourcesMatch
       || expected.fieldDefinitions.some(field => !actual.fieldDefinitions.some(other => other.name === field.name && other.type === field.type && other.reference === field.reference && (other.unit || null) === (field.unit || null)))) failures.push(`${expected.id} 来源/粒度/主键/字段与材料不一致`);
   }
   for (const expected of discovery.relationshipTypes) {
@@ -90,7 +101,7 @@ export function validateProposalEvidence(draft, discovery, primaryKeyCorrections
   }
   failures.push(...(discovery.warnings || []).filter(warning => ![...corrected].some(id => warning === `${id}：未识别主键，进入 Review Queue 后必须补充。`)));
   if (draft.worldModel && !draft.worldModel.coverage.complete) failures.push('需求条目超过处理上限，未完整编译');
-  return [{ name: '材料语义保真与覆盖', status: failures.length ? 'failed' : 'passed', detail: failures.length ? [...new Set(failures)].join('；') : `对象来源、粒度、字段及显式关系与材料一致；${corrected.size ? `${corrected.size} 个缺失主键采用有记录的人工补充，不代表原材料已经声明或业务唯一性已证实` : '主键与材料一致'}；不代表真实业务样本或执行规则已验收。` }];
+  return [{ name: '材料语义保真与覆盖', status: failures.length ? 'failed' : 'passed', detail: failures.length ? [...new Set(failures)].join('；') : `对象来源、粒度、字段及显式关系与材料一致；${corrected.size ? `${corrected.size} 个缺失主键采用有记录的人工补充，不代表原材料已经声明或业务唯一性已证实` : '主键与材料一致'}；${assigned.size ? `${assigned.size} 个对象的来源采用有记录的人工归属确认（材料只声明了归属候选，不代表材料已声明来源系统）` : '来源系统与材料声明一致'}；不代表真实业务样本或执行规则已验收。` }];
 }
 
 export function proposalBusinessValidation(draft, critic, mapping) {

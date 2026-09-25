@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createMemoryDecision, normalizeUntrustedText } from './prompt-security-service.js';
 import { deleteState, listState, mutateState, readState, writeState } from '../repositories/runtime-state-repository.js';
-import { mutateWithDomainEvent } from '../domains/events/domain-event-outbox.js';
+import { mutateWithDomainEvent } from '../infrastructure/domain-events/domain-event-outbox.js';
 import { extractQueryBusinessIds } from './agent-query-service.js';
 
 const MAX_RUNS = 500;

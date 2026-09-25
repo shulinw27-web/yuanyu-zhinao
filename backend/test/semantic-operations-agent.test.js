@@ -9,6 +9,8 @@ import { detectRequestedSemanticSystems, discoverSemanticSources } from '../src/
 import { getMockConnectorCatalog, getMockSystemRecords } from '../src/services/mock-scenario-service.js';
 import { buildSemanticMappingContract, validateSemanticMappingContract, validateGovernedSemanticSamples } from '../src/services/semantic-mapping-validation-service.js';
 import { resolveSemanticOperationsPlanSystems } from '../src/services/semantic-operations-planner-service.js';
+import { naturalSchemaSkipReason, NATURAL_SCHEMA_SKIP_REASONS } from '../src/services/semantic-natural-schema-service.js';
+import { CANDIDATE_CATALOG, CANDIDATE_CATALOG_SIZE, listCatalogGaps, listUncoveredMentions, matchCandidateCatalog, UNCOVERED_MENTION_LIMIT } from '../src/services/semantic-candidate-catalog-service.js';
 
 const identity = { tenantId: 'semantic-test', subjectId: 'architect-01', deviceId: 'device-01' };
 
@@ -170,8 +172,10 @@ test('semantic operations proposal can only be applied by its owner and remains 
 
 test('semantic operations task binds natural-language intent to one reviewable server-side command', async () => {
   resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_snapshots', 'semantic_operations_agent_tasks', 'oa_meta_model_runtime']);
+  // 阶段 3：建模范围必须显式给出。文本里的「供应商/采购订单/原料批次」是业务对象，
+  // 不是系统范围——历史实现会据此推断为空后回落到全部可访问连接器，范围因此不可见。
   const task = await createSemanticOperationsTask({
-    body: { text: '建立供应商、采购订单和原料批次的语义模型。' },
+    body: { text: '建立供应商、采购订单和原料批次的语义模型。', systemCodes: ['ERP', 'WMS'] },
     role: getRole('executive'),
     identityScope: identity
   });
@@ -181,6 +185,10 @@ test('semantic operations task binds natural-language intent to one reviewable s
   assert.equal(task.proposal.critic.status, 'passed');
   assert.equal(task.planning.authoritativeIntent, 'build_model');
   assert.ok(['deterministic', 'local_model_advisory'].includes(task.planning.mode));
+  assert.equal(task.systemScope.selectionSource, 'explicit');
+  assert.deepEqual(task.systemScope.selected, ['ERP', 'WMS']);
+  assert.deepEqual(task.planning.systems, ['ERP', 'WMS']);
+  assert.deepEqual(task.sourceDiscovery.selectedSystemCodes, ['ERP', 'WMS']);
   const hidden = listSemanticOperationsTasks({ identityScope: { ...identity, subjectId: 'other-user' } });
   assert.equal(hidden.length, 0);
   const confirmation = issueSemanticOperationsTaskConfirmation({ taskId: task.id, identityScope: identity });
@@ -215,7 +223,7 @@ test('semantic operations status task is read-only and completes without confirm
 test('semantic operations confirmation is one-time, atomic, and resumes across devices', async () => {
   resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_snapshots', 'semantic_operations_agent_tasks', 'oa_meta_model_runtime']);
   const role = getRole('executive');
-  const task = await createSemanticOperationsTask({ body: { text: '建立供应商和采购订单语义模型。' }, role, identityScope: identity });
+  const task = await createSemanticOperationsTask({ body: { text: '建立供应商和采购订单语义模型。', systemCodes: ['ERP'] }, role, identityScope: identity });
   const missing = await executeSemanticOperationsTask({ taskId: task.id, role, identityScope: identity });
   assert.equal(missing.code, 'SEMANTIC_TASK_CONFIRMATION_INVALID');
   const resumed = listSemanticOperationsTasks({ identityScope: { ...identity, deviceId: 'device-02' } });
@@ -293,20 +301,22 @@ test('semantic operations routes each explicit operational intent without cross-
   resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_snapshots', 'semantic_operations_agent_tasks', 'oa_meta_model_runtime']);
   const role = getRole('executive');
   const cases = [
-    ['检查 ERP 和 WMS 的连接状态', 'discover_sources', 'inspect_sources', false],
-    ['查看当前模型发布状态和快照情况', 'inspect_status', 'inspect_status', false],
-    ['检查当前模型结构与断裂关系', 'validate_model', 'validate_model', true],
-    ['运行 Semantica 校验和模拟构建', 'simulate_model', 'simulate_model', true],
-    ['发布语义模型', 'publish_model', 'publish_model', true],
-    ['建立 WMS 库存与入库语义模型', 'build_model', 'apply_proposal', true]
+    ['检查 ERP 和 WMS 的连接状态', 'discover_sources', 'inspect_sources', false, ['ERP', 'WMS']],
+    ['查看当前模型发布状态和快照情况', 'inspect_status', 'inspect_status', false, null],
+    ['检查当前模型结构与断裂关系', 'validate_model', 'validate_model', true, null],
+    ['运行 Semantica 校验和模拟构建', 'simulate_model', 'simulate_model', true, null],
+    ['发布语义模型', 'publish_model', 'publish_model', true, null],
+    ['建立 WMS 库存与入库语义模型', 'build_model', 'apply_proposal', true, ['WMS']]
   ];
-  for (const [text, intent, command, confirmationRequired] of cases) {
-    const task = await createSemanticOperationsTask({ body: { text }, role, identityScope: identity });
+  for (const [text, intent, command, confirmationRequired, systemCodes] of cases) {
+    const task = await createSemanticOperationsTask({ body: { text, ...(systemCodes ? { systemCodes } : {}) }, role, identityScope: identity });
     assert.equal(task.intent, intent, text);
     assert.equal(task.command, command, text);
     assert.equal(task.confirmationRequired, confirmationRequired, text);
     assert.equal(task.status, confirmationRequired ? 'waiting_confirmation' : 'completed', text);
     assert.equal(Boolean(task.proposal), intent === 'build_model', text);
+    // 只有来源绑定意图才携带范围；其余意图不得因为文本里出现系统名而被动获得范围。
+    assert.deepEqual(task.systemScope ? task.systemScope.selected : null, systemCodes, text);
   }
 });
 
@@ -352,6 +362,12 @@ test('semantic source discovery exposes governed WMS readiness without reading b
   resetRuntimeState(['semantic_operations_agent_tasks']);
   const discovery = discoverSemanticSources({ request: '检查 ERP 和 WMS 的连接状态与建模物料。', role: getRole('executive') });
   assert.deepEqual(discovery.requestedSystems, ['ERP', 'WMS']);
+  // 阶段 3：文本识别已经从「范围依据」降级为「提示素材」。它仍然返回识别的系统名，
+  // 但 selectionSource 必须如实标注范围是推断来的，且 scopeNotice 说明写入前需显式确认。
+  assert.equal(discovery.selectionSource, 'text_inference');
+  assert.deepEqual(discovery.selectedSystemCodes, ['ERP', 'WMS']);
+  assert.equal(discovery.explicitSystemCodes, null);
+  assert.match(discovery.scopeNotice, /推断而非显式选择/);
   assert.equal(discovery.sources.find((item) => item.code === 'ERP').authorized, true);
   assert.equal(discovery.sources.find((item) => item.code === 'WMS').status, 'not_configured');
   assert.equal(discovery.sources.find((item) => item.code === 'WMS').authorized, true);
@@ -360,7 +376,7 @@ test('semantic source discovery exposes governed WMS readiness without reading b
   assert.match(discovery.policy, /不主动查询业务明细/);
 
   const task = await createSemanticOperationsTask({
-    body: { text: '检查 ERP 和 WMS 的连接状态与建模物料。' },
+    body: { text: '检查 ERP 和 WMS 的连接状态与建模物料。', systemCodes: ['ERP', 'WMS'] },
     role: getRole('executive'),
     identityScope: identity
   });
@@ -369,6 +385,7 @@ test('semantic source discovery exposes governed WMS readiness without reading b
   assert.equal(task.status, 'completed');
   assert.equal(task.confirmationRequired, false);
   assert.equal(task.sourceDiscovery.blockers.length, 0);
+  assert.deepEqual(task.sourceDiscovery.selectedSystemCodes, ['ERP', 'WMS']);
   assert.ok(task.sourceDiscovery.sources.find((item) => item.code === 'WMS').mappings.length >= 2);
   const explicitWms = discoverSemanticSources({ request: '根据 WMS 库存与入库数据建设模型。', role: getRole('executive') });
   assert.deepEqual(explicitWms.requestedSystems, ['WMS']);
@@ -429,7 +446,7 @@ test('OpenAPI material discovers WMS objects, primary keys, and references befor
 
 test('visual proposal revision recalculates field metadata, critic, diff, and applied draft', async () => {
   resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_snapshots', 'semantic_operations_agent_tasks', 'oa_meta_model_runtime']);
-  const task = await createSemanticOperationsTask({ body: { text: '建立 WMS 库存与入库语义模型。' }, role: getRole('executive'), identityScope: identity });
+  const task = await createSemanticOperationsTask({ body: { text: '建立 WMS 库存与入库语义模型。', systemCodes: ['WMS'] }, role: getRole('executive'), identityScope: identity });
   const objects = structuredClone(task.proposal.objectTypes);
   const inventory = objects.find((item) => item.id === 'Inventory');
   inventory.label = '仓储可用库存';
@@ -541,4 +558,169 @@ test('mapping rehearsal blocks draft adoption until a missing required source fi
   assert.equal(revised.mappingValidation.blocked, false);
   const applied = applySemanticOperationsProposal({ proposalId: proposal.id, role: getRole('executive'), identityScope: identity });
   assert.equal(applied.proposal.status, 'applied_to_draft');
+});
+
+// ── 阶段 4f：候选对象的**来源**与「没被生成」的原因必须可读（ADR-021）────────────
+//
+// 这一组针对本重构一路在消除的同一种毛病：**静默**。候选对象此前有两条静默路径——
+//   ① 自然语言抽取不尝试（模拟运行时 / 材料没有字典线索），只 `return null`，不说明理由；
+//   ② 受控目录关键词命中后，既不点名命中在哪个词上，也不说它是**兜底**而不是抽取结果。
+// 于是「材料里写了发运单、候选里却没有」这件事无人能解释：是没写清？目录没这个词？还是没接模型？
+test('阶段 4f：受控目录命中与「未做自然语言抽取」的原因都必须写进审阅说明', async () => {
+  resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);
+  // 纯自然语言、不带附件：结构化发现必然为空，于是落到受控目录兜底。
+  // 测试环境恒为 mock 运行时，因此自然语言抽取**不会**被尝试——这件事此前是静默的。
+  const proposal = await createSemanticOperationsProposalFromRequest({
+    body: { text: '根据 ERP 的采购订单与供应商资料建立候选模型。' },
+    role: getRole('executive'), identityScope: identity
+  });
+  assert.ok(!proposal.error, JSON.stringify(proposal).slice(0, 300));
+
+  // ① 命中依据：必须点名「哪个目录条目被哪几个词命中」。
+  //    只说「命中 2 类」仍回答不了「为什么没有发运单」——那要看的是**没命中**的那些。
+  const catalogNote = proposal.reviewNotes.find((note) => note.includes('受控目录关键词命中'));
+  assert.ok(catalogNote, `reviewNotes 未披露受控目录命中：${JSON.stringify(proposal.reviewNotes)}`);
+  assert.match(catalogNote, /PurchaseOrder ← 采购订单/);
+  assert.match(catalogNote, /Supplier ← 供应商/);
+  assert.match(catalogNote, /受控目录共 12 类/);
+  // 覆盖率与「可能漏了什么」必须一起说：这才说明白它只是词面匹配，不是「材料里的对象都在这了」。
+  assert.match(catalogNote, /目录未覆盖的业务对象\*\*不会\*\*出现在候选里/);
+
+  // ② 跳过原因：必须能区分「没接模型」与「材料没给字典线索」——两者要做的补救完全不同。
+  const skipNote = proposal.reviewNotes.find((note) => note.includes('未从非结构化材料做自然语言抽取'));
+  assert.ok(skipNote, `reviewNotes 未披露抽取跳过原因：${JSON.stringify(proposal.reviewNotes)}`);
+  assert.match(skipNote, /模拟模式/);
+
+  // ③ 目录也没命中时行为**不变**：仍是硬错误，不生成空候选、不放宽任何门槛。
+  const empty = await createSemanticOperationsProposalFromRequest({
+    body: { text: '你好' }, role: getRole('executive'), identityScope: identity
+  });
+  assert.equal(empty.code, 'SEMANTIC_PROPOSAL_NO_GROUNDED_OBJECTS');
+});
+
+test('阶段 4f：两条跳过原因由纯函数判定，使模拟运行时遮不住另一条分支', () => {
+  // 测试环境恒为 mock：若判定内联在 discoverNaturalSchema 里，`not_dictionary_like`
+  // 这条分支会被 mock 分支永久遮住，等于没有覆盖。
+  assert.equal(naturalSchemaSkipReason({ mode: 'workbuddy', material: '我们有订单、库存、发运三类数据，订单有单号和客户。' }), 'not_dictionary_like');
+  assert.equal(naturalSchemaSkipReason({ mode: 'workbuddy', material: '采购订单表 purchase_order，主键 purchase_order_id。' }), null);
+  assert.equal(naturalSchemaSkipReason({ mode: 'mock', material: '主键 purchase_order_id' }), 'mock_runtime');
+  assert.equal(naturalSchemaSkipReason({ mode: undefined, material: '' }), 'not_dictionary_like');
+  // 两句说明必须互不相同：合并成一句会让运营朝错误方向改材料（该换 provider 的跑去补字段名）。
+  assert.notEqual(NATURAL_SCHEMA_SKIP_REASONS.mock_runtime, NATURAL_SCHEMA_SKIP_REASONS.not_dictionary_like);
+  assert.match(NATURAL_SCHEMA_SKIP_REASONS.mock_runtime, /模拟模式/);
+  assert.match(NATURAL_SCHEMA_SKIP_REASONS.not_dictionary_like, /字典线索/);
+});
+
+// ── 阶段 4g：候选对象的**覆盖面**必须可点名（ADR-022）──────────────────────────
+//
+// 阶段 4f 让「命中依据」可读，但**没命中的那些仍是沉默的**：运营看得到「命中 2 类」，
+// 看不到「目录里根本没有承载你要的那类对象的词条」。于是留了一句无法执行的
+// 「请核对是否遗漏」——要核对什么、怎么核对，一个字都没有。
+// 本组钉住两侧：目录空白（确定性）与材料未覆盖提及（启发式）。
+test('阶段 4g：目录空白与未覆盖提及都必须可点名，但都不得进入候选对象', async () => {
+  resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);
+  // 一次性把四个业务对象写清（并用顿号列举），其中三个在受控目录里没有任何词条。
+  const proposal = await createSemanticOperationsProposalFromRequest({
+    body: { text: '本次要建模的对象是采购订单、发运单、出库单、客户投诉。' },
+    role: getRole('executive'), identityScope: identity
+  });
+  assert.ok(!proposal.error, JSON.stringify(proposal).slice(0, 300));
+
+  // ① 披露必须落**结构化字段**，不能只活在一句中文里：界面与复算要按字段判断。
+  const coverage = proposal.candidateCoverage;
+  assert.ok(coverage, '提案上没有 candidateCoverage');
+  assert.equal(coverage.catalogSize, CANDIDATE_CATALOG_SIZE);
+  assert.equal(coverage.catalogSize, 12);
+  // 「兜底路径是否生效」是解读整份披露的前提：目录没被用到时，说「命中 0 类」会误导。
+  assert.equal(coverage.fallbackApplied, true);
+  assert.deepEqual(coverage.matched, [{ id: 'PurchaseOrder', matchedTerms: ['采购订单', '订单'] }]);
+
+  // ② 目录空白（确定性）：平台已治理、但候选目录没有词条的对象类，必须点名。
+  //    「发运单 / 出库单」进不来不是运营没写清——WMS 的世界模型里有 OutboundShipment，
+  //    但受控目录里没有任何词条承载它。这一项此前没有任何地方能看出来。
+  assert.equal(coverage.gaps.length, 14);
+  assert.ok(coverage.gaps.some((item) => item.objectType === 'OutboundShipment' && item.system === 'WMS'));
+  assert.ok(coverage.gaps.every((item) => !CANDIDATE_CATALOG.some((entry) => entry.id === item.objectType)));
+
+  // ③ 未覆盖提及（启发式）：材料列举项里没有被任何词条覆盖的那些，必须点名。
+  assert.deepEqual(coverage.uncoveredMentions, ['发运单', '出库单', '客户投诉']);
+  assert.equal(coverage.uncoveredTruncated, false);
+  assert.equal(coverage.uncoveredBasis, 'enumeration_heuristic');
+
+  // ④ **披露不等于补齐**：点名之后候选对象集合必须**一个都没多**。
+  //    把它们补进候选涉及对象来源与范围的既有决策（ADR-012 / 013 / 017），不在这里做。
+  assert.deepEqual(proposal.objectTypes.map((item) => item.id), ['PurchaseOrder']);
+
+  // ⑤ 审阅说明：三类披露各自说清，且启发式必须自我标注（不能被当成抽取结果）。
+  const notes = proposal.reviewNotes;
+  assert.ok(notes.some((note) => /受控目录共 12 类/.test(note)), notes.join('\n'));
+  const gapNote = notes.find((note) => note.includes('在受控目录里没有任何词条'));
+  assert.ok(gapNote, notes.join('\n'));
+  assert.match(gapNote, /OutboundShipment（WMS）/);
+  const mentionNote = notes.find((note) => note.includes('没有被任何受控词条覆盖'));
+  assert.ok(mentionNote, notes.join('\n'));
+  assert.match(mentionNote, /发运单、出库单、客户投诉/);
+  assert.match(mentionNote, /启发式/);
+  assert.match(mentionNote, /不是对象抽取结果/);
+
+  // ⑥ 兜底路径没生效时（结构化材料给了对象），覆盖披露必须**不声称**目录能力问题。
+  const structured = await createSemanticOperationsProposal({
+    input: '采用材料中的结构化字典。', identityScope: identity,
+    schemaDiscovery: {
+      files: [], summary: '结构化字典', attribution: { attributed: [], ambiguous: [], unattributed: [] },
+      objectTypes: [{ id: 'InventoryLot', label: '库存批次', source: 'wms.inventory_lot', key: 'inventoryLotId', fields: ['inventoryLotId', 'quantity'], fieldDefinitions: [
+        { name: 'inventoryLotId', type: 'string', required: true, primaryKey: true, sourceField: 'inventoryLotId', mappingStatus: 'mapped' },
+        { name: 'quantity', type: 'number', sourceField: 'quantity', mappingStatus: 'mapped' }
+      ], classification: '内部受限', semanticType: 'InventoryLot', coreObject: 'InventoryLot', sourceSystems: ['WMS'] }],
+      relationshipTypes: []
+    }
+  });
+  assert.ok(!structured.error, JSON.stringify(structured).slice(0, 300));
+  assert.equal(structured.candidateCoverage.fallbackApplied, false);
+  assert.deepEqual(structured.candidateCoverage.matched, []);
+  assert.deepEqual(structured.candidateCoverage.gaps, []);
+  assert.deepEqual(structured.candidateCoverage.uncoveredMentions, []);
+});
+
+test('阶段 4g：覆盖面判据是纯函数，可脱离提案逐条取证', () => {
+  // ① 词面命中必须带**命中词**：「命中 2 类」回答不了「为什么没有发运单」。
+  assert.deepEqual(matchCandidateCatalog('根据 ERP 的采购订单与供应商资料建立候选模型。')
+    .map((entry) => `${entry.item.id}←${entry.matchedTerms.join('、')}`), ['Supplier←供应商', 'PurchaseOrder←采购订单、订单']);
+
+  // ② 目录空白：与系统目录的世界模型对象求差集，零启发式。14 类是该数据下的实测值，
+  //    系统目录里增删世界模型对象时这条会失败——这是有意的（与棘轮同一立场）。
+  const gaps = listCatalogGaps();
+  assert.equal(gaps.length, 14);
+  assert.deepEqual([...new Set(gaps.map((item) => item.system))].sort(), ['LIMS', 'MES', 'OMS', 'QMS', 'WMS']);
+  assert.ok(!gaps.some((item) => item.objectType === 'PurchaseOrder'));
+
+  // ③ 未覆盖提及：只有**并列列举**才取词。整段散文不产生任何提及——
+  //    否则「我们要根据这些资料建立模型」会被当成一个对象名。
+  assert.deepEqual(listUncoveredMentions({ sourceText: '我们要根据这些资料建立模型。' }).mentions, []);
+  assert.deepEqual(listUncoveredMentions({ sourceText: '采购订单、发运单、出库单、客户投诉', matchedTerms: ['采购订单', '订单'] }).mentions,
+    ['发运单', '出库单', '客户投诉']);
+
+  // ④ 噪声门：列举项里夹着从句时，非名词性线索字必须把它挡掉，不能淹掉真正要看的词。
+  assert.deepEqual(listUncoveredMentions({ sourceText: '我们有订单、库存、发运三类数据，订单有单号和客户。', matchedTerms: ['订单', '库存'] }).mentions, []);
+
+  // ⑤ 覆盖判定必须**双向**：提及含词条（原料批次⊃原料）与词条含提及（物料主数据⊃物料）都算已覆盖。
+  //    只判一向会让「物料」在命中「物料主数据」之后又被列进未覆盖清单，等于自己打自己。
+  assert.deepEqual(listUncoveredMentions({ sourceText: '物料、发运单', matchedTerms: ['物料主数据'] }).mentions, ['发运单']);
+  assert.deepEqual(listUncoveredMentions({ sourceText: '原料批次、发运单', matchedTerms: ['原料'] }).mentions, ['发运单']);
+  //    反向对照：词条与提及只是「都含原料二字」但互不包含时，不得算覆盖。
+  //    （注意此处的 `原料批次` 必须写在并列列举里才会被取词——单段文本不产生提及，见 ③。）
+  assert.deepEqual(listUncoveredMentions({ sourceText: '原料批次、发运单', matchedTerms: ['物料主数据'] }).mentions, ['原料批次', '发运单']);
+
+  // ⑥ 非汉字、单字与被覆盖项不得入清单；重复项去重。
+  assert.deepEqual(listUncoveredMentions({ sourceText: 'ERP、WMS', matchedTerms: [] }).mentions, []);
+  assert.deepEqual(listUncoveredMentions({ sourceText: '单、发运单、发运单', matchedTerms: [] }).mentions, ['发运单']);
+
+  // ⑦ 截断必须**说明被截断**：整段材料若被切成几十个短语，全列出来只会把审阅说明淹掉，
+  //    但静默丢弃会让「还有多少没看」变成新的沉默。
+  const many = ['发运单', '出库单', '客户投诉', '来料单', '送货单', '退货单', '装箱单', '报关单', '提货单', '验收单', '领料单', '调拨单', '盘点单', '入库单', '结算单'];
+  const truncated = listUncoveredMentions({ sourceText: many.join('、'), matchedTerms: [] });
+  assert.equal(truncated.total, 15);
+  assert.equal(truncated.mentions.length, UNCOVERED_MENTION_LIMIT);
+  assert.equal(truncated.truncated, true);
+  assert.equal(truncated.basis, 'enumeration_heuristic');
 });

@@ -8,7 +8,7 @@ import { multitenantFixture, isolatedPortal } from './helpers/multitenant-fixtur
 import { createAgentConversation, getAgentConversation, getAgentConversationContext, listAgentConversations, archiveAgentConversation, recordAgentConversationExchange } from '../src/services/agent-conversation-service.js';
 import { rememberAgentLongTermGoal, getAgentLongTermMemory, forgetAgentLongTermMemory } from '../src/services/agent-runtime-store.js';
 import { saveLibraryDocument, readLibraryDocument, searchLibraryDocuments, retractLibraryDocument } from '../src/services/knowledge-library-service.js';
-import { listDomainEvents } from '../src/domains/events/domain-event-outbox.js';
+import { listDomainEvents } from '../src/infrastructure/domain-events/domain-event-outbox.js';
 import { createSemanticOperationsProposal, applySemanticOperationsProposal, listSemanticOperationsSnapshots, rollbackSemanticOperationsSnapshot } from '../src/services/semantic-operations-agent-service.js';
 import { getRole } from '../src/services/authorization-service.js';
 import { resetRuntimeState } from '../src/repositories/runtime-state-repository.js';

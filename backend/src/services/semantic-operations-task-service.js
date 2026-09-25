@@ -16,7 +16,7 @@ import {
 } from './meta-model-service.js';
 import { validateSemanticaModelDefinition } from './semantica-demo-bridge-service.js';
 import { publishGovernedOntology } from './ontology-runtime-service.js';
-import { discoverSemanticSources } from './semantic-source-discovery-service.js';
+import { discoverSemanticSources, detectRequestedSemanticSystems } from './semantic-source-discovery-service.js';
 import { planSemanticOperationsRequest } from './semantic-operations-planner-service.js';
 import { semanticFingerprint } from './semantic-model-fingerprint.js';
 import { semanticOperationsOwnerMatches, semanticOperationsPrincipalKey } from './semantic-operations-identity.js';
@@ -54,6 +54,154 @@ const taskCanBeViewed = (task, accessContext) => {
 
 const operation = (intent, command, permission, reason) => ({ intent, command, permission, reason });
 const noOperation = (intent, reason, response) => ({ intent, command: null, permission: null, reason, response });
+
+/** 需要来源范围的意图：建模与来源预检。只有这两个意图的值可以来自「哪些系统」。 */
+const SOURCE_BOUND_INTENTS = Object.freeze(['build_model', 'discover_sources']);
+
+/**
+ * 解析并校验本次建模/预检的来源范围。范围只能来自请求体里的显式勾选，任何情况下都不放大：
+ * 没有选择、选择了未登记的系统、选择了当前角色数据域之外的系统，一律 400 并说明原因，
+ * 而不是「静默裁到可见的」「静默扩到全部可见的」。这与 4.5 决策 C 一致：
+ * 界面选择不构成隐式提权，但用户选了却拿不到数据时必须明确知道为什么。
+ *
+ * 判定复用 `discoverSemanticSources` 的同一个连接器目录与角色数据域，避免出现
+ * 「面板显示可选、后端判定越权」的两套判断。
+ */
+function resolveSemanticSystemScope({ body, role, text, parent }) {
+  const raw = body?.systemCodes;
+  if (raw !== undefined && (!Array.isArray(raw) || raw.some((item) => typeof item !== 'string' || !item.trim()))) {
+    return { error: 'systemCodes 必须是非空字符串数组；未创建任务。', status: 400, code: 'SEMANTIC_SYSTEM_SCOPE_INVALID' };
+  }
+  const codes = raw === undefined
+    ? []
+    : [...new Set(raw.map((item) => item.trim().toUpperCase()))];
+  if (!codes.length) {
+    // 承接上文时给出上文范围作为提示，但仍要求本轮显式确认：范围不能靠「继承」偷偷生效。
+    const inherited = parent?.systemScope?.selected?.length ? `上文任务的范围是 ${parent.systemScope.selected.join('、')}，如仍要沿用请在本轮显式带上。` : '';
+    return {
+      error: `本次诉求需要来源系统范围，但没有选择任何系统。请在建模范围中选择至少一个已登记系统后重试；服务器不会自动扩大到全部可访问连接器。${inherited}`,
+      status: 400,
+      code: 'SEMANTIC_SYSTEM_SCOPE_REQUIRED'
+    };
+  }
+  const discovered = discoverSemanticSources({ systemCodes: codes, role });
+  const unknown = discovered.sources.filter((item) => !item.registryKnown).map((item) => item.code);
+  if (unknown.length) {
+    return { error: `系统编码不在系统注册表中，无法作为来源范围：${unknown.join('、')}。请从系统接入清单中选择，未创建任务。`, status: 400, code: 'SEMANTIC_SYSTEM_UNKNOWN' };
+  }
+  const unregistered = discovered.sources.filter((item) => item.registryKnown && item.status === 'not_registered').map((item) => item.code);
+  if (unregistered.length) {
+    return { error: `以下系统尚未登记受控连接器，不能作为来源范围：${unregistered.join('、')}。请先在系统接入中完成登记，未创建任务。`, status: 400, code: 'SEMANTIC_SYSTEM_NOT_REGISTERED' };
+  }
+  const forbidden = discovered.sources.filter((item) => item.authorized === false).map((item) => item.code);
+  if (forbidden.length) {
+    return {
+      error: `所选系统中的 ${forbidden.join('、')} 超出当前角色的数据域授权。范围不会被静默裁剪，也不会为它们提权；请去掉这些系统，或由具备权限的人员处理。未创建任务。`,
+      status: 403,
+      code: 'SEMANTIC_SYSTEM_SCOPE_FORBIDDEN'
+    };
+  }
+  return {
+    systemCodes: codes,
+    mentionedNotSelected: detectRequestedSemanticSystems(text).filter((code) => !codes.includes(code))
+  };
+}
+
+/**
+ * 汇总提案对所选来源范围的实际覆盖。**过滤发生在提案构建阶段**（`applyScopeFilterToObjects`，ADR-013），
+ * 这里只把结果翻译成可审计的上报口径：
+ * - `covered`：过滤后提案里对象来源命中的所选系统
+ * - `uncovered`：选了但过滤后提案里一个对象都没有的系统（必须在界面上显式出现）
+ * - `excludedObjects`：因**全部**来源在所选范围外而被排除的对象
+ * - `excludedRelationships`：因端点对象被排除而一并排除的关系
+ * - `partialScopeObjects`：**部分**来源在范围外、但仍在提案里的对象
+ * - `unassignedObjects`：材料未声明来源系统、无法追溯到任何系统的对象（历史高发风险点）
+ *
+ * `excludedObjects` 是本 ADR 的核心约束：**过滤不得静默**。被排除项必须可读地出现在任务结果里，
+ * 运营才能看出「材料里有东西因为没勾系统而被排除」并据此补选系统重跑。
+ * 旧的 `outOfScopeObjects` 字段被拆为 `partialScopeObjects`（仍在提案）与 `excludedObjects`（已移除）——
+ * 保留并集别名会让调用方无法从字段名判断对象是否还在提案里。
+ */
+function summarizeSystemScopeCoverage(scope, proposal) {
+  const selected = new Set(scope.selected);
+  const objects = proposal?.objectTypes || [];
+  const exclusions = proposal?.scopeExclusions || {};
+  const covered = new Set();
+  for (const object of objects) {
+    [...new Set((object.sourceSystems || []).filter(Boolean))]
+      .filter((code) => code !== 'UNASSIGNED' && selected.has(code))
+      .forEach((code) => covered.add(code));
+  }
+  return {
+    ...scope,
+    covered: [...covered].sort(),
+    uncovered: scope.selected.filter((code) => !covered.has(code)).map((code) => ({
+      code,
+      reason: objects.length ? '本次提案中没有任何对象的来源系统标注为该系统。' : '本次未生成提案对象，无法判断覆盖情况。'
+    })),
+    excludedObjects: exclusions.excludedObjects || [],
+    excludedRelationships: exclusions.excludedRelationships || [],
+    partialScopeObjects: exclusions.partialScopeObjects || [],
+    unassignedObjects: exclusions.unassignedObjects || [],
+    // 阶段 4a：跨系统标识只上报计数与冲突种类，明细留在提案的 identityLinking 上——
+    // 在任务上复制一份完整清单，迟早会与提案那份不一致。
+    // 阶段 4c：裁定集合按同一口径只报「已裁定了哪些概念」，明细与重算报告仍在提案上。
+    identity: proposal?.identityLinking ? {
+      summary: proposal.identityLinking.summary,
+      conflictKinds: [...new Set(proposal.identityLinking.conflicts.map((item) => item.kind))].sort(),
+      rulings: proposal.identityConflictRulings || [],
+      // 阶段 4c 第三段：同名声明裁定与等价裁定同口径只报「裁定了哪些分歧项」，明细仍在提案上。
+      declarationRulings: proposal.declarationRulings || []
+    } : null
+  };
+}
+
+const IDENTITY_CONFLICT_LABELS = Object.freeze({
+  ambiguous_identifier: '标识归属歧义',
+  alias_divergence: '同义不同名',
+  key_shape_incompatible: '键形状不可对齐',
+  declaration_divergence: '同名声明不一致'
+});
+
+/** 标识对应的可读摘要：只陈述事实与数量，不替运营下结论（明细在提案的 identityLinking 上）。 */
+function describeIdentityFindings(identityLinking) {
+  if (!identityLinking) return [];
+  const { summary, keyGaps, conflicts, unresolvedReferences } = identityLinking;
+  // 「其所属概念存在等价分歧、且尚未裁定」的链接数——不能直接数 `ruling === null`，
+  // 那会把 PurchaseOrder / Supplier 这类本就没有等价分歧的链接也算进来。
+  const unresolvedConcepts = identityLinking.rulingReport?.unresolvedConcepts || [];
+  const unresolvedAssumptionLinks = identityLinking.links.filter((item) => !item.ruling && unresolvedConcepts.includes(item.concept));
+  return [
+    ...(summary.links ? [`跨系统标识对应 ${summary.links} 条（其中 ${summary.requiresMapping} 条是代理键与业务键之间的引用，不能按值直接对齐，确认时须给出结构化映射定义${summary.shapeUnknown ? `；另有 ${summary.shapeUnknown} 条有一端键形状未判定（裸名），须先判定形状` : ''}），未自动并入草稿关系`] : []),
+    // 阶段 4e（ADR-020）：资格是独立口径，必须与「有几条对应」一起说。缺这一句，运营只能靠
+    // 自己试错去发现「11 条里有 4 条这次根本用不了」。
+    ...(summary.ineligible ? [`其中 ${summary.ineligible} 条本次不可并入草稿：端点对象 ${[...new Set(identityLinking.links.filter((item) => !item.eligible).flatMap((item) => item.ineligibleEndpoints.map((endpoint) => `${endpoint.system}.${endpoint.objectId}`)))].join('、')} 不在本次候选对象内（它们只在系统声明里存在），需先让这些对象成为候选对象`] : []),
+    // 「有多少条链站在没人回答过的前提上」是阶段 4c 最需要被说清的一项：
+    // 只说「11 条对应」会让人以为 11 个结论各自独立，实际上它们共享少数几个等价假设。
+    ...(unresolvedAssumptionLinks.length ? [`其中 ${unresolvedAssumptionLinks.length} 条建立在尚未裁定的等价前提上（涉及 ${unresolvedConcepts.join('、')}），需先裁定等价关系再逐条确认`] : []),
+    ...(summary.ruledConcepts ? [`已裁定 ${summary.ruledConcepts} 个概念的标识等价关系${summary.withdrawnLinks ? `，并因裁定为不同实体撤下 ${summary.withdrawnLinks} 条跨组对应` : ''}`] : []),
+    ...(summary.conflicts ? [`标识冲突 ${summary.conflicts} 项：${[...new Set(conflicts.map((item) => IDENTITY_CONFLICT_LABELS[item.kind] || item.kind))].sort().join('、')}`] : []),
+    // 阶段 4c 第三段：并集是默认动作、不是结论。不报出「有几个复合条目 / 几个分歧项没裁定」，
+    // 运营只能看到「这个对象有 7 个字段」，而没有任何一处声明说过这句话。
+    ...(summary.declarationDivergences ? [`同名声明不一致 ${summary.declarationDivergences} 项，其中 ${summary.unresolvedDeclarationItems} 项未裁定${summary.mergedUnruledObjects ? `、${summary.mergedUnruledObjects} 个对象的字段仍是并集` : ''}`] : []),
+    ...(summary.ruledDeclarationItems ? [`已裁定 ${summary.ruledDeclarationItems} 项同名声明分歧${summary.splitObjects ? `，拆分为 ${summary.splitObjects} 个对象` : ''}${summary.droppedDeclarations ? `，并显式排除 ${summary.droppedDeclarations} 条声明` : ''}`] : []),
+    ...(keyGaps.length ? [`未识别到自身标识的对象：${keyGaps.map((item) => `${item.objectId}（${item.system}）`).join('、')}`] : []),
+    ...(unresolvedReferences.length ? [`范围内被引用但没有对应实体：${unresolvedReferences.map((item) => `${item.field}→${item.concept}`).join('、')}`] : [])
+  ];
+}
+
+/** 覆盖问题的可读摘要，用于任务回应与证据事件；没有问题时不产生噪音。 */
+function describeScopeFindings(systemScope) {
+  if (!systemScope) return [];
+  return [
+    ...systemScope.uncovered.map((item) => `${item.code}：本次提案未覆盖（${item.reason}）`),
+    ...(systemScope.excludedObjects?.length ? [`按范围排除的对象：${systemScope.excludedObjects.map((item) => `${item.objectId}（${item.sourceSystems.join('/')}）`).join('、')}（来源系统不在本次所选范围内；如需纳入请补选系统后重跑）`] : []),
+    ...(systemScope.excludedRelationships?.length ? [`随对象一并排除的关系：${systemScope.excludedRelationships.map((item) => `${item.from}-${item.predicate}->${item.to}`).join('、')}`] : []),
+    ...(systemScope.partialScopeObjects?.length ? [`部分来源超出范围的对象：${systemScope.partialScopeObjects.map((item) => `${item.objectId}（超出 ${item.outside.join('/')}）`).join('、')}（已保留，仅提示来源超出所选范围）`] : []),
+    ...(systemScope.unassignedObjects?.length ? [`来源系统未标注的对象：${systemScope.unassignedObjects.join('、')}（材料未声明来源，无法追溯到系统，已保留）`] : []),
+    ...(systemScope.mentionedNotSelected.length ? [`文本提到但未选择的系统：${systemScope.mentionedNotSelected.join('、')}（未纳入本次范围）`] : [])
+  ];
+}
 const includesAnyTerm = (text, terms) => terms.some((term) => text.includes(term));
 const buildTerms = ['建设', '建立', '构建', '建模', '新增对象', '添加对象', '识别对象', '抽取对象', '定义对象', '设计模型', '生成候选', '生成语义', '生成模型'];
 const groundedObjectTerms = ['供应商', '采购', '订单', '原料', '物料', '批次', '检验', '质检', '生产', '成品', '库存', '仓库', '入库', '出库', '门店', '设备', '组织', '人员', '审批', '字段', '对象', '关系', '数据字典', 'openapi', 'schema'];
@@ -72,7 +220,7 @@ export function classifySemanticOperationsIntent(text, { hasAttachments = false 
     return noOperation('unsupported_operation', 'unsupported_destructive_operation', '当前对话不会直接执行删除、覆盖、回滚或下线操作。请在“版本与回滚”中选择明确快照，并按治理流程单独确认。');
   }
   if (/^(?:你好|您好|嗨|哈喽|hello|hi|早上好|下午好|晚上好|在吗|有人吗)[!！。.，,\s]*$/i.test(value)) {
-    return noOperation('conversation', 'greeting', '你好，我是语义运营 Agent。我可以协助建设语义模型、检查数据来源、查看草稿状态、运行校验与模拟；涉及写入或发布的操作都会等待你明确确认。');
+    return noOperation('conversation', 'greeting', '你好，我是元域智营 Agent。我可以协助建设语义模型、检查数据来源、查看草稿状态、运行校验与模拟；涉及写入或发布的操作都会等待你明确确认。');
   }
   if (/(?:你是谁|能做什么|有哪些能力|怎么使用|使用说明|帮助|支持什么)/.test(value)) {
     return noOperation('conversation', 'capability_question', '我负责语义层运营，可以根据自然语言或受控材料建设模型、发现来源、检查状态、校验草稿和运行 Semantica 模拟。请告诉我对象范围、来源系统和目标；写操作会先生成计划并等待确认。');
@@ -104,7 +252,7 @@ export function classifySemanticOperationsIntent(text, { hasAttachments = false 
       : noOperation('needs_clarification', 'build_scope_missing', '我识别到建模意图，但还缺少对象范围或结构材料。请说明要建设的业务对象、来源系统，或上传数据字典、OpenAPI、JSON Schema、CSV 示例。');
   }
   if (!value && hasAttachments) return operation('build_model', 'apply_proposal', 'meta_model.draft.save', 'attachment_only_build');
-  return noOperation('needs_clarification', 'operation_not_identified', '我还不能确定你希望执行哪类语义运营任务。请明确是建设模型、检查来源、查看状态、校验草稿、模拟构建还是发布模型，并补充对象或系统范围。');
+  return noOperation('needs_clarification', 'operation_not_identified', '我还不能确定你希望执行哪类元域智营任务。请明确是建设模型、检查来源、查看状态、校验草稿、模拟构建还是发布模型，并补充对象或系统范围。');
 }
 
 const planFor = (intent) => ({
@@ -118,6 +266,39 @@ const planFor = (intent) => ({
   needs_clarification: [],
   unsupported_operation: []
 }[intent] || []);
+
+/**
+ * 语义面意图裁决：模型理解与确定性分类的唯一汇合点。抽成纯函数以便独立测试。
+ *
+ * 回落规则（修正「模型一抖、入口全黑」）：
+ * understandAgentTurn 在模型不可用或输出不合契约时返回 source='understanding_failed'。
+ * 历史上该结果仍被当作一次有效的 dialogue 判定（reason=model_dialogue），于是任何自然语言
+ * 诉求都退化成「本轮模型未返回可用的理解结果」——连「识别到建模意图但缺少对象范围」
+ * 这种可操作的澄清都拿不到。现在：模型**未产出有效理解**时回落服务端确定性分类
+ * （与 mock 模式下同一条路径），并把降级事实保留在返回值里，不伪装成模型理解成功。
+ *
+ * 安全边界（不得放宽）：发布不参与回落。既有不变量要求发布必须同时具备「语义理解」与
+ * 「本轮明确请求」，语义理解不可用时不得降级授权发布。
+ */
+export function resolveSemanticOperationsIntent({ turn, text, contextualText, hasAttachments = false }) {
+  const turnUnavailable = Boolean(turn) && turn.source === 'understanding_failed';
+  let classified = classifySemanticOperationsIntent(turn && !turnUnavailable ? text : contextualText, { hasAttachments });
+  if (turnUnavailable && classified.intent === 'publish_model') {
+    classified = noOperation('needs_clarification', 'publish_requires_model_understanding', '发布需要先取得可用的语义理解结果，本次不会降级授权发布。请重试，或先执行“校验草稿 / 模拟构建”。');
+  }
+  if (turn && !turnUnavailable) {
+    const operations = {
+      build_model: ['apply_proposal', 'meta_model.draft.save'], discover_sources: ['inspect_sources', null], inspect_status: ['inspect_status', null],
+      validate_model: ['validate_model', 'meta_model.draft.validate'], simulate_model: ['simulate_model', 'meta_model.simulate'], publish_model: ['publish_model', 'meta_model.publish']
+    };
+    const requested = operations[turn.intent];
+    // Publishing requires both semantic understanding and an affirmative
+    // current-turn request; history/model prose cannot authorize it.
+    if (requested && (turn.intent !== 'publish_model' || classified.intent === 'publish_model')) classified = operation(turn.intent, ...requested, 'model_understood_server_gated');
+    else classified = noOperation(turn.needsClarification ? 'needs_clarification' : 'conversation', 'model_dialogue', turn.answer || '尚未执行操作，请明确本轮允许的动作。');
+  }
+  return { classified, turnUnavailable };
+}
 
 const commandLabel = {
   apply_proposal: '采纳模型建议到草稿',
@@ -159,9 +340,11 @@ const publicTask = (task) => task && ({
   proposal: task.proposal || null,
   planning: task.planning || null,
   sourceDiscovery: task.sourceDiscovery || null,
+  systemScope: task.systemScope || null,
   result: task.result || null,
   response: task.response,
   routing: task.routing || null,
+  modelUnavailable: task.modelUnavailable || null,
   materialReview: task.materialReview || null,
   events: task.events
 });
@@ -202,7 +385,7 @@ const inspectStatus = async (identityScope) => {
 
 export async function createSemanticOperationsTask({ body, role, identityScope }) {
   const text = normalize(body?.text);
-  if (!text && !body?.attachments?.length) return { error: '请输入语义运营目标，或上传一份受控材料。', status: 400 };
+  if (!text && !body?.attachments?.length) return { error: '请输入元域智营目标，或上传一份受控材料。', status: 400 };
   const promptSafety = inspectModelPromptSafety(text);
   if (!promptSafety.safe) return { error: '运营指令未通过安全检查，未创建任务。', status: 400 };
   const owner = identityKey(identityScope);
@@ -230,26 +413,27 @@ export async function createSemanticOperationsTask({ body, role, identityScope }
   const contextAnchor = parent?.messages?.find((item) => item.role === 'user')?.content || parent?.request || '';
   const contextualText = turn?.resolvedRequest || (parent && /^(?:继续|再|补充|按照|基于|这个|它|然后|接着|同时)/.test(text)
     ? `延续语义任务“${contextAnchor}”。本轮要求：${text}` : text);
-  let classified = classifySemanticOperationsIntent(turn ? text : contextualText, { hasAttachments: Boolean(body?.attachments?.length || workspaceDiscovery.objectTypes.length) });
-  if (turn) {
-    const operations = {
-      build_model: ['apply_proposal', 'meta_model.draft.save'], discover_sources: ['inspect_sources', null], inspect_status: ['inspect_status', null],
-      validate_model: ['validate_model', 'meta_model.draft.validate'], simulate_model: ['simulate_model', 'meta_model.simulate'], publish_model: ['publish_model', 'meta_model.publish']
-    };
-    const requested = operations[turn.intent];
-    // Publishing requires both semantic understanding and an affirmative
-    // current-turn request; history/model prose cannot authorize it.
-    if (requested && (turn.intent !== 'publish_model' || classified.intent === 'publish_model')) classified = operation(turn.intent, ...requested, 'model_understood_server_gated');
-    else classified = noOperation(turn.needsClarification ? 'needs_clarification' : 'conversation', 'model_dialogue', turn.answer || '尚未执行操作，请明确本轮允许的动作。');
-  }
+  let { classified, turnUnavailable } = resolveSemanticOperationsIntent({
+    turn, text, contextualText,
+    hasAttachments: Boolean(body?.attachments?.length || workspaceDiscovery.objectTypes.length)
+  });
   if (classified.permission && !hasButtonPermission(role.id, classified.permission)) classified = noOperation('permission_denied', 'role_permission_denied', '当前角色没有执行该操作的权限，未创建执行计划。可以继续讨论方案，或由具备权限的人员处理。');
   const nonExecutingIntent = ['inspect_status', 'discover_sources', 'conversation', 'needs_clarification', 'unsupported_operation', 'permission_denied'].includes(classified.intent);
   const conversationalIntent = ['conversation', 'needs_clarification', 'unsupported_operation', 'permission_denied'].includes(classified.intent);
+  // 范围门禁在意图判定之后、任何读取与规划之前：范围不合法就不产生任务、不读材料、不生成提案。
+  const sourceBound = SOURCE_BOUND_INTENTS.includes(classified.intent);
+  const scope = sourceBound ? resolveSemanticSystemScope({ body, role, text: contextualText, parent }) : null;
+  if (scope?.error) return { error: scope.error, status: scope.status, code: scope.code };
   const id = taskId(owner, text);
   const createdAt = now();
   const trace = await createAgentEvidenceTrace({ roleId: role?.id, identityScope, input: text, requestId: id, platform: identityScope?.platform, kind: 'semantic_operations_task' });
-  const sourceDiscovery = ['build_model', 'discover_sources'].includes(classified.intent)
-    ? discoverSemanticSources({ request: workspaceDiscovery.objectTypes.length ? [...new Set(workspaceDiscovery.objectTypes.flatMap(item => item.sourceSystems || []))].join(' / ') : contextualText, role })
+  const sourceDiscovery = sourceBound
+    ? discoverSemanticSources({
+      // request 只用于「文本/材料里提到了哪些系统」的提示素材，不再决定范围。
+      request: workspaceDiscovery.objectTypes.length ? [...new Set(workspaceDiscovery.objectTypes.flatMap(item => item.sourceSystems || []))].join(' / ') : contextualText,
+      role,
+      systemCodes: scope.systemCodes
+    })
     : null;
   const planning = conversationalIntent ? null : await planSemanticOperationsRequest({ request: contextualText || '根据上传材料建设语义模型', authoritativeIntent: classified.intent, sourceDiscovery, identityScope,
     materialFacts: { objects: workspaceDiscovery.objectTypes.map(item => ({ id: item.id, key: item.key, granularity: item.granularity, systems: item.sourceSystems,
@@ -264,7 +448,10 @@ export async function createSemanticOperationsTask({ body, role, identityScope }
     owner,
     createdAt,
     updatedAt: createdAt,
-    status: turn?.source === 'understanding_failed' ? 'failed' : classified.intent === 'needs_clarification' ? 'needs_input' : classified.intent === 'permission_denied' ? 'denied' : nonExecutingIntent ? 'completed' : 'waiting_confirmation',
+    status: classified.intent === 'needs_clarification' ? 'needs_input' : classified.intent === 'permission_denied' ? 'denied' : nonExecutingIntent ? 'completed' : 'waiting_confirmation',
+    // 模型理解不可用时的降级标记。状态本身由服务端确定性分类决定（不再是死路一条的
+    // 'failed'），但降级事实必须对前端与审计可见，不得静默。
+    modelUnavailable: turnUnavailable || null,
     intent: classified.intent,
     title: text.slice(0, 42) || '根据受控材料建设语义模型',
     request: text,
@@ -281,14 +468,31 @@ export async function createSemanticOperationsTask({ body, role, identityScope }
     originDeviceId: identityScope?.deviceId || null,
     plan: planFor(classified.intent),
     planning,
-    routing: { mode: turn ? 'model_understanding_server_gated' : 'server_rules', source: turn?.source || 'server_rules', decision: classified.intent, reason: classified.reason },
+    routing: turnUnavailable
+      ? { mode: 'server_rules_fallback', source: 'understanding_failed', decision: classified.intent, reason: classified.reason, degraded: true, modelFailureCode: turn.failureCode || null }
+      : { mode: turn ? 'model_understanding_server_gated' : 'server_rules', source: turn?.source || 'server_rules', decision: classified.intent, reason: classified.reason },
     sourceDiscovery,
-    events: [{ time: createdAt, type: conversationalIntent ? 'conversation_routed' : 'intent_understood', detail: conversationalIntent ? `服务器识别为“${classified.intent}”，未创建可执行命令。` : `服务器已绑定“${classified.intent}”任务，尚未执行修改。` }]
+    // 范围来源与覆盖结果必须留在任务上，供审阅与审计追溯（阶段 3）；被排除项的可读清单见 ADR-013。
+    systemScope: scope ? {
+      selectionSource: 'explicit',
+      selected: scope.systemCodes,
+      mentionedNotSelected: scope.mentionedNotSelected,
+      covered: [],
+      uncovered: scope.systemCodes.map((code) => ({ code, reason: '尚未生成提案，无法判断覆盖情况。' })),
+      excludedObjects: [],
+      excludedRelationships: [],
+      partialScopeObjects: [],
+      unassignedObjects: []
+    } : null,
+    events: [
+      ...(turnUnavailable ? [{ time: createdAt, type: 'model_understanding_unavailable', detail: `模型理解不可用（${turn.failureCode || 'MODEL_RESULT_UNAVAILABLE'}）；已回落到服务端确定性分类，规则判定为“${classified.intent}”。发布动作不参与回落。` }] : []),
+      { time: createdAt, type: conversationalIntent ? 'conversation_routed' : 'intent_understood', detail: conversationalIntent ? `服务器识别为“${classified.intent}”，未创建可执行命令。` : `服务器已绑定“${classified.intent}”任务，尚未执行修改。` }
+    ]
   };
   if (planning) task.events.push({ time: now(), type: 'planning_completed', detail: ['local_model_advisory', 'external_model_advisory'].includes(planning.mode) ? `${planning.provider === 'ark' ? '火山方舟' : planning.mode === 'local_model_advisory' ? '本地模型' : '云端模型'}已生成结构化规划建议；执行边界仍由服务器控制。` : '已使用确定性规划；执行边界由服务器控制。' });
   if (classified.intent === 'build_model') {
     const sourceMaterialIncomplete = task.materialIncomplete || (!workspace.refs.length && /【附件记忆为节选/.test(previousMaterial));
-    const proposal = await createSemanticOperationsProposalFromRequest({ body: { ...body, text: contextualText, sourceMaterial: `${visibleMessages.filter(item => item.role === 'user').map(item => item.content).join('\n')}\n${text}` }, role, identityScope, scannedMaterial: material, sourceMaterialIncomplete, workspaceDocuments: workspace.documents });
+    const proposal = await createSemanticOperationsProposalFromRequest({ body: { ...body, text: contextualText, sourceMaterial: `${visibleMessages.filter(item => item.role === 'user').map(item => item.content).join('\n')}\n${text}` }, role, identityScope, scannedMaterial: material, sourceMaterialIncomplete, workspaceDocuments: workspace.documents, scopeSystems: scope.systemCodes });
     if (proposal.error) {
       if (proposal.code !== 'SEMANTIC_PROPOSAL_NO_GROUNDED_OBJECTS') return proposal;
       task.intent = 'needs_clarification';
@@ -303,12 +507,22 @@ export async function createSemanticOperationsTask({ body, role, identityScope }
       task.events.push({ time: now(), type: 'clarification_requested', detail: '未从诉求或材料中识别到有依据的候选对象，未生成提案。' });
     } else {
       task.proposal = proposal;
+      task.systemScope = summarizeSystemScopeCoverage(task.systemScope, proposal);
       task.response = `已生成 ${proposal.objectTypes.length} 个候选对象和 ${proposal.relationshipTypes.length} 条关系；Schema Critic ${proposal.critic.status === 'passed' ? '已通过' : '未通过'}，Mock 映射演练${proposal.mappingValidation.blocked ? '存在阻断' : proposal.mappingValidation.status === 'passed' ? '已通过' : '已完成部分验证'}。${proposal.critic.status !== 'passed' || proposal.mappingValidation.blocked ? '请先校对来源、字段类型和映射；校验通过前不能采纳。' : '请审阅 Diff、影响和样本预览后确认是否采纳。'}`;
+      const findings = describeScopeFindings(task.systemScope);
+      if (findings.length) task.response += ` 范围覆盖：所选 ${task.systemScope.selected.join('/')}，已覆盖 ${task.systemScope.covered.join('/') || '无'}。${findings.join('；')}。`;
+      const identityFindings = describeIdentityFindings(proposal.identityLinking);
+      if (identityFindings.length) {
+        task.response += ` 标识对应：${identityFindings.join('；')}。`;
+        task.events.push({ time: now(), type: 'system_identity_linking_reported', detail: identityFindings.join('；') });
+      }
       task.events.push({ time: now(), type: 'proposal_created', detail: `生成候选模型，Critic=${proposal.critic.status}，Mapping=${proposal.mappingValidation.status}。` });
+      if (findings.length) task.events.push({ time: now(), type: 'system_scope_coverage_reported', detail: findings.join('；') });
     }
   } else if (classified.intent === 'discover_sources') {
     task.result = sourceDiscovery;
-    task.response = `已检查 ${sourceDiscovery.sources.length} 个相关来源；发现 ${sourceDiscovery.blockers.length} 个阻断项和 ${sourceDiscovery.warnings.length} 个准备提醒，未读取任何业务明细。`;
+    task.systemScope = { ...task.systemScope, covered: [...scope.systemCodes], uncovered: [] };
+    task.response = `已按所选范围检查 ${sourceDiscovery.sources.length} 个来源；发现 ${sourceDiscovery.blockers.length} 个阻断项和 ${sourceDiscovery.warnings.length} 个准备提醒，未读取任何业务明细。`;
     task.events.push({ time: now(), type: 'source_discovery_completed', detail: `来源预检完成，blockers=${sourceDiscovery.blockers.length}。` });
   } else if (classified.intent === 'inspect_status') {
     task.result = await inspectStatus(identityScope);
@@ -321,7 +535,13 @@ export async function createSemanticOperationsTask({ body, role, identityScope }
     task.events.push({ time: now(), type: 'read_completed', detail: '只读状态检查完成。' });
   } else if (conversationalIntent) {
     task.response = classified.response;
-    task.events.push({ time: now(), type: task.status === 'failed' ? 'conversation_failed' : classified.intent === 'needs_clarification' ? 'clarification_requested' : classified.intent === 'permission_denied' ? 'permission_denied' : 'conversation_completed', detail: task.status === 'failed' ? '模型未完成有效回答，可以重试；未生成提案或执行动作。' : '本次未生成提案、未读取业务明细、未创建可执行动作。' });
+    task.events.push({
+      time: now(),
+      type: classified.intent === 'needs_clarification' ? 'clarification_requested' : classified.intent === 'permission_denied' ? 'permission_denied' : 'conversation_completed',
+      detail: turnUnavailable
+        ? '模型理解不可用，本条回答由服务端确定性规则生成；未生成提案、未读取业务明细、未创建可执行动作。'
+        : '本次未生成提案、未读取业务明细、未创建可执行动作。'
+    });
   } else {
     task.response = `已形成“${commandLabel[classified.command]}”执行计划。该操作尚未执行，需要当前运营人员明确确认。`;
   }
@@ -338,8 +558,8 @@ export async function createSemanticOperationsTask({ body, role, identityScope }
     index[id] = task;
     return { value: index };
   });
-  await traceEvent(trace.id, 'semantic_intent_routed', 'routing', 'completed', '语义运营意图已由服务器规则绑定。', { intent: task.intent, command: task.command, reason: task.routing?.reason, parentTaskId: task.parentTaskId });
-  if (task.planning) await traceEvent(trace.id, 'semantic_plan_created', 'planning', 'completed', '语义运营规划已生成，执行边界仍由服务器控制。', { mode: task.planning.mode, authoritativeIntent: task.planning.authoritativeIntent, stepCount: task.plan?.length || 0 });
+  await traceEvent(trace.id, 'semantic_intent_routed', 'routing', 'completed', '元域智营意图已由服务器规则绑定。', { intent: task.intent, command: task.command, reason: task.routing?.reason, parentTaskId: task.parentTaskId });
+  if (task.planning) await traceEvent(trace.id, 'semantic_plan_created', 'planning', 'completed', '元域智营规划已生成，执行边界仍由服务器控制。', { mode: task.planning.mode, authoritativeIntent: task.planning.authoritativeIntent, stepCount: task.plan?.length || 0 });
   if (task.sourceDiscovery) await traceEvent(trace.id, 'semantic_sources_inspected', 'evidence', 'completed', '已完成受控来源预检，未读取业务明细。', { sourceCount: task.sourceDiscovery.sources?.length || 0, blockers: task.sourceDiscovery.blockers?.length || 0 });
   if (task.proposal) await traceEvent(trace.id, 'semantic_proposal_generated', 'proposal', task.proposal.critic?.status || 'completed', '候选语义模型与映射验证结果已固定到证据链。', { proposalId: task.proposal.id, revision: task.proposal.revision, objectCount: task.proposal.objectTypes?.length || 0, relationshipCount: task.proposal.relationshipTypes?.length || 0, mappingStatus: task.proposal.mappingValidation?.status });
   if (task.intent === 'inspect_status') await traceEvent(trace.id, 'semantic_read_completed', 'read', 'completed', '只读语义状态快照已固定到证据链。', task.result);
@@ -374,7 +594,7 @@ export function getSemanticOperationsTask({ taskId: id, identityScope, accessCon
 export function archiveSemanticOperationsTask({ taskId: id, identityScope }) {
   return mutateTaskIndex((index) => {
     const task = index[id];
-    if (!task || !semanticOperationsOwnerMatches(task.owner, identityScope)) return { commit: false, result: { error: '未找到属于当前身份的语义运营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
+    if (!task || !semanticOperationsOwnerMatches(task.owner, identityScope)) return { commit: false, result: { error: '未找到属于当前身份的元域智营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
     if (task.status === 'executing') return { commit: false, result: { error: '执行中的任务不能归档。', code: 'SEMANTIC_TASK_ARCHIVE_BLOCKED' } };
     task.archivedAt = now();
     task.updatedAt = task.archivedAt;
@@ -392,7 +612,7 @@ export async function recordSemanticOperationsReportExport({ taskId: id, receipt
   if (!valid) return { error: '报告导出回执无效，未写入审计记录。', code: 'SEMANTIC_REPORT_RECEIPT_INVALID' };
   const result = await mutateTaskIndex((index) => {
     const task = index[id];
-    if (!task || !semanticOperationsOwnerMatches(task.owner, identityScope)) return { commit: false, result: { error: '未找到属于当前身份的语义运营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
+    if (!task || !semanticOperationsOwnerMatches(task.owner, identityScope)) return { commit: false, result: { error: '未找到属于当前身份的元域智营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
     const time = now();
     task.events.push({ time, type: 'governed_report_exported', detail: `已导出 ${receipt.fileName}（${receipt.bytes} bytes，SHA-256 ${receipt.sha256.slice(0, 12)}…）。` });
     task.updatedAt = time; index[id] = task;
@@ -405,14 +625,18 @@ export async function recordSemanticOperationsReportExport({ taskId: id, receipt
 export function reviseSemanticOperationsTaskProposal({ taskId: id, body, role, identityScope }) {
   const operationResult = mapMaybe(getIndex(), (indexSnapshot) => {
   const task = indexSnapshot[id];
-  if (!task || !semanticOperationsOwnerMatches(task.owner, identityScope)) return { error: '未找到属于当前身份的语义运营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' };
+  if (!task || !semanticOperationsOwnerMatches(task.owner, identityScope)) return { error: '未找到属于当前身份的元域智营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' };
   if (task.status !== 'waiting_confirmation' || task.command !== 'apply_proposal' || !task.proposal?.id) return { error: '当前任务没有可修订的待确认模型提案。', code: 'SEMANTIC_TASK_PROPOSAL_NOT_EDITABLE' };
-  return mapMaybe(updateSemanticOperationsProposal({
+    return mapMaybe(updateSemanticOperationsProposal({
     proposalId: task.proposal.id,
     revision: body?.revision,
     objectTypes: body?.objectTypes,
       relationshipTypes: body?.relationshipTypes,
       primaryKeyCorrections: body?.primaryKeyCorrections,
+      identityLinkConfirmations: body?.identityLinkConfirmations,
+      identityConflictRulings: body?.identityConflictRulings,
+      declarationRulings: body?.declarationRulings,
+      sourceAssignments: body?.sourceAssignments,
     role,
     identityScope
   }), (proposal) => {
@@ -428,7 +652,54 @@ export function reviseSemanticOperationsTaskProposal({ taskId: id, body, role, i
     capturedAt: task.updatedAt
   };
   const ready = proposal.critic.status === 'passed' && !proposal.mappingValidation.blocked;
-  task.response = `提案已保存为第 ${proposal.revision} 版；Schema Critic ${proposal.critic.status === 'passed' ? '已通过' : '未通过'}，Mock 映射演练${proposal.mappingValidation.blocked ? '存在阻断' : proposal.mappingValidation.status === 'passed' ? '已通过' : '已完成部分验证'}。${ready ? '可以确认写入草稿。' : '请根据检查结果继续修订。'}`;
+  // 并入结果必须**逐项**说清：并了几条、哪条被材料证据挡住、哪条因字段修订失效。
+  // 只说「已保存」会让「我勾了但它没生效」变成无从追问的状态。
+  //
+  // 阶段 4c：裁定的话必须先说，因为它决定了哪些链接还存在——确认是按链接给的，
+  // 先报「并入了几条」再说「有两条被裁定撤下」，读起来就成了两次矛盾的结论。
+  const rulingReport = proposal.identityLinking?.rulingReport || null;
+  const staleNotes = (items) => items.map((item) => `${item.key}（${item.reason}）`).join('、');
+  const rulingNotes = rulingReport ? [
+    ...(rulingReport.applied.length ? [`已裁定 ${rulingReport.applied.length} 个概念的标识等价关系（${rulingReport.applied.map((item) => `${item.concept}＝${item.ruling === 'same_entity' ? '同一实体' : '不同实体'}`).join('、')}）。`] : []),
+    ...(rulingReport.droppedStale.length ? [`${rulingReport.droppedStale.length} 条此前的等价裁定已失效并移除（${rulingReport.droppedStale.map((item) => `${item.concept}：${item.reason}`).join('、')}）。`] : []),
+    ...((proposal.identityLinking?.withdrawnLinks?.length) ? [`因裁定为不同实体，撤下 ${proposal.identityLinking.withdrawnLinks.length} 条跨等价类的标识对应（${proposal.identityLinking.withdrawnLinks.map((item) => `${item.from}→${item.to}`).join('、')}）；它们不再出现在可确认清单里，此前的确认随之失效。`] : []),
+    ...(rulingReport.unresolvedConcepts.length ? [`仍有 ${rulingReport.unresolvedConcepts.length} 个概念（${rulingReport.unresolvedConcepts.join('、')}）的等价前提未裁定。`] : [])
+  ].join('') : '';
+  const linkReport = proposal.identityLinkConfirmationReport;
+  const mappedLinks = (proposal.identityLinkConfirmations || []).filter((item) => item.keyMapping);
+  const shapeNotes = (linkReport?.shapeResolutions || []).map((item) => `${item.field} 判定为${item.shape === 'agent' ? '代理键' : '业务键'}（与另一端${item.resolvedStatus === 'linkable' ? '一致，可按值对齐' : '不同，需建立映射'}）`);
+  const linkNotes = linkReport ? [
+    linkReport.merged ? `已并入 ${linkReport.merged} 条人工确认的标识对应（标记为推断，未取得材料级证据）。` : '',
+    // 阶段 4d（ADR-019）：结构化映射与形状判定都是**这次修订产生的新结论**，必须出现在回应里。
+    // 否则运营看不到自己填的定义去了哪儿——它进的是草稿里的 `keyMapping` 字段，不是一段散文。
+    mappedLinks.length ? `其中 ${mappedLinks.length} 条带结构化映射定义（${mappedLinks.map((item) => `${item.keyMapping.fromField}→${item.keyMapping.toField}，责任人 ${item.keyMapping.owner} / 版本 ${item.keyMapping.version}`).join('、')}），已随关系写入草稿。` : '',
+    shapeNotes.length ? `另有 ${shapeNotes.length} 条对应的一端键形状由人工判定：${shapeNotes.join('、')}。` : '',
+    linkReport.skippedExisting.length ? `${linkReport.skippedExisting.length} 条确认项已有材料证据的同名关系，未用推断覆盖证据。` : '',
+    linkReport.droppedStale.length ? `${linkReport.droppedStale.length} 条此前确认的标识对应已失效并被移除：${staleNotes(linkReport.droppedStale)}。` : ''
+  ].filter(Boolean).join('') : '';
+  // 阶段 4e（ADR-020）：**不可并入的对应必须在回应里说出来**。只报「已并入 N 条」，会让
+  // 「11 条里有 4 条这次用不了、因为对象没进候选」变成一次静默损失——原因与下一步动作都要给出。
+  const ineligibleLinks = (proposal.identityLinking?.links || []).filter((item) => !item.eligible);
+  const eligibilityNotes = ineligibleLinks.length
+    ? `另有 ${ineligibleLinks.length} 条对应本次不可并入：${[...new Set(ineligibleLinks.flatMap((item) => item.ineligibleEndpoints.map((endpoint) => `${endpoint.system}.${endpoint.objectId}`)))].join('、')} 不在本次候选对象内（它们只在系统声明里存在），需先让这些对象成为候选对象。`
+    : '';
+  // 阶段 4c 第三段：同名声明裁定改的是**字段目录的组成**。它排在等价裁定之后、确认之前说，
+  // 因为「对象被拆成两个 / 某份声明被排除」会改变后面所有链接的证据字符串与计数。
+  const declarationReport = proposal.identityLinking?.declarationReport || null;
+  const declarationNotes = declarationReport ? [
+    ...(declarationReport.applied.length ? [`已裁定 ${declarationReport.applied.length} 项同名声明分歧（${declarationReport.applied.map((item) => `${item.key}＝${item.ruling === 'merge' ? '同一对象（字段并集）' : '不同对象（不并集）'}`).join('、')}）。`] : []),
+    ...(declarationReport.splitObjects.length ? [`因裁定区分粒度拆出 ${declarationReport.splitObjects.length} 处（${declarationReport.splitObjects.map((item) => `${item.from}→${item.into.map((group) => group.name).join('/')}`).join('、')}）；被拆出的对象只是来源系统的声明，尚未进入提案。`] : []),
+    ...(declarationReport.droppedDeclarations.length ? [`同时显式排除 ${declarationReport.droppedDeclarations.length} 条声明（${declarationReport.droppedDeclarations.map((item) => item.declarationKey).join('、')}），它们的字段不再进入字段目录。`] : []),
+    ...(declarationReport.droppedLinks.length ? [`${declarationReport.droppedLinks.length} 条标识对应因对象改名或字段集改变而不再存在：${declarationReport.droppedLinks.map((item) => item.evidence).join('、')}；此前的确认随之失效。`] : []),
+    ...(declarationReport.droppedStale.length ? [`${declarationReport.droppedStale.length} 条此前的同名声明裁定已失效并移除（${declarationReport.droppedStale.map((item) => item.key).join('、')}）。`] : []),
+    ...(declarationReport.unresolvedItems.length ? [`仍有 ${declarationReport.unresolvedItems.length} 项同名声明分歧未裁定（${declarationReport.unresolvedItems.join('、')}），这些对象的字段目录仍是并集。`] : [])
+  ].join('') : '';
+  // 归属确认是**改事实**的动作（写进 sourceSystems、可能改变范围裁剪结果），所以它必须排在最前面说：
+  // 「这次把哪些对象的来源定了下来」会改变后面所有结论的解释口径。
+  const assignmentNotes = (proposal.sourceAssignments || []).length
+    ? `已确认 ${proposal.sourceAssignments.length} 个对象的来源归属（${proposal.sourceAssignments.map((item) => `${item.objectId}→${item.system}`).join('、')}），来源系统已按确认写入。`
+    : '';
+  task.response = `提案已保存为第 ${proposal.revision} 版；Schema Critic ${proposal.critic.status === 'passed' ? '已通过' : '未通过'}，Mock 映射演练${proposal.mappingValidation.blocked ? '存在阻断' : proposal.mappingValidation.status === 'passed' ? '已通过' : '已完成部分验证'}。${assignmentNotes}${declarationNotes}${rulingNotes}${linkNotes}${eligibilityNotes}${ready ? '可以确认写入草稿。' : '请根据检查结果继续修订。'}`;
   task.events.push({ time: task.updatedAt, type: 'proposal_revised', detail: `提案修订为 revision=${proposal.revision}，Critic=${proposal.critic.status}，Mapping=${proposal.mappingValidation.status}。` });
   const mutation = mutateTaskIndex((index) => {
     const current = index[id];
@@ -451,7 +722,7 @@ export function issueSemanticOperationsTaskConfirmation({ taskId: id, identitySc
   const operationResult = mapMaybe(currentDraftFingerprint(), (draftFingerprint) => mutateTaskIndex((index) => {
     const task = index[id];
     if (!task || !semanticOperationsOwnerMatches(task.owner, identityScope)) {
-      return { commit: false, result: { error: '未找到属于当前身份的语义运营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
+      return { commit: false, result: { error: '未找到属于当前身份的元域智营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
     }
     if (task.status === 'executing' && task.execution?.leaseExpiresAt && Date.parse(task.execution.leaseExpiresAt) <= Date.now()) {
       task.status = 'retryable';
@@ -486,7 +757,7 @@ export function issueSemanticOperationsTaskConfirmation({ taskId: id, identitySc
 const reserveExecution = ({ id, identityScope, confirmationToken }) => mapMaybe(currentDraftFingerprint(), (draftFingerprint) => mutateTaskIndex((index) => {
   const task = index[id];
   if (!task || !semanticOperationsOwnerMatches(task.owner, identityScope)) {
-    return { commit: false, result: { error: '未找到属于当前身份的语义运营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
+    return { commit: false, result: { error: '未找到属于当前身份的元域智营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
   }
   if (!['waiting_confirmation', 'retryable'].includes(task.status)) {
     return { commit: false, result: { error: '该任务已经执行、正在执行或不可重复确认。', code: 'SEMANTIC_TASK_NOT_CONFIRMABLE' } };
@@ -573,7 +844,7 @@ export async function executeSemanticOperationsTask({ taskId: id, role, identity
     result = { error: `执行失败：${error.message}`, retryable: true };
   }
   const finalized = await finalizeExecution({ id, identityScope, result });
-  await traceEvent(task.traceId, result.error ? 'semantic_execution_blocked' : 'semantic_execution_completed', 'execution', result.error ? 'blocked' : 'completed', result.error || '语义运营命令已完成并归档结果。', { command: task.command, retryable: result.retryable === true });
+  await traceEvent(task.traceId, result.error ? 'semantic_execution_blocked' : 'semantic_execution_completed', 'execution', result.error ? 'blocked' : 'completed', result.error || '元域智营命令已完成并归档结果。', { command: task.command, retryable: result.retryable === true });
   await setAgentEvidenceTraceStatus(task.traceId, result.error ? (result.retryable ? 'retryable' : 'blocked') : 'completed', { completed: !result.error });
   return finalized;
 }

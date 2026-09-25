@@ -5,7 +5,7 @@ import { getRole } from '../src/services/authorization-service.js';
 import { getOAMetaModelDraft, getPublishedOntologyModel, saveOAMetaModelDraft, simulateBuildOAMetaModel } from '../src/services/meta-model-service.js';
 import { evaluateBoundDecision, validateDecisionBinding, replayDecisionCases } from '../src/services/decision-binding-service.js';
 import { runOntologyCaseReplay, getOntologyCaseReplay, publishGovernedOntology } from '../src/services/ontology-runtime-service.js';
-import { qualityScenarioDraft } from '../../frontend/src/features/meta-model/ontology-scenario.js';
+import { qualityScenarioDraft } from '@healthcare-ai/agent-ui/ontology-scenario';
 import { semanticFingerprint } from '../src/services/semantic-model-fingerprint.js';
 
 const role = getRole('executive');

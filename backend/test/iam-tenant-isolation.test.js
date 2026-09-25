@@ -10,7 +10,7 @@ import { getEffectiveAccess } from '../src/services/access-control-service.js';
 import { createIdentitySessionService } from '../src/services/identity-session-service.js';
 import { verifyEnterpriseAccessToken } from '../src/services/enterprise-oidc-service.js';
 import { createDingTalkAuthService } from '../src/services/dingtalk-auth-service.js';
-import { listDomainEvents } from '../src/domains/events/domain-event-outbox.js';
+import { listDomainEvents } from '../src/infrastructure/domain-events/domain-event-outbox.js';
 
 const account = 'quality@demo.local';
 const within = (tenant, work) => runWithIAMStoreContext(work, tenant);

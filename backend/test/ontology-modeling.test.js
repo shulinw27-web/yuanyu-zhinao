@@ -5,7 +5,7 @@ import { getRole } from '../src/services/authorization-service.js';
 import { getOAMetaModelDraft, getPublishedDecisionContext, saveOAMetaModelDraft, validateOAMetaModelDraft, simulateBuildOAMetaModel, publishOAMetaModel } from '../src/services/meta-model-service.js';
 import { evaluateBusinessDecision, replayBusinessDecision } from '../src/services/business-decision-service.js';
 import { semanticFingerprint } from '../src/services/semantic-model-fingerprint.js';
-import { qualityScenarioDraft, semanticSimulationMessage } from '../../frontend/src/features/meta-model/ontology-scenario.js';
+import { qualityScenarioDraft, semanticSimulationMessage } from '@healthcare-ai/agent-ui/ontology-scenario';
 import { launchProcurement, approveProcurement, getProcurementScenario } from '../src/services/procurement-service.js';
 import { analyzeProductionImpact } from '../src/services/domain-analysis-service.js';
 import { getRegisteredTools, validateToolInvocation } from '../src/services/agent-tool-registry.js';

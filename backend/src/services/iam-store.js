@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { getRuntimeStoreInfo, mutateState, readState } from '../repositories/runtime-state-repository.js';
-import { mutateWithDomainEvent } from '../domains/events/domain-event-outbox.js';
+import { mutateWithDomainEvent } from '../infrastructure/domain-events/domain-event-outbox.js';
 import { createAsyncIAMStore } from './async-iam-store.js';
 import {
   CURRENT_IAM_SCHEMA_VERSION,

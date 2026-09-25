@@ -26,7 +26,7 @@ import {
   sameAgentRunSubject,
   secureAgentConfirmationTokenMatches
 } from './agent-runtime-store.js';
-import { appendDomainEventToWorkspace, DOMAIN_EVENT_NAMESPACE, DOMAIN_EVENT_WORKSPACE_KEY, initialDomainEventWorkspace } from '../domains/events/domain-event-outbox.js';
+import { appendDomainEventToWorkspace, DOMAIN_EVENT_NAMESPACE, DOMAIN_EVENT_WORKSPACE_KEY, initialDomainEventWorkspace } from '../infrastructure/domain-events/domain-event-outbox.js';
 import { getRuntimeStoreInfo, mutateState } from '../repositories/runtime-state-repository.js';
 import { configurePort, delegate, describePersistence, getPort, hasPort, RUNTIME_STATE_PORT, PERSISTENCE_PORT_METHODS } from './persistence-port.js';
 import { prepareMemoryCorrection } from './agent-memory-review.js';

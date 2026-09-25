@@ -7,12 +7,12 @@ import { PostgresRuntimeStateRepository } from '../src/repositories/postgres-run
 import { PostgresAgentLongTaskRepository } from '../src/repositories/postgres-agent-long-task-repository.js';
 import { createIdentitySessionService } from '../src/services/identity-session-service.js';
 import { createAsyncIAMStore } from '../src/services/async-iam-store.js';
-import { configureDomainEventRepository, DOMAIN_EVENT_NAMESPACE, DOMAIN_EVENT_WORKSPACE_KEY, getDomainEventOutboxMetrics, listDomainEvents } from '../src/domains/events/domain-event-outbox.js';
+import { configureDomainEventRepository, DOMAIN_EVENT_NAMESPACE, DOMAIN_EVENT_WORKSPACE_KEY, getDomainEventOutboxMetrics, listDomainEvents } from '../src/infrastructure/domain-events/domain-event-outbox.js';
 import { IAM_NAMESPACE, IAM_WORKSPACE_KEY, createInitialIAMWorkspace } from '../src/services/iam-workspace-model.js';
 import { claimAgentExecution, createAgentRun, getAgentRun } from '../src/services/agent-runtime-store.js';
 import { configureAgentLongTaskRepository, consumeAgentRunTransitions, enqueueAgentLongTask, listAgentLongTasks } from '../src/services/agent-long-task-store.js';
 import { claimAgentExecution as claimDistributedAgentExecution, configureAgentRunRepository, createAgentRun as createDistributedAgentRun, forgetAgentLongTermMemory as forgetDistributedMemory, getAgentLongTermMemory as getDistributedMemory, getAgentRuns as getDistributedAgentRuns, recordAgentExecution as recordDistributedAgentExecution, rememberAgentLongTermGoal as rememberDistributedMemory } from '../src/services/agent-run-store.js';
-import { PostgresDomainEventStore } from '../src/domains/events/postgres-domain-event-store.js';
+import { PostgresDomainEventStore } from '../src/infrastructure/domain-events/postgres-domain-event-store.js';
 import { configureDomainEventConsumerRepository, listDomainEventConsumerMetrics, processDomainEventBatch } from '../src/workers/domain-event-worker.js';
 import { appendAgentEvidenceEvent, bindAgentEvidenceTraceRun, configureAgentEvidenceTraceRepository, createAgentEvidenceTrace, getAgentEvidenceTraceByRunId, listAgentEvidenceTraces, setAgentEvidenceTraceStatus } from '../src/services/agent-evidence-trace-service.js';
 import { archiveAgentConversation, configureAgentConversationRepository, createAgentConversation, getAgentConversation, getAgentConversationContext, listAgentConversations, recordAgentConversationExchange } from '../src/services/agent-conversation-service.js';

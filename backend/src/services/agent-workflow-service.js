@@ -1,5 +1,5 @@
 import { readState } from '../repositories/runtime-state-repository.js';
-import { mutateWithDomainEvent } from '../domains/events/domain-event-outbox.js';
+import { mutateWithDomainEvent } from '../infrastructure/domain-events/domain-event-outbox.js';
 import { verifyQualityDraftTarget } from './agent-target-binding-service.js';
 
 const NAMESPACE = 'agent_workflow';

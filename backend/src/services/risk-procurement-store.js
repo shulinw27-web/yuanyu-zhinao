@@ -1,5 +1,5 @@
 import { getRuntimeStoreInfo, readState } from '../repositories/runtime-state-repository.js';
-import { mutateWithDomainEvent, DOMAIN_EVENT_NAMESPACE, DOMAIN_EVENT_WORKSPACE_KEY, appendDomainEventToWorkspace, initialDomainEventWorkspace } from '../domains/events/domain-event-outbox.js';
+import { mutateWithDomainEvent, DOMAIN_EVENT_NAMESPACE, DOMAIN_EVENT_WORKSPACE_KEY, appendDomainEventToWorkspace, initialDomainEventWorkspace } from '../infrastructure/domain-events/domain-event-outbox.js';
 
 let postgresRepository = null;
 

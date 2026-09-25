@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { qualityScenarioDraft } from '../../frontend/src/features/meta-model/ontology-scenario.js';
+import { qualityScenarioDraft } from '@healthcare-ai/agent-ui/ontology-scenario';
 import { evaluateIdentityMapping } from '../src/services/ontology-identity-service.js';
 import { replayDecisionCases } from '../src/services/decision-binding-service.js';
 import { runOntologyCaseReplay, getOntologyCaseReplay } from '../src/services/ontology-runtime-service.js';

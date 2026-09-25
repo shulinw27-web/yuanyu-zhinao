@@ -7,6 +7,10 @@ import { getIAMRolePolicy, getIAMUser, updateIAMRolePolicy } from '../src/servic
 import { assignUserRoles, getPermissionManagementWorkspace, saveRolePolicy } from '../src/services/permission-management-service.js';
 import { getNotifications, getRiskList } from '../src/services/risk-service.js';
 
+// 与 permission-api-hardening 同一处缺陷：API 启动预算（40 × 25ms = 1000ms）小于实测启动时间
+// （1097–1519ms），导致测试组随机失败。详见该文件的说明。
+const API_STARTUP_TIMEOUT_MS = 8000;
+
 const executiveIdentity = { subjectId: 'admin@demo.local' };
 const qualityIdentity = { subjectId: 'quality@demo.local' };
 
@@ -184,14 +188,15 @@ test('HTTP permission APIs enforce button policies and apply saved data scopes i
     return { status: response.status, payload: await response.json() };
   };
   const waitUntilReady = async () => {
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    const started = Date.now();
+    while (Date.now() - started < API_STARTUP_TIMEOUT_MS) {
       try {
         const response = await fetch(`${baseUrl}/health`);
         if (response.ok) return;
       } catch { /* API is still starting. */ }
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    throw new Error(`权限测试 API 未就绪：${serverLog}`);
+    throw new Error(`权限测试 API 未就绪（等待 ${Date.now() - started}ms）：${serverLog}`);
   };
 
   try {
