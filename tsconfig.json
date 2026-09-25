@@ -17,7 +17,8 @@
     "frontend/src/**/*.vue",
     "apps/*/src/**/*.js",
     "apps/*/src/**/*.vue",
-    "packages/*/src/**/*.js"
+    "packages/*/src/**/*.js",
+    "packages/*/src/**/*.vue"
   ],
   "exclude": ["**/node_modules/**", "**/dist/**", "**/release/**"]
 }

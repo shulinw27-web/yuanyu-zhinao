@@ -10,6 +10,7 @@
     "test:permissions": "node --test test/permission-navigation.test.js test/page-data-registry.test.js test/app-actions.test.js"
   },
   "dependencies": {
+    "@healthcare-ai/agent-ui": "*",
     "@healthcare-ai/api-contracts": "*",
     "@healthcare-ai/client-runtime": "*",
     "vue": "^3.5.13"

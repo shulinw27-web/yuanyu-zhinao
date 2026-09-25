@@ -1,4 +1,4 @@
-export async function fetchPageData({ pageId, activeRole, effectiveAccess, api, canAccessPage }) {
+export async function fetchPageData({ pageId, activeRole, api }) {
   if (pageId === 'dashboard') {
     const [dashboardValue, notificationsValue, systemsValue] = await Promise.all([api.dashboard(activeRole), api.notifications(activeRole), api.systems(activeRole)]);
     return { dashboardValue, notificationsValue, systemsValue };
@@ -29,14 +29,12 @@ export async function fetchPageData({ pageId, activeRole, effectiveAccess, api, 
   if (pageId === 'procurement') return { procurementValue: await api.procurementScenario(activeRole) };
   if (pageId === 'permissions') return { permissionWorkspaceValue: await api.permissionManagement(activeRole) };
   if (pageId === 'config') {
-    const worldModelRequest = canAccessPage('world', effectiveAccess)
-      ? Promise.all([api.worldTemplates(activeRole), api.worldConnectionTargets(activeRole), api.worldDrafts(activeRole)])
-      : Promise.resolve([[], [], []]);
-    const [configurationValue, agentModelConfigValue, simulationValue, accountCenterValue, permissionCenterValue, keyCenterValue, worldModelValues] = await Promise.all([
-      api.configurations(activeRole), api.agentModelConfig(activeRole), api.simulationOverview(activeRole), api.accountCenter(activeRole), api.permissionCenter(activeRole), api.keyCenter(activeRole), worldModelRequest
+    // 2026-09-25 阶段 2：config 页已不再承载系统接入与元模型连接模板，
+    // 因此不再拉取 worldTemplates / worldConnectionTargets / worldDrafts。
+    const [configurationValue, agentModelConfigValue, simulationValue, accountCenterValue, permissionCenterValue, keyCenterValue] = await Promise.all([
+      api.configurations(activeRole), api.agentModelConfig(activeRole), api.simulationOverview(activeRole), api.accountCenter(activeRole), api.permissionCenter(activeRole), api.keyCenter(activeRole)
     ]);
-    const [worldTemplatesValue, worldTargetsValue, worldDraftsValue] = worldModelValues;
-    return { configurationValue, agentModelConfigValue, simulationValue, worldTemplatesValue, worldTargetsValue, worldDraftsValue, accountCenterValue, permissionCenterValue, keyCenterValue };
+    return { configurationValue, agentModelConfigValue, simulationValue, accountCenterValue, permissionCenterValue, keyCenterValue };
   }
   throw new Error('未知页面，无法加载数据。');
 }
@@ -66,8 +64,7 @@ export function applyPageData({ pageId, data, state, unwrapPermissionWorkspace }
     set('permissionWorkspace', workspace);
   } else if (pageId === 'config') {
     set('configuration', data.configurationValue); set('agentModelConfig', data.agentModelConfigValue); set('simulation', data.simulationValue);
-    set('worldTemplates', data.worldTemplatesValue);
-    set('worldTargets', data.worldTargetsValue); set('worldDrafts', data.worldDraftsValue); set('accountCenter', data.accountCenterValue);
+    set('accountCenter', data.accountCenterValue);
     set('permissionCenter', data.permissionCenterValue); set('keyCenter', data.keyCenterValue);
   }
 }

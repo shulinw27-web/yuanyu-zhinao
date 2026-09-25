@@ -1,9 +1,8 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { createAgentClient } from '@healthcare-ai/agent-sdk';
-import KnowledgeLibraryPanel from '../../../frontend/src/features/knowledge/KnowledgeLibraryPanel.vue';
-import MemoryReviewPanel from '../../../frontend/src/features/knowledge/MemoryReviewPanel.vue';
-import AnomalyAssistantPanel from '../../../frontend/src/features/agent/AnomalyAssistantPanel.vue';
+import { KnowledgeLibraryPanel, MemoryReviewPanel } from '@healthcare-ai/agent-ui/knowledge';
+import { AnomalyAssistantPanel } from '@healthcare-ai/agent-ui/agent';
 
 const props = defineProps({
   layout: { type: String, default: 'desktop' },

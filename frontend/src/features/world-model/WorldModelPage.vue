@@ -1,7 +1,6 @@
 <script setup>
 import SemanticContextPanel from './SemanticContextPanel.vue';
-import CoreMetaObjectLayer from '../meta-model/CoreMetaObjectLayer.vue';
-import OAMetaModelStudio from '../meta-model/OAMetaModelStudio.vue';
+import { CoreMetaObjectLayer, OAMetaModelStudio } from '@healthcare-ai/agent-ui/meta-model';
 import { api } from '../../api/client.js';
 const props = defineProps({ graph: Object, access: Object, semanticContext: Object, role: String, coreMetaObjects: Object, metaModels: { type: Array, default: () => [] }, oaMetaSimulation: Object, oaMetaDraft: Object, oaMetaAuthoringProfile: Object, metaModelMessage: String, buttonPermissionIds: { type: Array, default: () => [] } });
 const replayCases = payload => api.replayOntologyCases(payload, props.role);
@@ -14,7 +13,7 @@ const colors = { exception: 'red', affected: 'gold', protected: 'purple', risk: 
     <div class="section-header"><div><span class="eyebrow">SEMANTIC LAYER · SEMANTICA CONNECTED</span><h2>语义层工作台</h2><p>在这里将跨系统事实抽象为可治理的对象和关系，再向智脑提供按权限裁剪、可追溯的业务上下文。</p></div></div>
     <section class="panel semantic-layer-guide"><b>从事实到智脑上下文</b><span>1. 运行模拟或接入系统产生事实</span><i>→</i><span>2. Semantica 抽取候选对象与关系</span><i>→</i><span>3. 在画布确认语义模型</span><i>→</i><span>4. 校验并登记后供智脑受控调用</span></section>
     <SemanticContextPanel :context="semanticContext" :role="role" />
-    <section class="panel semantic-connection-note"><b>语义运营 Agent 已迁移到独立运营端。</b> 本页面保留已登记语义上下文、核心元对象和人工精调画布；自然语言建模、Schema Critic、Diff 与回滚请在语义运营端执行。</section>
+    <section class="panel semantic-connection-note"><b>元域智营 Agent 已迁移到独立运营端。</b> 本页面保留已登记语义上下文、核心元对象和人工精调画布；自然语言建模、Schema Critic、Diff 与回滚请在元域智营端执行。</section>
     <CoreMetaObjectLayer :layer="coreMetaObjects" />
     <OAMetaModelStudio :meta-model="metaModels[0]" :draft="oaMetaDraft" :authoring-profile="oaMetaAuthoringProfile" :simulation="oaMetaSimulation" :role="role" :message="metaModelMessage" :replay-cases="replayCases" :button-permission-ids="buttonPermissionIds" @save-draft="$emit('save-oa-meta-draft', $event)" @validate-draft="$emit('validate-oa-meta-draft')" @simulate-build="$emit('simulate-oa-meta-model')" @publish="$emit('publish-oa-meta-model')" />
     <div class="section-header"><div><span class="eyebrow">META MODEL INSTANCE VIEW</span><h2>元模型驱动的风险实例影响图谱</h2><p>元模型定义对象、关系、状态、事件与策略边界；此处展示其在受控业务数据上的实时实例视图。</p></div></div>

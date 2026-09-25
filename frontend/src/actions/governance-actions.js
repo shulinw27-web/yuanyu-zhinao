@@ -1,31 +1,17 @@
-import { semanticSimulationMessage } from '../features/meta-model/ontology-scenario.js';
+import { semanticSimulationMessage } from '@healthcare-ai/agent-ui/ontology-scenario';
+
+// 2026-09-25 阶段 2：世界模型映射草稿的三个动作已从管理 Web 移除。
+// 「元模型连接模板 / 映射草稿」的入口迁到元域智营端系统接入视图，
+// 后端端点保留一个版本周期；本页不再持有相关状态，避免出现无人使用的死状态。
 
 export function createGovernanceActions({ api, refs, runAccessGuarded }) {
   const {
-    worldTemplateMessage, worldDrafts, metaModels, oaMetaSimulation, metaModelMessage, oaMetaDraft,
+    metaModels, oaMetaSimulation, metaModelMessage, oaMetaDraft,
     agentModelConfig, modelConfigMessage, simulation, simulationMessage, keyCenterMessage, keyCenter
   } = refs;
 
   const guarded = (operation, commit, messageRef) => runAccessGuarded(operation, commit, (err) => { messageRef.value = err.message; });
 
-  const createWorldDraft = (payload) => guarded(
-    async (role) => ({ response: await api.createWorldDraft(payload, role), drafts: await api.worldDrafts(role) }),
-    ({ response, drafts }) => {
-      worldTemplateMessage.value = response.reused ? '已存在同一模板和目标系统的草稿，已定位到该草稿。' : `已创建 ${response.draft.templateName} 映射草稿；请继续执行字段和关系校验。`;
-      worldDrafts.value = drafts;
-    }, worldTemplateMessage
-  );
-  const validateWorldDraft = (id) => guarded(
-    async (role) => ({ response: await api.validateWorldDraft(id, role), drafts: await api.worldDrafts(role) }),
-    ({ response, drafts }) => {
-      worldTemplateMessage.value = response.draft.validation.status === 'passed' ? '映射校验通过，已具备提交发布的条件。' : '映射校验未通过，请补齐主键、字段、关系或数据分级。';
-      worldDrafts.value = drafts;
-    }, worldTemplateMessage
-  );
-  const publishWorldDraft = (id) => guarded(
-    async (role) => ({ response: await api.publishWorldDraft(id, role), drafts: await api.worldDrafts(role) }),
-    ({ response, drafts }) => { worldTemplateMessage.value = `世界模型版本 ${response.draft.version} 已发布（Demo 模拟）。`; worldDrafts.value = drafts; }, worldTemplateMessage
-  );
   const simulateOAMetaModel = () => guarded(
     async (role) => ({ response: await api.simulateBuildOAMetaModel(role), models: await api.metaModels(role) }),
     ({ response, models }) => {
@@ -84,5 +70,5 @@ export function createGovernanceActions({ api, refs, runAccessGuarded }) {
     ({ response, overview }) => { keyCenterMessage.value = response.unchanged ? '该密钥租约已失效，无需重复吊销。' : `租约 ${response.lease.id} 已吊销。`; keyCenter.value = overview; }, keyCenterMessage
   );
 
-  return { createWorldDraft, validateWorldDraft, publishWorldDraft, simulateOAMetaModel, publishOAMetaModel, saveOAMetaDraft, validateOAMetaDraft, saveAgentModelConfig, runSimulationScenario, decideSimulationApproval, setSimulationConnectorFault, resetSimulation, rotateKeyPolicy, revokeKeyLease };
+  return { simulateOAMetaModel, publishOAMetaModel, saveOAMetaDraft, validateOAMetaDraft, saveAgentModelConfig, runSimulationScenario, decideSimulationApproval, setSimulationConnectorFault, resetSimulation, rotateKeyPolicy, revokeKeyLease };
 }

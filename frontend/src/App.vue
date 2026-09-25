@@ -21,7 +21,6 @@ const role = ref('quality_manager');
 const roles = ref([]); const dashboard = ref(null); const risks = ref([]); const notifications = ref([]); const world = ref(null); const access = ref(null); const systems = ref([]); const platform = ref(null); const configuration = ref(null); const procurement = ref(null); const agentRuntime = ref(null); const agentTools = ref([]); const agentRuns = ref([]); const agentModelConfig = ref(null);
 const agentSkills = ref([]); const agentConnectors = ref(null);
 const agentOperations = ref(null); const agentWorkItems = ref([]); const agentEvaluations = ref(null); const modelConfigMessage = ref(''); const simulation = ref(null); const simulationMessage = ref('');
-const worldTemplates = ref([]); const worldTargets = ref([]); const worldDrafts = ref([]); const worldTemplateMessage = ref('');
 const coreMetaObjects = ref(null); const metaModels = ref([]); const oaMetaSimulation = ref(null); const oaMetaDraft = ref(null); const oaMetaAuthoringProfile = ref(null); const metaModelMessage = ref('');
 const accountCenter = ref(null); const permissionCenter = ref(null); const keyCenter = ref(null); const keyCenterMessage = ref(''); const semanticContext = ref(null);
 const effectiveAccess = ref(null); const permissionWorkspace = ref(null); const permissionMessage = ref(''); const permissionSaving = ref(false);
@@ -31,7 +30,7 @@ const pageLoading = ref(true);
 const pageDataState = {
   dashboard, risks, notifications, world, access, systems, platform, configuration, procurement,
   agentRuntime, agentTools, agentRuns, agentModelConfig, agentSkills, agentConnectors, agentOperations,
-  agentWorkItems, agentEvaluations, simulation, worldTemplates, worldTargets, worldDrafts,
+  agentWorkItems, agentEvaluations, simulation,
   coreMetaObjects, metaModels, oaMetaSimulation, oaMetaDraft, oaMetaAuthoringProfile,
   accountCenter, permissionCenter, keyCenter, semanticContext, permissionWorkspace, alertingWorkspace
 };
@@ -117,9 +116,6 @@ function resetPageData() {
   agentWorkItems.value = [];
   agentEvaluations.value = null;
   simulation.value = null;
-  worldTemplates.value = [];
-  worldTargets.value = [];
-  worldDrafts.value = [];
   coreMetaObjects.value = null;
   metaModels.value = [];
   oaMetaSimulation.value = null;
@@ -139,7 +135,6 @@ function resetRoleMessages() {
   procurementMessage.value = '';
   modelConfigMessage.value = '';
   simulationMessage.value = '';
-  worldTemplateMessage.value = '';
   metaModelMessage.value = '';
   keyCenterMessage.value = '';
   permissionMessage.value = '';
@@ -166,7 +161,7 @@ async function loadPage(pageId, { force = false } = {}) {
   pageLoading.value = true;
   error.value = '';
   try {
-    const data = await fetchPageData({ pageId, activeRole, effectiveAccess: accessSnapshot, api, canAccessPage });
+    const data = await fetchPageData({ pageId, activeRole, api });
     if (requestId !== pageLoadGeneration || requestAccessGeneration !== accessGeneration || activeRole !== role.value || pageId !== page.value) return;
     applyPageData({ pageId, data, state: pageDataState, unwrapPermissionWorkspace });
     loadedPages.add(pageId);
@@ -313,9 +308,6 @@ const {
   act,
   executeProcurement,
   runAgentEvaluations,
-  createWorldDraft,
-  validateWorldDraft,
-  publishWorldDraft,
   simulateOAMetaModel,
   publishOAMetaModel,
   saveOAMetaDraft,
@@ -338,7 +330,7 @@ const {
   refs: {
     page, effectiveAccess, access, selectedRisk, message, procurementMessage, procurement,
     agentRuns, agentOperations, agentWorkItems, assistantMessages, agentEvaluations, error,
-    worldTemplateMessage, worldDrafts, metaModels, oaMetaSimulation, metaModelMessage, oaMetaDraft,
+    metaModels, oaMetaSimulation, metaModelMessage, oaMetaDraft,
     agentModelConfig, modelConfigMessage, simulation, simulationMessage, keyCenterMessage, keyCenter,
     permissionSaving, permissionMessage, alertingSaving, alertingMessage, alertingWorkspace, notifications
   },
@@ -397,7 +389,7 @@ watch(effectiveAccess, (accessValue) => {
     <ChannelsPage v-else-if="page === 'channels'" :notifications="notifications" :workspace="alertingWorkspace" :button-permission-ids="buttonPermissionIds" :message="alertingMessage" :saving="alertingSaving" @save-configuration="saveAlertingConfiguration" @simulate-alert="simulateAlertRoute" @test-voice="testAlertVoice" @voice-event="recordAlertVoiceEvent"/>
     <ProcurementActionPage v-else-if="page === 'procurement'" :scenario="procurement" :role="role" :action-message="procurementMessage" :button-permission-ids="buttonPermissionIds" @launch="executeProcurement('launch')" @approve="executeProcurement('approve')"/>
     <PermissionManagementPage v-else-if="page === 'permissions'" :workspace="permissionWorkspace" :role="role" :message="permissionMessage" :saving="permissionSaving" @assign-user="assignPermissionUser" @save-policy="savePermissionPolicy"/>
-    <ConfigManagementPage v-else-if="page === 'config'" :configuration="configuration" :model-config="agentModelConfig" :model-config-message="modelConfigMessage" :simulation="simulation" :simulation-message="simulationMessage" :world-templates="worldTemplates" :world-targets="worldTargets" :world-drafts="worldDrafts" :account-center="accountCenter" :permission-center="permissionCenter" :key-center="keyCenter" :key-center-message="keyCenterMessage" :role="role" :button-permission-ids="buttonPermissionIds" :world-template-message="worldTemplateMessage" @run-simulation-scenario="runSimulationScenario" @decide-simulation-approval="decideSimulationApproval" @set-simulation-connector-fault="setSimulationConnectorFault" @reset-simulation="resetSimulation" @save-model-config="saveAgentModelConfig" @create-world-draft="createWorldDraft" @validate-world-draft="validateWorldDraft" @publish-world-draft="publishWorldDraft" @rotate-key-policy="rotateKeyPolicy" @revoke-key-lease="revokeKeyLease"/>
+    <ConfigManagementPage v-else-if="page === 'config'" :configuration="configuration" :model-config="agentModelConfig" :model-config-message="modelConfigMessage" :simulation="simulation" :simulation-message="simulationMessage" :account-center="accountCenter" :permission-center="permissionCenter" :key-center="keyCenter" :key-center-message="keyCenterMessage" :role="role" :button-permission-ids="buttonPermissionIds" @run-simulation-scenario="runSimulationScenario" @decide-simulation-approval="decideSimulationApproval" @set-simulation-connector-fault="setSimulationConnectorFault" @reset-simulation="resetSimulation" @save-model-config="saveAgentModelConfig" @rotate-key-policy="rotateKeyPolicy" @revoke-key-lease="revokeKeyLease"/>
     <div v-else class="loading">当前页面不存在或不在有效权限范围内。</div>
   </AppShell>
   <RiskDrawer :risk="selectedRisk" :access="access || {}" :role="role" :message="message" :button-permission-ids="buttonPermissionIds" @close="selectedRisk = null" @acknowledge="act('acknowledge')" @approve="act('approve')"/>

@@ -1,6 +1,6 @@
 import { createApp } from 'vue';
 import App from './App.vue';
-import './styles/main.css';
+import '@healthcare-ai/agent-ui/styles/main.css';
 import './styles/ai-theme.css';
 import './styles/layout-density.css';
 import './styles/action-center.css';
@@ -8,8 +8,8 @@ import './styles/mobile-assistant.css';
 import './styles/private-agent.css';
 import './styles/model-connection.css';
 import './styles/world-template.css';
-import './styles/meta-model.css';
-import './styles/core-meta-objects.css';
+import '@healthcare-ai/agent-ui/styles/meta-model.css';
+import '@healthcare-ai/agent-ui/styles/core-meta-objects.css';
 import './styles/account-permission.css';
 import './styles/console-redesign.css';
 import './styles/key-center.css';

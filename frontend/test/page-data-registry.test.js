@@ -4,18 +4,34 @@ import { applyPageData, fetchPageData } from '../src/page-data-registry.js';
 
 const ref = (value = null) => ({ value });
 
-test('配置页在没有世界模型页面权限时不请求治理接口', async () => {
+test('配置页结构上不再请求世界模型 / 系统接入接口', async () => {
   const called = [];
+  const forbidden = ['worldTemplates', 'worldConnectionTargets', 'worldDrafts'];
   const api = new Proxy({}, {
     get: (_, name) => async () => {
       called.push(String(name));
-      if (name === 'metaModels') throw new Error('不应调用治理接口');
-      return name.endsWith('s') ? [] : {};
+      if (forbidden.includes(String(name))) throw new Error(`配置页不应再调用 ${String(name)}：入口已迁至元域智营端系统接入视图`);
+      return String(name).endsWith('s') ? [] : {};
     }
   });
-  await fetchPageData({ pageId: 'config', activeRole: 'marketing_manager', effectiveAccess: {}, api, canAccessPage: () => false });
-  assert.equal(called.includes('metaModels'), false);
+  // 阶段 2 之前这里靠 canAccessPage('world') 分支跳过；现在调用签名已不含权限判定，
+  // 因此断言的是「不存在这条调用路径」，而不是「这条路径被权限挡住」。
+  await fetchPageData({ pageId: 'config', activeRole: 'marketing_manager', api });
+  assert.deepEqual(called.filter((name) => forbidden.includes(name)), []);
   assert.deepEqual(called.sort(), ['accountCenter', 'agentModelConfig', 'configurations', 'keyCenter', 'permissionCenter', 'simulationOverview'].sort());
+});
+
+test('配置页数据应用不再写入世界模型相关状态', () => {
+  const state = {
+    configuration: ref(), agentModelConfig: ref(), simulation: ref(),
+    accountCenter: ref(), permissionCenter: ref(), keyCenter: ref()
+  };
+  applyPageData({
+    pageId: 'config',
+    data: { configurationValue: {}, agentModelConfigValue: {}, simulationValue: {}, accountCenterValue: {}, permissionCenterValue: {}, keyCenterValue: {} },
+    state
+  });
+  assert.deepEqual(Object.keys(state).sort(), ['accountCenter', 'agentModelConfig', 'configuration', 'keyCenter', 'permissionCenter', 'simulation'].sort());
 });
 
 test('权限工作区应用时拒绝无效响应结构', () => {

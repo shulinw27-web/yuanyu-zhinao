@@ -1,0 +1,22 @@
+{
+  "name": "@healthcare-ai/agent-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "双端共用前端资产：元模型/本体面板、知识资料面板、异常助手面板与企业设计基线样式",
+  "exports": {
+    ".": "./src/index.js",
+    "./meta-model": "./src/meta-model/index.js",
+    "./knowledge": "./src/knowledge/index.js",
+    "./agent": "./src/agent/index.js",
+    "./system-access": "./src/system-access/index.js",
+    "./ontology-scenario": "./src/meta-model/ontology-scenario.js",
+    "./ontology-read-plan": "./src/meta-model/ontology-read-plan-import.js",
+    "./styles/main.css": "./src/styles/main.css",
+    "./styles/meta-model.css": "./src/styles/meta-model.css",
+    "./styles/core-meta-objects.css": "./src/styles/core-meta-objects.css"
+  },
+  "dependencies": {
+    "vue": "^3.5.13"
+  }
+}
