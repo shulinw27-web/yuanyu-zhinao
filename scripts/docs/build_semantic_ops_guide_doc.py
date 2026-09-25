@@ -22,8 +22,8 @@ from word_helpers import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = ROOT / 'docs' / 'guides' / '元域智脑-语义运营Agent操作指南-v1.0.md'
-OUTPUT = ROOT / 'docs' / 'reference' / 'exports' / '元域智脑-语义运营Agent操作指南-v1.0.docx'
+SOURCE = ROOT / 'docs' / 'guides' / '元域智营-Agent操作指南-v1.0.md'
+OUTPUT = ROOT / 'docs' / 'reference' / 'exports' / '元域智营-Agent操作指南-v1.0.docx'
 
 
 def set_running_furniture(section):
@@ -32,7 +32,7 @@ def set_running_furniture(section):
     paragraph = header.paragraphs[0]
     paragraph.clear()
     paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    run = paragraph.add_run('元域智脑 | 语义运营 Agent 操作指南')
+    run = paragraph.add_run('元域智脑 | 元域智营 Agent 操作指南')
     set_font(run, 8.5, MUTED)
     first_header = section.first_page_header
     first_header.paragraphs[0].clear()
@@ -105,7 +105,7 @@ def add_cover(doc):
     subtitle = doc.add_paragraph()
     subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
     subtitle.paragraph_format.space_after = Pt(22)
-    set_font(subtitle.add_run('语义运营 Agent 操作指南'), 20, DARK, bold=True)
+    set_font(subtitle.add_run('元域智营 Agent 操作指南'), 20, DARK, bold=True)
 
     add_text(doc, '面向语义建模、数据治理与平台运营人员', 12, MUTED,
              align=WD_ALIGN_PARAGRAPH.CENTER, after=48)
@@ -213,10 +213,10 @@ def main():
     add_contents(doc)
     build_body(doc)
 
-    doc.core_properties.title = '元域智脑 - 语义运营 Agent 操作指南'
-    doc.core_properties.subject = '语义运营、语义建模、Semantica 与版本治理操作说明'
+    doc.core_properties.title = '元域智脑 - 元域智营 Agent 操作指南'
+    doc.core_properties.subject = '元域智营、语义建模、Semantica 与版本治理操作说明'
     doc.core_properties.author = '元域智脑平台'
-    doc.core_properties.keywords = '语义运营 Agent, Semantica, 语义建模, 操作指南'
+    doc.core_properties.keywords = '元域智营 Agent, Semantica, 语义建模, 操作指南'
     doc.save(OUTPUT)
     print(OUTPUT)
 

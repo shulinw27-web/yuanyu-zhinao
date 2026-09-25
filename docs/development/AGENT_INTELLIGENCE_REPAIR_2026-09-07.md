@@ -119,9 +119,9 @@ node scripts/evaluate-agent-material-context.mjs
 ## 完成记录
 
 - 完整自动回归 **326/326 通过**，无失败或跳过：[回归日志](../../output/intelligence-repair-final-regression.log)。
-- Lint、Typecheck、智脑 Web 构建及语义运营 Web 构建通过。日志分别为 `output/intelligence-repair-final-{lint,typecheck,desktop-build,semantic-build}.log`。
+- Lint、Typecheck、智脑 Web 构建及元域智营 Web 构建通过。日志分别为 `output/intelligence-repair-final-{lint,typecheck,desktop-build,semantic-build}.log`。
 - 协议修正后连续两轮核心真实方舟用例 **12/12 通过**：[第一轮](../../output/agent-intelligence-protocol-fixed-20260907.jsonl)、[第二轮](../../output/agent-intelligence-release-confirmed-20260907.jsonl)。页面发现“分析三个关注点”不必要澄清后，补充安全默认分析原则，再用该同义表达替换 B2 重跑，**12/12 通过**：[最终验收](../../output/agent-intelligence-final-acceptance-20260907.jsonl)。候选模型正确保留待校对阻断，不能解释为发布验收通过。
 - 更新后的内部协议下，再跑 20 轮对话及新窗口隔离，共 **21 项检查通过**：[复测](../../output/agent-long-dialogue-release-20260907.jsonl)；两端结构化附件与不重传续问 **4/4 通过**：[复测](../../output/agent-material-context-release-20260907.jsonl)。前者测试进程在最后“安全默认分析”提示词增量前启动，历史投影实现未变；最后增量另由核心验收和页面查询覆盖。
 - 六次重复问候的内部协议全部有效：[只记录结构与合成回答的诊断](../../output/turn-contract-fixed-20260907.jsonl)。诊断脚本不输出请求正文、密钥或模型原始响应。
-- 当前 API 已重启加载修复；智脑与语义运营两个开发页面仍保留供用户验证。没有修改项目外方舟密钥或扩大图片出网权限。
+- 当前 API 已重启加载修复；智脑与元域智营两个开发页面仍保留供用户验证。没有修改项目外方舟密钥或扩大图片出网权限。
 - 文档检查通过：115 份 Markdown、286 个本地链接。相关状态、架构增量、方舟接入说明、操作指南和生产 Checklist 引用均已同步；文档集中保留在 `docs/`。

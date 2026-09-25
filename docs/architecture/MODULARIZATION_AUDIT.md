@@ -1,8 +1,12 @@
-# 模块化与组件化审计（2026-09-24）
+# 模块化与组件化审计（2026-09-24，2026-09-25 / 2026-09-26 更新清偿状态）
 
 [返回架构文档](README.md)
 
 本页从**整体架构层面**审计项目当前的模块化（后端/包）与组件化（前端）状况。方法：**先实测后结论**——所有判断均给出可复核的实测数字与文件位置，不做凭文档推断的结论。审计范围覆盖 `backend/`、`frontend/`、`apps/`、`packages/`、`services/`。
+
+> **2026-09-26 状态更新**：执行顺序第 3 项（`domains/events` → `infrastructure/domain-events`）与第 5 项（前端三层组件判据落文档）已完成，详见第 4 节与 [ARCHITECTURE.md](ARCHITECTURE.md) §3.3。第 4、6 项仍属后续排期。
+
+> **2026-09-25 状态更新**：P0（跨包穿透）已**全部清偿**——新建 `packages/agent-ui` 上提 17 个文件，棘轮基线 8 → 0，扫描面补上此前漏掉的 `.cjs`/`.css`。详见 2.6 节与 [ADR-010](adr/ADR-010-agent-ui-package-extraction.md)。**后端同构问题（governance 域导出达上限）已按同一思路处理**：接入能力拆为独立域 `system-onboarding`，导出上限压到 4，跨域边 8 → 10 并逐条说明判据，详见 2.7 节与 [ADR-011](adr/ADR-011-system-onboarding-domain-extraction.md)。下表保留审计当时的实测口径，便于对照。
 
 ## 0. 结论摘要
 
@@ -10,7 +14,7 @@
 
 | 级别 | 问题 | 实测证据 | 影响 |
 | --- | --- | --- | --- |
-| **P0** | 工作区包反向依赖兄弟应用的私有源码 | 3 个包/应用共 **8 处** `../../../frontend/src/...` 相对路径 import（已加棘轮冻结，见 2.5） | 包边界名义化，构建与发布均不安全 |
+| **P0** | 工作区包反向依赖兄弟应用的私有源码 | 3 个包/应用共 **8 处** `../../../frontend/src/...` 相对路径 import（已加棘轮冻结，见 2.5；**2026-09-25 全部清偿，见 2.6**） | 包边界名义化，构建与发布均不安全 |
 | **P1** | `packages/agent-workbench` 是"伪包" | 850 行单一 Vue 组件，且其 3 个依赖来自 frontend | 复用承诺与实际耦合不符，无法独立复用 |
 | **P1** | 领域层"重导出"而非契约 | `governance/public-api.js` 48 行 30 条 export；`agent` 24 条 | 契约面无约束力，模块边界不可验证 |
 | **P2** | 横切关注点靠逐文件 import | `prompt-security-service` 被 **19** 个文件 import | 新增能力需改 19 处，易漏 |
@@ -38,14 +42,17 @@
 ```
 workspaces: ["frontend","backend","packages/*","apps/*"]
 
-依赖方向（实测）：
-  apps/desktop|dingtalk|mobile  →  packages/agent-sdk + packages/agent-workbench
-  apps/semantic-operations-console → packages/api-contracts + packages/semantic-operations-sdk
-  frontend  → packages/api-contracts + packages/client-runtime
+依赖方向（实测，2026-09-25 更新）：
+  apps/desktop|dingtalk|mobile  →  packages/agent-sdk + packages/agent-workbench（→ packages/agent-ui）
+  apps/semantic-operations-console → packages/agent-ui + packages/api-contracts + packages/semantic-operations-sdk
+  frontend  → packages/agent-ui + packages/api-contracts + packages/client-runtime
+  backend   → packages/api-contracts（+ packages/agent-ui，仅 devDependencies，供 4 个本体测试取场景夹具）
   apps/product-portal → 仅 vue（无内部包）
 ```
 
 依赖图**无环**。问题不在环，而在**跨越声明的依赖边界**（见第 2 节）。
+
+> **2026-09-25 变更**：新增 `packages/agent-ui` 并消除全部跨包穿透，依赖方向由「物理穿透」改为声明式（见 2.6 节与 [ADR-010](adr/ADR-010-agent-ui-package-extraction.md)）。
 
 ### 1.3 领域层契约面
 
@@ -79,7 +86,7 @@ workspaces: ["frontend","backend","packages/*","apps/*"]
 
 ## 2. P0：工作区包反向依赖兄弟应用的私有源码
 
-### 2.1 实测违规清单
+### 2.1 实测违规清单（**已于 2026-09-25 全部清偿**）
 
 **8 处**（由 `backend/test/architecture-boundaries.test.js` 的同款扫描算法复现，可用 `npm run test:architecture` 随时复核）：
 
@@ -94,15 +101,23 @@ apps/semantic-operations-console/src/main.js:3     → ../../../frontend/src/sty
 apps/semantic-operations-console/src/main.js:4     → ../../../frontend/src/styles/meta-model.css
 ```
 
-> **计数修正说明**：本审计初版报告为 6 处，仅检索了 `from '...'` 形式。精确扫描（同时覆盖 `import '...'` 副作用导入）后追加发现 2 处 CSS 引用，共 8 处。这是一个自我修正：CSS 的副作用导入同样穿透包边界。
+> **计数修正说明（一）**：本审计初版报告为 6 处，仅检索了 `from '...'` 形式。精确扫描（同时覆盖 `import '...'` 副作用导入）后追加发现 2 处 CSS 引用，共 8 处。这是一个自我修正：CSS 的副作用导入同样穿透包边界。
+>
+> **计数修正说明（二，2026-09-25）**：上表仍然**不完整**——扫描扩展名当时只有 `.js/.mjs/.ts/.vue`，漏掉 `.cjs` 与 `.css`。扩大扫描面后另有 3 处真实穿透（语义运营端 2 处测试、1 处 `examples/` 样例），详见 2.6 节。两次修正的方向一致：**「实测」的可信度取决于扫描面，而不是取决于是否写了「实测」二字。**
 
-### 2.1.1 一处不构成违规的跨区引用
+### 2.1.1 不构成违规的跨区引用（2 处，均已登记理由）
 
 ```
-apps/product-portal/src/components/DocsCenter.vue → ../../../../docs/public/product-docs.json
+apps/product-portal/src/components/DocsCenter.vue       → ../../../../docs/public/product-docs.json
+apps/semantic-operations-console/test/read-plan-import.test.cjs → ../../../examples/semantic-schemas/cross-channel-fulfillment/read-plan.mjs
 ```
 
-**判定为合法**：这是**内容投放**而非源码依赖。依据 `docs/guides/PRODUCT_PORTAL.md`：「公开文档的受控来源是产品公开内容，由官网显式打包，不向浏览器暴露整个 docs 目录」。该 JSON 是人工维护的公开内容资产，且 packages 的 `exports` 机制不适用于内容包。已登记在 `CROSS_PACKAGE_CONTENT_ALLOWLIST` 并在基线文件中写明理由——**白名单必须带理由，否则会退化为无声的例外堆积**。
+**判定为合法**：这是**内容/样例投放**而非源码依赖。
+
+- `docs/public/product-docs.json`：依据 `docs/guides/PRODUCT_PORTAL.md`「公开文档的受控来源是产品公开内容，由官网显式打包，不向浏览器暴露整个 docs 目录」。该 JSON 是人工维护的公开内容资产。
+- `examples/semantic-schemas/...`：仓库级 `examples/` 是跨包共用的**只读样例数据**（端到端 schema 示例），不属任何包的私有源码，也不参与任何构建产物；`packages` 的 `exports` 机制不适用于纯数据文件。
+
+两者均已登记在 `CROSS_PACKAGE_CONTENT_ALLOWLIST` 并在基线文件中写明理由——**白名单必须带理由，否则会退化为无声的例外堆积**。
 
 ### 2.2 为什么这是 P0
 
@@ -135,6 +150,8 @@ apps/product-portal/src/components/DocsCenter.vue → ../../../../docs/public/pr
 - 在 `package.json` 声明 `exports`，并在 `agent-workbench` 与 `semantic-operations-console` 的 `dependencies` 里显式声明 `"@healthcare-ai/agent-ui": "*"`。
 - 好处：依赖关系从"物理穿透"变为"声明式依赖"，可被工具校验。
 
+> **实际实施时按包边界（而非「谁引用谁」）把范围扩到 17 个文件**：`agent-workbench` 还引用了 `MemoryReviewPanel` 与 `AnomalyAssistantPanel`，`CoreMetaObjectLayer` 与元模型面板同属一个关注点，样式（`main.css` / `meta-model.css` / `core-meta-objects.css`）也随组件走。只搬 11 个文件会留下半套组件，下次仍要再动一次。见 2.6 节。
+
 **方案 B（结构更干净但改动大）：让 `agent-workbench` 接收面板而非内嵌。**
 
 - `AgentWorkbench.vue` 当前在顶层直接 import 3 个面板（见 1.1 节实测第 4~6 行）。改为通过 `provide/inject` 或 `slots` + 注册表接收，由各端 App.vue 注入自己要用的面板。
@@ -144,7 +161,7 @@ apps/product-portal/src/components/DocsCenter.vue → ../../../../docs/public/pr
 
 无论选 A 还是 B，都应当立即增加一条架构测试，禁止 `packages/*` 与 `apps/*` 出现指向上层目录的跨包相对 import。这条测试成本极低（正则扫描），却能锁住边界不再劣化——与已在后端落地的棘轮机制同构。
 
-> **落地状态：已完成（2026-09-24）。** 见 2.5 节。
+> **落地状态**：方案 C 已完成（2026-09-24），见 2.5 节；方案 A 已完成（2026-09-25），见 2.6 节。方案 B 未启动。
 
 ### 2.5 落地：跨包边界棘轮测试（已完成）
 
@@ -157,10 +174,10 @@ apps/product-portal/src/components/DocsCenter.vue → ../../../../docs/public/pr
 
 | 关注点 | 做法 |
 | --- | --- |
-| 扫描范围 | `packages/`、`apps/`、`frontend/src/` 三棵树，递归收集 `.js/.mjs/.ts/.vue`（跳过 `node_modules/dist/release/build/.git`） |
+| 扫描范围 | `packages/`、`apps/`、`frontend/src/` 三棵树，递归收集 `.js/.mjs/.cjs/.ts/.vue/.css`（跳过 `node_modules/dist/release/build/.git`） |
 | 违规判定 | 提取所有相对 import（正则同时覆盖 `from '...'`、`import('...')` 与副作用 `import '...'`），解析后按「顶层归属区」比较：`packages/<name>`、`apps/<name>`、`frontend`、`backend` 各自为一个区，跨区即为违规 |
-| 基线冻结 | `CROSS_PACKAGE_IMPORT_BASELINE`（8 条，见 2.1 节实测清单） |
-| 内容白名单 | `CROSS_PACKAGE_CONTENT_ALLOWLIST`（1 条，见 2.1.1 节）——区分「源码依赖违规」与「公开内容资产的有意引入」 |
+| 基线冻结 | `CROSS_PACKAGE_IMPORT_BASELINE`（2026-09-24 冻结 8 条 → **2026-09-25 归零**，见 2.1 节实测清单与 2.6 节） |
+| 内容白名单 | `CROSS_PACKAGE_CONTENT_ALLOWLIST`（2 条，见 2.1.1 节）——区分「源码依赖违规」与「公开内容/样例数据的无意引入」 |
 | 双向校验 | **新增**未登记违规 → 失败并打印待登记项；**已解除**的基线项 → 失败并要求下调基线。防止基线长期虚高 |
 | 自检 | 断言扫描到的工作区源码数 `>= 30`，避免扫描逻辑失效时「静默通过」 |
 
@@ -174,7 +191,80 @@ apps/product-portal/src/components/DocsCenter.vue → ../../../../docs/public/pr
 3. **常规运行**：`npm run test:architecture` 10/10 通过；`npm run lint` 通过。
 4. **残留清理**：探测文件 `.scan-tmp.mjs`、`.dbg.mjs`、`.bak` 均已删除，工作区无残留。
 
-**遗留（未完成，不属本次范围）**：2.4 方案 A/B 的实际结构修复尚未启动，8 条基线仍在。真正清偿需单独排期。
+**遗留（2026-09-25 已关闭）**：2.4 方案 A 已实施、8 条基线已全部清偿归零，见 2.6 节。方案 B（`AgentWorkbench` 改 `provide/inject` + `slots`）仍未启动，属第 3 节议题。
+
+---
+
+### 2.6 清偿：新建 `packages/agent-ui`（已完成，2026-09-25）
+
+按 2.4 方案 A 实施，并顺带修掉一个**此前未被发现的扫描盲区**。
+
+**迁移内容**：17 个文件从 `frontend` 上提到 `packages/agent-ui`，全部为**纯重命名**（`git diff -M --numstat` 为 0 增 0 删；3 个样式文件字节一致）：
+
+| 新路径 | 文件数 | 来源 |
+| --- | --- | --- |
+| `src/meta-model/` | 7 | `frontend/src/features/meta-model/*`（含 `CoreMetaObjectLayer`、`ontology-scenario.js`） |
+| `src/knowledge/` | 6 | `frontend/src/features/knowledge/*`（`KnowledgeLibraryPanel` + 4 子面板 + `MemoryReviewPanel`） |
+| `src/agent/` | 1 | `frontend/src/features/agent/AnomalyAssistantPanel.vue` |
+| `src/styles/` | 3 | `frontend/src/styles/{main,meta-model,core-meta-objects}.css` |
+
+迁移后 `frontend/src/features/{meta-model,knowledge}/` 目录已空并删除。
+
+**比审计初版建议多做的部分（以及为什么）**：
+
+1. **多搬 3 个文件**：审计的「11 个文件」只覆盖「被跨包引用的 5 个组件及其闭包」。实际实施时按**包边界**而非「谁引用谁」圈定范围——`agent-workbench` 还引用了 `MemoryReviewPanel` 与 `AnomalyAssistantPanel`（基线第 6、8 条），且 `CoreMetaObjectLayer` 与元模型面板同属一个关注点；只搬闭包会留下半套组件，下次仍要再动一次。
+2. **样式一并上提**：`main.css`（企业设计基线）被元域智营端用于页面骨架，`meta-model.css` / `core-meta-objects.css` 是元模型专属样式。迁移后的组件仍依赖这些全局类，留在 `frontend` 会立刻产生新的穿透。
+3. **显式具名 `exports` 而非通配**：只声明 9 个入口，刻意不开 `"./*": "./src/*"`。理由与代价见 ADR-010。
+
+**扫描盲区修正（自我修正）**：棘轮初版只收 `.js/.mjs/.ts/.vue`，**漏掉 `.cjs` 与 `.css`**。扩大扫描面后实测发现另有 3 处真实穿透：
+
+```
+apps/semantic-operations-console/test/read-plan-import.test.cjs  → ../../../frontend/src/features/meta-model/ontology-read-plan-import.js
+apps/semantic-operations-console/test/read-plan-panel.test.cjs   → ../../../frontend/src/features/meta-model/ontology-read-plan-import.js
+apps/semantic-operations-console/test/read-plan-import.test.cjs  → ../../../examples/semantic-schemas/cross-channel-fulfillment/read-plan.mjs
+```
+
+即 2.1 节的「8 处」**在扩大扫描面前并不完整**。前 2 处随本次搬迁一并改为 `@healthcare-ai/agent-ui/ontology-read-plan`；第 3 处指向仓库级 `examples/`（跨包共用的只读样例数据，非任何包的私有源码、不参与构建产物），登记入 `CROSS_PACKAGE_CONTENT_ALLOWLIST` 并写明理由。
+
+**测试读取源码的方式随之调整**：语义运营端 4 个 `.cjs` 组件测试需要读取组件源码文本做断言，原为相对路径穿透。改为「声明式入口 + 目录推导」：
+
+```js
+const metaModelDir = dirname(require.resolve('@healthcare-ai/agent-ui/meta-model'));
+const filename = resolve(metaModelDir, 'OntologyCaseReplay.vue');
+```
+
+不为此在 `exports` 里开 `"./src/*"` 后门——测试读源码是真实需求，但需求不构成放宽边界声明的理由。
+
+**第二类静默丢失覆盖：类型检查**。`tsconfig.json` 的 `include` 原本只有 `packages/*/src/**/*.js`，**没有 `.vue`**（`.vue` 只覆盖 `frontend/src` 与 `apps/*/src`）。被迁移的 14 个 `.vue` 文件原本通过 `frontend/src/**/*.vue` 受检，迁移后会**静默失去类型检查**。已补上 `packages/*/src/**/*.vue`，重跑 `vue-tsc` 通过。
+
+> **这条比扫描盲区更值得记住**：迁移是「纯重命名」，所有测试仍然绿——如果只用「测试通过」验收，覆盖面收缩不会以任何形式暴露。**结构性迁移的验收必须包含「检查工具的覆盖面有没有跟着变」**。
+
+**已知不洁（如实记录）**：`backend` 的 `devDependencies` 出现 `@healthcare-ai/agent-ui`，原因是「场景夹具被后端测试复用」（4 个本体测试导入 `ontology-scenario.js`）。正确处理是把夹具抽到独立数据包，本次未抽以免引入第三个包、扩大改动面。已写入 [ADR-010](adr/ADR-010-agent-ui-package-extraction.md) 的退出条件第 2 条：一旦后端**非测试**代码引用该包，必须立刻抽离。
+
+**验收**：`test:architecture` 10/10 且基线条目 **8 → 0**（下降非持平）；5 端构建全部通过（`frontend` / `semantic-operations-console` / `desktop` / `mobile` / `dingtalk`）；语义运营端组件测试 60/60、`test:ontology` 104/104、`test:knowledge` 56/56、`test:semantic` 156/156、`test:registry` 7/7、前端 `test:permissions` 10/10；`npm run lint`、`npm run typecheck`、`npm run docs:check` 均通过。
+
+---
+
+### 2.7 后端侧同类问题：把「接入」从 governance 域里分出来（已完成，2026-09-25）
+
+2.4/2.6 处理的是**前端**的边界穿透。同一时期后端出现了同构的问题：接入能力需要一个新的组装层（总览 / 详情 / 连通性探测），而 `governance` 域的 `DOMAIN_EXPORT_CEILING` 已达 **92 且规则是「只降不升」**——塞进去只能抬高基线。
+
+**做法**：新建 `backend/src/domains/system-onboarding/`，`DOMAIN_EXPORT_CEILING['system-onboarding'] = 4`，**刻意压到 4**（只放契约面：`SYSTEM_ACCESS_BOUNDARY` + 总览 + 详情 + 探测；探测历史读取与测试复位服务属实现细节，不进契约面）。这正是棘轮本身给出的合法路径：**先分域，再谈导出**。
+
+**同时仍然做了一次清单收敛（方向与阶段 0 一致）**：`system-access-service.js` 初版从 `mcp-connector-service.js` 单独派生了一份连接器目录（`connectorByCode`），但该变量**从未被使用**——既是死代码，也是「同一份清单在两个域各存一份」的苗头。已整条链路删除，连接器信息一律读注册表 `definition.connector`，并在文件头写明不这样做的理由。
+
+**跨域边登记（有意增加，非耦合）**：`CROSS_DOMAIN_EDGE_BASELINE` 8 → 10，新增：
+
+```
+system-access-service.js → mock-onboarding-source-service.js   （探测读内置合成数据源）
+system-access-service.js → semantic-tenant-context.js          （探测结果按租户隔离）
+```
+
+**刻意未加** `system-access-service.js → world-model-template-service.js`：连接模板/映射草稿仍属 `governance` 域，由**路由层组合两个域的 public-api**。判据是「组装依赖」与「领域耦合」的区别——前者是视图层拼装，后者是业务规则互依。**相邻模块之间出现依赖时，先把「必须加边」和「可以用路由层组合」分开判断，再决定是否登记。**
+
+**验收**：`test:architecture` 10/10（跨包基线保持 0、跨域边 8 → 10）；`test:access`（新增）9/9；`lint`/`typecheck` 通过。决策理由、放弃项与 5 条退出条件见 [ADR-011](adr/ADR-011-system-onboarding-domain-extraction.md)。
+
+> **两条边界的对比值得记住**：前端是「8 → 0」（清偿债务），后端是「8 → 10」（有意增加）。**基线数字本身不说明好坏，方向才说明**——`CROSS_PACKAGE_IMPORT_BASELINE` 的语义是「不该有的穿透」，必须趋零；`CROSS_DOMAIN_EDGE_BASELINE` 的语义是「已评审的跨域依赖」，允许增长但每一条都要能说清为什么。
 
 ---
 
@@ -225,6 +315,10 @@ packages/agent-workbench/src/index.js            （仅导出）
 **判断**：`domains/events` 实际是**基础设施**（事件出站箱），被误放在"领域"层。这已在阶段一以 `INFRASTRUCTURE_DOMAINS = new Set(['events'])` 的技术手段排除在棘轮之外，但**概念上的错位仍在**：它挂在 `domains/` 下会让后续读者以为领域层可以互相依赖。
 
 **建议**：把 `domains/events/` 重命名为 `infrastructure/domain-events/`（或 `shared/`），物理位置与概念层级对齐。这是一次机械重构（改路径 + 改 import），成本低但能消除一个持续误导后来者的结构信号。
+
+> **已完成（2026-09-26）**：按建议落到 `backend/src/infrastructure/domain-events/`，影响 **22 个文件**（19 处含 `domains/events` 字面量 + 3 处 `../events/` 相对引用），相对深度不变（`domains/x` 与 `infrastructure/x` 距 `src/` 同为两层），域内相对导入无需改动。`architecture-baseline.js` 的 `INFRASTRUCTURE_DOMAINS` 随之从 `new Set(['events'])` 收敛为**空集**——`domains/` 下**每一个**目录都必须是带 public-api 的业务边界，不再有例外（保留空集合而非删掉，是为了让「基础设施目录混进 domains/」一旦复发立刻可见）。回归：`test:architecture` 10/10、`test:events` 17/17、`npm run quality` EXIT=0。
+>
+> **注意本节另一半仍未关闭**：`risk-service.js` → `domains/alerting/alerting-service.js` 这类**领域之间**的反向引用与本次改名无关，仍挂在第 4 节描述的问题上（已由跨域边棘轮 189 条登记，属后续收敛）。实测迁移后 `services/` → `domains/` 的**直接**引用只剩这 1 处（`git grep "from '../domains/" backend/src/services/`），其余 9 处已随 `domains/events` 迁出而变成 `services/` → `infrastructure/`，即**不再构成分层反转**。
 
 ---
 
@@ -316,12 +410,12 @@ semantic-*（3 个）   → 都属于"语义建模"链路
 | 顺序 | 动作 | 成本 | 收益 | 状态 |
 | --- | --- | --- | --- | --- |
 | 1 | **加架构测试**：禁止 `packages/*`、`apps/*` 向上跨包相对 import | 极低（正则扫描） | 立即锁住 P0 不再恶化 | **已完成（2026-09-24，见 2.5）** |
-| 2 | 新建 `packages/agent-ui`，迁移 11 个被跨包引用的组件与闭包 | 中 | 消除 P0，依赖变声明式 | 未开始 |
-| 3 | `domains/events` → `infrastructure/domain-events` | 低（机械改名） | 消除分层反转的概念误导 | 未开始 |
+| 2 | 新建 `packages/agent-ui`，迁移被跨包引用的组件与闭包 | 中 | 消除 P0，依赖变声明式 | **已完成（2026-09-25，见 2.6；实际迁移 17 个文件，基线 8 → 0）** |
+| 3 | `domains/events` → `infrastructure/domain-events` | 低（机械改名） | 消除分层反转的概念误导 | **已完成（2026-09-26，见第 4 节；影响 22 个文件，`INFRASTRUCTURE_DOMAINS` 收敛为空集）** |
 | 4 | 抽 `AgentWorkbench.vue` 的 4 个 composables | 中 | 850 → ≤400 行，关注点分离 | 未开始 |
-| 5 | 前端三层组件判据写入文档 | 极低 | 后续归位有依据 | 未开始 |
+| 5 | 前端三层组件判据写入文档 | 极低 | 后续归位有依据 | **已完成（2026-09-26，见 [ARCHITECTURE.md](ARCHITECTURE.md) §3.3）** |
 | 6 | 横切关注点管线化（**须先立测试**） | 高 | 消除安全遗漏风险 | 未开始 |
 
 第 1 项已执行完毕——它成本近乎为零，把已经存在的边界问题固定在当前规模（8 处），防止在修复前继续扩大。这与后端阶段一落地棘轮是同一个判断：**先冻结，再收敛。**
 
-第 2~6 项属后续排期，**本次范围不含**；且第 2 项须在第 1 项的棘轮守护下进行（迁移完成一处即同步下调一次基线）。
+第 2、3、5 项已完成；第 4、6 项属后续排期（第 4 项须先有 composable 层的测试守护，第 6 项须先立枚举入口的测试），**仍不在本次范围**。

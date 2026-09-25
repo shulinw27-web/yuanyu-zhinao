@@ -62,7 +62,7 @@
 | --- | --- |
 | `npm run quality` | ESLint、Vue 类型检查及 **498 次 Node 测试通过**，0 失败、0 跳过；`output/release-native-claims-quality.log` |
 | Semantica Python 定义测试 | **6/6 通过**，`unittest discover -s services/semantic-context -p test_model_definition.py` |
-| 管理 Web 与语义运营 Web | `npm run build` 通过；`output/release-build.log` |
+| 管理 Web 与元域智营 Web | `npm run build` 通过；`output/release-build.log` |
 | 智脑桌面前端 | `npm run build:desktop` 通过；`output/release-desktop-build.log`；不等于重新打包安装程序或人工 UI 验收 |
 | 文档检查 | 139 份 Markdown、540 个本地链接通过；文档继续集中于 docs |
 | 安全与 Git | 源码敏感信息扫描通过；提交前另对 Git 暂存区检查已配置密钥精确值、常见令牌、私密路径及大文件，不输出密钥 |
@@ -285,7 +285,7 @@ LOT-N4、LOT-N5 及 SHOP-N3/SO-N3 下游现在纳入；其他父批 LOT-N9 不�
 
 上一轮跨仓履约回归：`output/semantic-workbench-loop/2026-09-10T01-55-28-936Z/`，45 次请求，12/12 验收通过；覆盖 A/B 口径切换、旧会话使用新发布版本、C 草稿未发布不生效、材料计算与跨轮追问。两个脚本仅停止了各自创建的进程。
 
-代码质量：`npm run quality` 通过 ESLint、Vue 类型检查及 468/468 次 Node 测试执行（组合命令可能重复执行，非互异用例数），0 失败、0 跳过。新增修复专项 8/8；原运行时测试补充局部完成、旧模型指纹拒绝、超过三根拒绝。语义运营端 Vite 构建通过，最后一次模板防御性调整也经过类型检查。`npm run docs:check` 通过（139 份 Markdown、521 个本地链接），`git diff --check` 通过。本轮未改 Python 产品代码，未以旧 Python 测试结果计入新执行数。日志：`output/supply-chain-repair-quality.log`。
+代码质量：`npm run quality` 通过 ESLint、Vue 类型检查及 468/468 次 Node 测试执行（组合命令可能重复执行，非互异用例数），0 失败、0 跳过。新增修复专项 8/8；原运行时测试补充局部完成、旧模型指纹拒绝、超过三根拒绝。元域智营端 Vite 构建通过，最后一次模板防御性调整也经过类型检查。`npm run docs:check` 通过（139 份 Markdown、521 个本地链接），`git diff --check` 通过。本轮未改 Python 产品代码，未以旧 Python 测试结果计入新执行数。日志：`output/supply-chain-repair-quality.log`。
 
 保留中途失败，不以重新运行删除问题：
 

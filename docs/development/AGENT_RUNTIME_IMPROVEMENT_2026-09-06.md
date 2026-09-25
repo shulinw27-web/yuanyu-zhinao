@@ -39,7 +39,7 @@
 | `npm run lint`、`npm run typecheck` | 通过 |
 | `npm run docs:check` | 110 份 Markdown、226 个本地链接通过 |
 | `npm run security:source-scan` | 当前源码规则扫描通过；不等同于渗透测试 |
-| `npm run build`、`npm run build:desktop`、`npm run build:mobile` | Web、语义运营、桌面智脑、移动端四端构建通过 |
+| `npm run build`、`npm run build:desktop`、`npm run build:mobile` | Web、元域智营、桌面智脑、移动端四端构建通过 |
 | 稳定性采样边界用例重复执行 10 次 | 10 次全部通过；不是 72 小时稳定性验收 |
 
 复测过程中处理了两项问题：采样窗口只剩几毫秒时仍发起请求，导致健康端点误报超时；旧安全用例仍预期已完成只读核验的运行状态为 `planned`。前者已修复采样截止逻辑，后者更新为 `analysis_completed` 并额外断言写执行记录仍为空。失败日志保留在 `output/agent-runtime-regression-2026-09-06.log` 和 `output/agent-runtime-regression-2026-09-06-final.log`，没有将失败运行计入最终通过数。
@@ -131,7 +131,7 @@ Demo 支持对单个可见、未关闭的 `RC` 报警生成质量调查草稿。
 
 ### 5. 运营规划与答复可信度
 
-语义运营规划器复用模型网关的 10 秒超时；测试不再通过 `NODE_ENV=test` 跳过模型调用。HTTP 协议测试验证：模型把“检查状态”建议成“发布模型”时，实际意图和目标仍保留服务器的只读请求，不能扩展系统范围。
+元域智营规划器复用模型网关的 10 秒超时；测试不再通过 `NODE_ENV=test` 跳过模型调用。HTTP 协议测试验证：模型把“检查状态”建议成“发布模型”时，实际意图和目标仍保留服务器的只读请求，不能扩展系统范围。
 
 答复治理不再因“两条以上引用”直接给出高可信度。当前输出明确说明检查范围是证据引用，不是答案正确率。业务智脑的三个只读工具循环与运营端的单命令审核流程仍是不同实现，没有宣称两端已统一为通用自主规划器。
 
@@ -156,7 +156,7 @@ node scripts/evaluate-agent-capabilities.mjs
 | 全量自动化回归 | **288/288 通过**，失败、取消、跳过均为 0；比上一批增加 15 项。[最终日志](../../output/agent-continuation-regression-2026-09-07-verified.log) |
 | Lint、类型检查 | 通过 |
 | 源码敏感信息规则扫描 | 通过；不等于完整安全审计 |
-| 四端生产构建 | 业务 Web、语义运营、桌面智脑、移动端全部通过 |
+| 四端生产构建 | 业务 Web、元域智营、桌面智脑、移动端全部通过 |
 | 固定评测集 Mock 模式 | 7 个案例的自动边界检查通过；`modelActuallyUsed=false`。[结果](../../output/agent-evaluation-contract-2026-09-07.json) |
 | 真实 Qwen 模型评测 | **受阻，未运行案例**：8080 推理端点不可用。[预检结果](../../output/agent-evaluation-model-2026-09-07.json) |
 | 浏览器与 Electron 实机回归 | **未完成**：启动隔离 API 和前端后台服务的操作被当前工具安全策略拒绝。未生成视觉验收结论 |

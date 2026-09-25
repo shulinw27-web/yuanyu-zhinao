@@ -28,7 +28,7 @@ async function waitForRenderer() {
     if (await rendererReady()) return;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error(`语义运营桌面渲染器未在预期时间内启动：${rendererUrl}`);
+  throw new Error(`元域智营桌面渲染器未在预期时间内启动：${rendererUrl}`);
 }
 
 function stop(exitCode = 0) {

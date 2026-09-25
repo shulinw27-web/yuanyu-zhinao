@@ -16,7 +16,7 @@
 
 2026-09-17 权限隔离增量：企业IAM人员、组织、策略和审计按租户保存，认证及会话版本验证绑定可信租户；683次全量自动化执行通过。门户自动初始化身份、权益计量和在途撤权仍未交付，不代表生产多租户就绪。[身份与升级边界](docs/guides/IDENTITY_PROVIDER_ADAPTERS.md) · [测试报告](docs/development/MULTITENANT_VALIDATION.md#14-执行面iam租户隔离2026-09-17)。
 
-第七批增量：语义运营可导入并逐项回放最多三个读取方案，业务知识页展示发布目录、根对象与输出口径，选定一个后只读联合核验；模型变更拒绝旧选择，事实与原文分列。不执行处置、不调用额外模型，自动联合规划仍待开发。[使用指南](docs/guides/KNOWLEDGE_WORKSPACE_GUIDE.md) · [最新验收](docs/development/WEKNORA_UPGRADE_ACCEPTANCE.md)。
+第七批增量：元域智营可导入并逐项回放最多三个读取方案，业务知识页展示发布目录、根对象与输出口径，选定一个后只读联合核验；模型变更拒绝旧选择，事实与原文分列。不执行处置、不调用额外模型，自动联合规划仍待开发。[使用指南](docs/guides/KNOWLEDGE_WORKSPACE_GUIDE.md) · [最新验收](docs/development/WEKNORA_UPGRADE_ACCEPTANCE.md)。
 
 2026-09-13 第五批：项目已通过专用只读 Key 接通本机 WeKnora 合成库，双端真实检索/引用回读/身份隔离及混合检索通过；两端各三轮方舟问答通过，实际订单和金额不足时明确未知。修复有效分块状态误判、摘要误作原文候选和检索诊断标记。范围仅合成库，实时业务联合规划仍未完成。[最新验收与剩余项](docs/development/WEKNORA_UPGRADE_ACCEPTANCE.md)。以下旧批次保留历史状态。
 
@@ -28,7 +28,7 @@
 
 2026-09-12：已发布模型解释改为“模型选择引用、服务端校验填值”，区分实际事实、计算指标、证据缺口与待验证建议；拒绝伪造字段、旧快照和不存在的引用。契约和使用边界见 [发布模型接入指南](docs/guides/PUBLISHED_MODEL_WORKBENCH.md)。
 
-企业级 AI 工作台与语义运营平台
+企业级 AI 工作台与元域智营平台
 
 **双 Agent 协同 · 企业本体建模 · 多模态交互 · 受控任务执行 · 多端工作空间**
 
@@ -65,7 +65,7 @@
 | 入口 | 面向人群 | 核心职责 | 产品形态 |
 | --- | --- | --- | --- |
 | **智脑工作台** | 业务人员、管理者、知识工作者 | 智能对话、材料分析、业务查询、任务协同、受控桌面工作 | Web、Electron、移动 H5、钉钉 H5 |
-| **语义运营 Agent** | 业务建模、数据治理与运营人员 | 需求讨论、字典解析、候选建模、可视化校对、模型版本与巡检 | 独立 Web、独立 Electron |
+| **元域智营 Agent** | 业务建模、数据治理与运营人员 | 需求讨论、字典解析、候选建模、可视化校对、模型版本与巡检 | 独立 Web、独立 Electron |
 | **管理 Web** | 平台管理员与实施人员 | 权限、配置、运行情况及治理管理；语义层作为独立模块呈现 | Web |
 
 两类 Agent 共享服务端基础设施，但保留各自的任务语义与授权范围。业务登录资格不等于模型发布权限；语义模型的编辑权限也不等于采购、库存或审批的业务操作权限。
@@ -146,7 +146,7 @@
 flowchart TB
     subgraph clients["多端工作空间"]
         business["智脑工作台<br/>Web · Electron · 移动 H5 · 钉钉 H5"]
-        semantic["语义运营 Agent<br/>独立 Web · Electron"]
+        semantic["元域智营 Agent<br/>独立 Web · Electron"]
         admin["管理 Web<br/>权限 · 配置 · 运行治理"]
     end
     gateway["共享 API 与身份边界<br/>身份源适配 · IAM · 数据范围 · 设备约束"]
@@ -155,7 +155,7 @@ flowchart TB
     admin --> gateway
     subgraph platform["平台应用与运行时"]
         runtime["业务 Agent Runtime<br/>上下文 · 任务编排 · 工具选择 · 证据"]
-        authoring["语义运营与模型治理<br/>候选 · 人工校对 · 回放 · 版本发布"]
+        authoring["元域智营与模型治理<br/>候选 · 人工校对 · 回放 · 版本发布"]
         execution["受控执行<br/>目标绑定 · 确认 · 审批 · 回执"]
     end
     gateway --> runtime
@@ -197,7 +197,7 @@ flowchart TB
 
 > “采购订单以订单号为主键，入库单引用订单号，一张订单可以分多次入库。请建立候选模型，并说明如何避免重复统计订单金额，先不要发布。”
 
-语义运营 Agent 先形成对象与一对多关系候选，并讨论统计粒度。运营人员在画布中补齐来源、字段、主键与口径，再进行结构检查、样本回放和差异审阅；符合条件后，由有权限的身份确认发布。
+元域智营 Agent 先形成对象与一对多关系候选，并讨论统计粒度。运营人员在画布中补齐来源、字段、主键与口径，再进行结构检查、样本回放和差异审阅；符合条件后，由有权限的身份确认发布。
 
 **适合验证：** 语义理解、候选溯源、人工校对与版本治理。描述不足时应提示补充，不能将猜测写成正式业务口径。
 
@@ -228,7 +228,7 @@ flowchart TB
 yuanyu-zhinao/
 ├── apps/
 │   ├── desktop/                     智脑 Web / Electron
-│   ├── semantic-operations-console/ 语义运营 Web / Electron
+│   ├── semantic-operations-console/ 元域智营 Web / Electron
 │   ├── mobile/                      移动端工作台
 │   └── dingtalk/                    钉钉手机与 PC H5 入口
 ├── frontend/                        管理 Web 与共享语义建模界面
@@ -268,7 +268,7 @@ npm run dev:api
 # 终端二：业务智脑 Web
 npm run dev:zhinao:web
 
-# 终端三：语义运营 Web（按需启动）
+# 终端三：元域智营 Web（按需启动）
 npm run dev:semantic-ops
 ```
 
@@ -276,10 +276,10 @@ npm run dev:semantic-ops
 | --- | --- | --- |
 | 业务 API | `npm run dev:api` | `http://127.0.0.1:3001` |
 | 智脑 Web | `npm run dev:zhinao:web` | `http://127.0.0.1:5184` |
-| 语义运营 Web | `npm run dev:semantic-ops` | `http://127.0.0.1:5174` |
+| 元域智营 Web | `npm run dev:semantic-ops` | `http://127.0.0.1:5174` |
 | 管理 Web | `npm run dev:web` | `http://127.0.0.1:5173` |
 | 智脑 Electron | `npm run dev:zhinao:electron` | 独立桌面窗口 |
-| 语义运营 Electron | `npm run dev:semantic-ops:electron` | 独立桌面窗口 |
+| 元域智营 Electron | `npm run dev:semantic-ops:electron` | 独立桌面窗口 |
 
 同一产品的 Web 与 Electron 开发实例可能争用端口。默认 Mock 主要用于流程验证；体验真实智能对话前，需要配置并确认可用模型。
 
@@ -301,7 +301,7 @@ npm run docs:check            # 文档结构与本地链接
 npm run security:source-scan  # 已配置的密钥模式与敏感文件检查
 npm run quality               # lint + 类型检查 + 全量 Node 自动化
 npm run test:ontology         # 本体、判断绑定、历史关系与身份映射专项
-npm run build                # 管理 Web 与语义运营 Web
+npm run build                # 管理 Web 与元域智营 Web
 npm run build:desktop        # 智脑 Web 构建，不代表完成桌面签名发布
 npm run build:mobile         # 移动 Web 构建，不代表完成原生真机验收
 ```
@@ -334,9 +334,9 @@ npm run build:mobile         # 移动 Web 构建，不代表完成原生真机�
 | 想了解什么 | 推荐阅读 |
 | --- | --- |
 | 接手项目与确认现状 | [项目交接](docs/overview/PROJECT_HANDOFF.md) · [当前状态](docs/overview/PROJECT_STATUS.md) |
-| 两个 Agent 分别能做什么 | [智脑能力范围](docs/overview/ZHINAO_CAPABILITY_SCOPE.md) · [语义运营能力范围](docs/overview/SEMANTIC_OPERATIONS_CAPABILITY_SCOPE.md) |
+| 两个 Agent 分别能做什么 | [智脑能力范围](docs/overview/ZHINAO_CAPABILITY_SCOPE.md) · [元域智营能力范围](docs/overview/SEMANTIC_OPERATIONS_CAPABILITY_SCOPE.md) |
 | 架构与接口 | [整体架构](docs/architecture/ARCHITECTURE.md) · [模块与 API](docs/modules/README.md) |
-| 上手体验 | [智脑使用指南](docs/guides/ZHINAO_USER_GUIDE_V2.md) · [语义运营指南](docs/guides/元域智脑-语义运营Agent操作指南-v1.0.md) |
+| 上手体验 | [智脑使用指南](docs/guides/ZHINAO_USER_GUIDE_V2.md) · [元域智营指南](docs/guides/元域智营-Agent操作指南-v1.0.md) |
 | 构建企业语义层 | [场景建模指南](docs/guides/ONTOLOGY_SCENARIO_MODELING.md) · [语义建模架构](docs/architecture/SEMANTIC_MODEL_AUTHORING.md) |
 | 本地开发与真实联调准备 | [启动指南](docs/development/GETTING_STARTED.md) · [开发准备事项](docs/development/DEVELOPMENT_READINESS.md) |
 | 多端与企业宿主集成 | [客户端接入](docs/guides/CLIENT_ACCESS_GUIDE.md) · [国内平台接入](docs/guides/DOMESTIC_PLATFORM_ACCESS_GUIDE.md) |

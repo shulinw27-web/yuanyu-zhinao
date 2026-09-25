@@ -1,6 +1,6 @@
 # 用业务材料快速建立语义候选模型
 
-更新：2026-09-10。适用于独立语义运营 Agent，不是业务智脑。用 [制造案例材料](../../examples/semantic-schemas/manufacturing-case/) 可以复现；详细结果见 [修复报告](../development/SEMANTIC_MANUFACTURING_REPAIR.md)。
+更新：2026-09-10。适用于独立元域智营 Agent，不是业务智脑。用 [制造案例材料](../../examples/semantic-schemas/manufacturing-case/) 可以复现；详细结果见 [修复报告](../development/SEMANTIC_MANUFACTURING_REPAIR.md)。
 
 ## 准备什么
 

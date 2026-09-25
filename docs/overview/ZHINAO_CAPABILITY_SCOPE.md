@@ -36,7 +36,7 @@
 
 智脑是面向业务人员的对话式工作台：理解用户诉求，在当前权限内查找证据、分析业务问题、整理日常工作，并在明确确认后调用已开放的业务或桌面工具。
 
-它不是语义模型管理端，也不是拥有整台电脑控制权的通用自动化助手。语义对象、来源映射、模型校验和版本发布由独立的语义运营端负责。
+它不是语义模型管理端，也不是拥有整台电脑控制权的通用自动化助手。语义对象、来源映射、模型校验和版本发布由独立的元域智营端负责。
 
 当前业务查询主要基于 OA、ERP、WMS、MES、LIMS、QMS、OMS 等系统的受控模拟数据。系统名称出现在页面上，不代表已经连接对应企业系统。
 
@@ -152,7 +152,7 @@
 - [对话及上下文使用说明](../guides/AGENT_DIALOGUE_AND_CONTEXT.md)
 - [桌面工作台执行边界](../guides/DESKTOP_WORKBENCH_EXECUTION.md)
 - [长任务运行时](../operations/AGENT_LONG_TASK_RUNTIME.md)、[学习治理](../architecture/ZHINAO_LEARNING_GOVERNANCE.md)
-- [语义运营能力范围](SEMANTIC_OPERATIONS_CAPABILITY_SCOPE.md)
+- [元域智营能力范围](SEMANTIC_OPERATIONS_CAPABILITY_SCOPE.md)
 - [生产待办与验收条件](../operations/PRODUCTION_TODO_CHECKLIST.md)
 
 代码核对入口：[智脑服务](../../backend/src/services/private-agent-service.js)、[桌面工具注册表](../../backend/src/services/desktop-tool-registry.js)、[业务草稿工具](../../backend/src/services/agent-workflow-service.js)。

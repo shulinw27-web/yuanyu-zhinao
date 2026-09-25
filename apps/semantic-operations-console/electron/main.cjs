@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, session, shell } = require('electron');
 const path = require('node:path');
 const { fileURLToPath } = require('node:url');
-const { exportSemanticReport } = require('./report-exporter.cjs');
+const { exportSemanticReport, REPORT_ROOT_DIR_NAME } = require('./report-exporter.cjs');
 
 const developmentUrl = process.env.ELECTRON_RENDERER_URL;
 const isDevelopment = Boolean(developmentUrl);
@@ -55,7 +55,7 @@ function registerIpc() {
   });
   ipcMain.handle('semantic-ops:show-report', (event, targetPath) => {
     requireTrustedSender(event);
-    const root = path.resolve(app.getPath('documents'), '元域语义运营报告');
+    const root = path.resolve(app.getPath('documents'), REPORT_ROOT_DIR_NAME);
     const target = path.resolve(String(targetPath || ''));
     if (path.dirname(target) !== root) throw new Error('REPORT_PATH_INVALID');
     shell.showItemInFolder(target); return true;
@@ -70,7 +70,7 @@ function createWindow() {
     minHeight: 640,
     show: false,
     backgroundColor: '#07131f',
-    title: '元域语义运营 Agent',
+    title: '元域智营 Agent',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),

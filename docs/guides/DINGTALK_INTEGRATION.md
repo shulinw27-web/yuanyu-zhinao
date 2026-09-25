@@ -12,7 +12,7 @@
 
 其他终端部署见 [各端指南](CLIENT_ACCESS_GUIDE.md)；与企业微信、飞书等国内入口的区别见 [国内平台指南](DOMESTIC_PLATFORM_ACCESS_GUIDE.md)。
 
-采用企业内部 H5 微应用。手机钉钉与电脑钉钉打开同一个响应式工作台，共用现有 Agent、会话、文件理解及权限服务。`apps/dingtalk/` 只负责钉钉宿主适配；不复制业务逻辑，也不把语义运营端放进业务入口。
+采用企业内部 H5 微应用。手机钉钉与电脑钉钉打开同一个响应式工作台，共用现有 Agent、会话、文件理解及权限服务。`apps/dingtalk/` 只负责钉钉宿主适配；不复制业务逻辑，也不把元域智营端放进业务入口。
 
 应用首页地址和 PC 端首页地址均可配置为同一个 HTTPS 站点。例如 `https://zhinao.example.com/`。该站点部署 `apps/dingtalk/dist/`，同源 `/api/` 反向代理到业务 API。
 

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const load = () => import('../../../frontend/src/features/meta-model/ontology-read-plan-import.js');
+const load = () => import('@healthcare-ai/agent-ui/ontology-read-plan');
 const plan = id => ({ id, label: id, datasets: [{ id: 'rows', objectType: 'Order', where: [{ field: 'id', target: true }] }], outputs: [{ id: 'qty', label: '数量', unit: '件', expression: { op: 'one', dataset: 'rows', field: 'qty' } }] });
 test('human import previews one to three plans in all supported wrappers', async () => {
   const { parseReadPlanImport } = await load();

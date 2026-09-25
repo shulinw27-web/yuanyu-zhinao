@@ -28,7 +28,7 @@
 | Python `services/semantic-context/test_model_definition.py` | 4/4 通过 | 本机契约函数测试，不证明独立图引擎已在线 |
 | `npm run lint` | 通过 | 全仓静态检查 |
 | `npm run typecheck` | 通过 | 当前 TypeScript/Vue 配置范围 |
-| 管理 Web、语义运营、智脑桌面 Web、钉钉 H5 构建 | 全部通过 | 不等于 Electron 安装包或钉钉真机验收 |
+| 管理 Web、元域智营、智脑桌面 Web、钉钉 H5 构建 | 全部通过 | 不等于 Electron 安装包或钉钉真机验收 |
 | 浏览器载入示例→保存→校验→模拟 | 通过 | 独立内存测试 API，不覆盖原工作区草稿 |
 | 浏览器保存质量示例→粘贴 JSON→只读回放 | 2/2 通过 | P1 待确认建议调查、过期证据需复核；当前浏览器无发布基线 |
 | 浏览器导入历史 JSON→只读回放 | 2/2 通过 | 同一业务时刻、不同已知截止，补录前有效、补录后无效；导入不自动执行 |
@@ -64,7 +64,7 @@
 - [通用元模型服务](../../backend/src/services/meta-model-service.js)
 - [本体契约与影响分析](../../backend/src/services/ontology-contract-service.js)
 - [业务判断与回放](../../backend/src/services/business-decision-service.js)
-- [场景校对界面](../../frontend/src/features/meta-model/OntologyScenarioPanel.vue)
+- [场景校对界面](../../packages/agent-ui/src/meta-model/OntologyScenarioPanel.vue)
 - [智脑分析入口](../../backend/src/services/domain-analysis-service.js)
 - [Node 专项](../../backend/test/ontology-modeling.test.js)
 - [字段适配与样本回放](../../backend/src/services/decision-binding-service.js)

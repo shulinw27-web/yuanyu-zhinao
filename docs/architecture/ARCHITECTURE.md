@@ -12,7 +12,7 @@
 
 2026-09-08 身份层增量：各端经统一身份源适配器验证外部身份，再映射到平台 IAM；会话服务不再包含钉钉专属逻辑。身份源可为钉钉或多个企业 OIDC，业务授权及数据范围不由外部角色声明决定。配置、扩展契约与限制见 [身份源适配指南](../guides/IDENTITY_PROVIDER_ADAPTERS.md)。
 
-平台面向企业业务协作与日常工作场景，提供由移动端、桌面 Web 与 Electron 承载的受控 AI 能力层，以及独立的语义运营 Agent。
+平台面向企业业务协作与日常工作场景，提供由移动端、桌面 Web 与 Electron 承载的受控 AI 能力层，以及独立的元域智营 Agent。
 
 核心目标如下：
 
@@ -20,7 +20,7 @@
 2. 将企业数据、模型、连接器和高风险工作流置于服务端控制平面，客户端不持有高权限凭据。
 3. 将“人员、原材料、产品、设备、门店”作为跨域业务与语义上下文的统一锚点。
 4. 让智脑只根据可访问的证据生成计划；写入动作必须经过确认、审批、审计和受控连接器。
-5. 分离员工智脑、语义运营 Agent 与管理控制面：分别负责业务/日常任务、语义模型建设、运行观察与权限配置。
+5. 分离员工智脑、元域智营 Agent 与管理控制面：分别负责业务/日常任务、语义模型建设、运行观察与权限配置。
 
 平台采用以下原则：
 
@@ -34,6 +34,42 @@
 
 多任务、上下文压缩、Codex 能力差距与安全复审详见 [ZHINAO_AGENT_ARCHITECTURE_V2.md](ZHINAO_AGENT_ARCHITECTURE_V2.md)。
 
+### 1.1 系统接入的三层目标模型（2026-09-25）
+
+元域智营端的语义建设按三层组织，**接入是最底层前提**：语义建模的一切输入都必须可追溯到某个已接入系统。
+
+| 层 | 实体 | 生命周期 | 归属 | 说明 |
+| --- | --- | --- | --- | --- |
+| 接入层 | `SystemConnection`（每系统一条） | **长期资产**：草稿 → 已登记 → 已授权 → 已连通 →（已停用 ⇄ 已连通） | 元域智营端 | 系统「类型」属平台级、全租户共享；接入「实例」属租户资产，按租户隔离 |
+| 建模层 | `ModelingSession`（一次建模尝试） | **一次性**：选系统（N≥1）+ 材料 + 诉求 → 提案 → 复核 → 采纳/驳回 | 元域智营端 Agent 工作台 | 选系统为必选前提，空选择不允许提交 |
+| 治理层 | `SemanticModel` / `Version` / `Snapshot` | **长期资产**：草稿 → 校验 → 确认 → 发布 → 回滚 | 元域智营端 | 沿用既有治理链路（Schema Critic → Diff → 复核 → 确认令牌 → 发布 → 快照） |
+
+统一事实源为 `backend/src/data/system-catalog.js`（系统目录）与 `backend/src/services/system-registry-service.js`（租户级接入实例）。此前系统清单分散在 5 处且互不一致，已收敛；决策理由与退出条件见 [ADR-009](adr/ADR-009-system-registry-single-source.md)，实施进度见 [系统接入重构方案](SYSTEM_ONBOARDING_RESTRUCTURE_PLAN.md)。
+
+**接入层已落地为独立领域（2026-09-25）**：`backend/src/domains/system-onboarding/`（契约面 4 项导出）+ `backend/src/services/system-access-service.js`（面向运营视图的组装与**真实连通性探测**）。职责分界是「注册表是事实源，接入服务只做组装与探测」——后者不新增任何系统定义、不复制任何清单，连接器信息一律读注册表 `definition.connector`。主视角在**元域智营端**（`apps/semantic-operations-console/src/components/SystemAccessWorkspace.vue`），管理 Web 已不再有接入入口。决策理由、放弃项与退出条件见 [ADR-011](adr/ADR-011-system-onboarding-domain-extraction.md)。
+
+**建模层的「选系统」已落为范围契约（2026-09-25）**：`build_model` 与 `discover_sources` 两类意图必须携带 `systemCodes`，空选择一律 400，**没有「推断为空就回落到全部可访问连接器」**。范围只有两个显式入口（请求体的 `systemCodes`，或调用方显式声明 `includeAllRegistered`），返回的 `selectionSource` 如实标注范围怎么来的；文本里出现的系统名降级为「提到但未选择」的提示素材。越权选择**阻断而非裁剪**（403）。覆盖结果以 `task.systemScope` 如实上报。决策理由与 4 条复审条件见 [ADR-012](adr/ADR-012-explicit-modeling-scope.md)。
+
+**跨系统标识对应是「上报 + 人工确认后并入」，不是自动写入（2026-09-25）**：`semantic-identity-link-service.js` 把所选系统的声明收拢成字段目录，做三档标识识别（主键 / 业务键 / **未识别**），再按事务概念别名表推导跨系统标识对应，并显式上报四类分歧（标识归属歧义、同义不同名、键形状不可对齐、同名声明不一致）。**对象自己的标识必须指向该对象自身概念**——概念不同的标识字段是引用而不是自身标识，否则外键会被当成主键。推导结果落在 `proposal.identityLinking`，**不自动并入** `relationshipTypes`；并入只发生在人工逐条确认之后（`identityLinkConfirmations`，走既有复核动作），且并入的边标 `provenanceType: 'inferred'` + `derivedFrom`，与材料证据（`declared`）在草稿里可区分。整套推导**不依赖模型**，因此可在 mock 下复现（`test:identity`）。见 [ADR-014](adr/ADR-014-identity-linking-as-assumption.md) 与 [ADR-015](adr/ADR-015-identity-link-confirmation.md)。
+
+**确认要问清「三态各一种输入」，且「不可按值连接」必须在草稿里机器可读（2026-09-25，阶段 4d）**：链接定级从二态改**三态**——`linkable` / `requires_mapping` / `shape_unknown`，第三态是刻意拆出来的（`linkStatusOf(field.shape, expectedShapeOf(target.identifierKind))` 原先是二元比较，而 `field.shape` 有三个取值 `agent` / `business` / `null`，于是**「形状判不出来」的裸名被当成了「形状已知且不同」**，实测 7 条 `requires_mapping` 里 2 条如此）。`requires_mapping` 的确认必须附**结构化映射定义** `keyMapping`（`fromField` / `toField` 须与链接**逐字一致**、`basis` 四类枚举、`master_data_lookup` 必填 `lookupSource`、`owner`、`version`），自由文本不再被接受；`shape_unknown` 必须先做形状判定（`agent` / `business`），判定后**重新定级**，**且不写回字段声明**（`shape` 是**这条边上的结论**，写回会污染 `buildSystemFieldCatalog`）。映射定义**进草稿**（关系上的 `keyMapping`，已登记进 `sanitizeProposalDraft` 关系白名单），但**证据等级不变**（仍 `inferred`）。**不做独立映射表实体**：实测 7 条映射无一条被两条边共享。见 [ADR-019](adr/ADR-019-structured-key-mapping.md)。
+
+**而一条对应「有没有资格被确认」本身也要判，且判据只有一个（2026-09-25，阶段 4e）**：确认这一关的前置条件是**两端 `objectId` 都在本次候选对象内**——这正是草案校验（`sanitizeProposalDraft` 要求关系两端引用候选对象）的判据，因此它由推导层从**同一个 `objects` 数组**构造为 `link.eligible`，`说得出可确认` 与 `写得进草稿` 不可能分叉。不可确认的对应**仍然列在清单里**（它是系统声明里真实存在的跨系统引用，隐藏它等于宣称「本次没有这条引用」），但带 `ineligibleEndpoints` 与**可行动**的 `ineligibleReason`（点名对象 + 依据来自哪里 + 先让它成为候选对象），且**没有确认入口**；确认请求给专用错误码 `SEMANTIC_IDENTITY_CONFIRMATION_ENDPOINT_OUT_OF_SCOPE`，检查次序 **链接存在 → 资格 → 形状 → 映射**（先问一条写不进草稿的边「形状是什么」没有意义）。**两个判据必须分开**：链接上的 `declarationSourced` 只回答「依据来自系统配置声明还是本次候选对象」——旧口径把它当资格用，实测让 `ERP.Inventory.lot_no`（**可确认**，因对象名与候选对象 `Inventory` 同名）被宣称「来源系统未进入候选对象」，是一句界面事实错误。`summary` 给出 `eligible` / `ineligible` 两项独立计数。**不放宽草案校验**（会产出悬空边），也不自动把声明里的对象补进候选（那会让标识推导反向决定对象抽取，属 ADR-012 / ADR-013 / ADR-017）。见 [ADR-020](adr/ADR-020-identity-link-confirmation-eligibility.md)。
+
+**而支撑这些对应的等价假设必须先被裁定（2026-09-25）**：`alias_divergence`（同一概念由多个字段名表达）不是一条普通的冲突——它是跨系统对应的**前提**。实测 11 条对应里有 9 条站在「同一概念下的多个字段名指向同一实体」这个没人回答过的假设上（`MaterialBatch` 一个概念下的三个字段名就支撑了 4 条），而界面此前只有「确认这条对应」，没有「这个前提成不成立」。裁定入口落在同一处（`identityConflictRulings`），两类动作 `same_entity` / `distinct_entity`（后者必须给出字段名的**等价类划分**，且是严格划分）。**裁定不并入草稿、不产生证据等级**——它改变的是链接推导的**输入**（哪些对应成立），采纳仍必须走确认；因此裁定与 `inferred` 不在同一层，不可能混用，顺序也是「先裁定假设、再采纳结论」。裁定为不同实体时，跨等价类的对应被**撤下**（`withdrawnLinks`）而不是保留为可疑项。见 [ADR-016](adr/ADR-016-identity-conflict-rulings.md)。
+
+**而同一对象的同名声明也必须裁定「合并 / 区分粒度」（2026-09-25）**：同一系统内同一 `objectId` 的多处声明（受控词汇表、已配置映射、材料抽取）字段集不一致时，目录**默认取字段并集**——这个默认动作此前不可见，而并集还会参与标识识别，于是产出一个**没有任何一处声明过的复合体**（实测 `MES.ProductionBatch` 被并集授予 `production_batch_id`，而它的配置映射只声明 `batch_no`）。裁定入口同样落在既有复核动作（`declarationRulings`），但键是**分歧项**而非概念（`object:Inventory` / `source:ProductionBatch@mes.production_batch`），与 ADR-016 的概念级裁定是两套粒度。动作 `merge`（并集显式化）/ `distinct`（**不并集**：按声明严格划分成组，各组按自己声明的字段识别标识）。裁定同样**不写草稿、不产生证据等级**——它改的是字段目录的组成。**未裁定也必须披露并集**：条目带 `declarations` / `exclusiveFields` / `declarationState`，`identifierBasis` 写明「这是在并集上识别的」；拆分、被排除的声明、因改名而消失的对应全部显式列出。见 [ADR-018](adr/ADR-018-declaration-divergence-merging.md)。
+
+**范围随后从「上报口径」变为「过滤器」（2026-09-25）**：阶段 4 要按选中系统的字段目录抽取对象，抽取本身就是一次筛选，因此 ADR-012 的退出条件 2 被触发，范围确定为**过滤器**——来源**全部**在所选范围外的对象与随端点悬空的关系**不进提案**，但必须以 `excludedObjects` / `excludedRelationships` **可读地列出**并提示补选系统（「过滤」不等于「静默丢弃」）。来源**部分**超出范围的对象**保留**并记入 `partialScopeObjects`（它有合法在范围内的来源，排除会丢掉范围内系统的真实事实）；来源为 `UNASSIGNED` 的**一律保留**（把「未标注」当「超范围」会让纯自然语言抽取路径整体被清空）。字段 `outOfScopeObjects` 被拆为 `partialScopeObjects` 与 `excludedObjects` 后移除——保留并集别名会让调用方无法从字段名判断对象是否还在提案里。越权阻断**先于**范围过滤，过滤不得成为对越权系统的静默裁剪通道。见 [ADR-013](adr/ADR-013-scope-as-filter-with-explicit-exclusions.md)。
+
+**材料归属由模型取证、服务端判定，且确认前只是候选（2026-09-25）**：这是「唯一真正需要模型能力」的那一段。此前模型虽已接入抽取（`discoverNaturalSchema` → `validateNaturalSchema`），但契约里没有「这张表属于哪一处」，于是抽取出的对象一律 `UNASSIGNED`——既进不了字段目录（跨系统对应**恒为 0 条**），又让 Critic 的「受控来源系统」失败、草稿无法采纳；而卡住链路的信息（材料里逐字写着的「ERP 采购订单表 purchase_order」）一直就在材料里。现在：模型只提供**逐字归属原文**（契约里**没有**系统码字段），系统码由服务端用注册表判定，且只用系统码与系统名、**不认业务词别名**；判定结果一律是**候选**，不写 `sourceSystems`、**不参与范围裁剪**，但**可以**进字段目录（否则跨系统连接在非结构化材料上永远建不起来）。候选转事实要走人工确认（`sourceAssignments`，依据不得为空），确认后才写入来源系统并**这时才**按范围重新裁剪。四道关口顺序固定——**归属确认 → 等价裁定 → 同名声明裁定 → 对应确认**（每一关改的都是下一关的输入：归属决定字段目录、等价裁定决定哪些对应存在、声明裁定决定目录的组成、对应确认才是写草稿；而对应确认内部还要先过**资格**，只有两端对象都在候选内的对应才写得进草稿，见 [ADR-020](adr/ADR-020-identity-link-confirmation-eligibility.md)）。见 [ADR-017](adr/ADR-017-model-extraction-attribution.md)。
+
+**候选对象的来源与「没被生成」的原因必须可读（2026-09-26，阶段 4f）**：候选对象这条路此前是**沉默**的——实测材料写「采购订单、发运单、出库单、客户投诉」时只得到 **1 类**候选（`PurchaseOrder`），另外三个**静默消失**，界面上没有一句话解释它们去哪了；而「候选从哪来」也有两条静默路径（自然语言抽取在**模拟运行时**与**材料无字典线索**时都只 `return null`，两者要做的补救却完全不同）。现在：受控目录命中披露**命中词**（`matchedTerms`）与**覆盖率**（命中 M / 共 12 类），并说明它是**词面匹配的兜底**而不是抽取结果（「材料里写到、但目录未覆盖的业务对象**不会**出现在候选里」）；抽取跳过给出**可区分的原因码**（`mock_runtime` / `not_dictionary_like`，各自一句中文说明）；披露落在既有 `reviewNotes`，**不新增实体、不改 schema、不放进 `objectTypes`**；**不放宽任何门槛**（候选为空仍是硬错误）。**边界如实**：披露是**覆盖率级**而非**清单级**——能提示「可能漏」，**不能**点名「漏了哪个」（那需要对象抽取能力，正是阶段 4 剩下的一半）；`not_dictionary_like` 在模拟环境下不可达，只能靠纯函数层用例覆盖。见 [ADR-021](adr/ADR-021-candidate-provenance-disclosure.md)。
+
+**「连通性测试」是真的**：探测会监听本地临时端口、发分页 HTTP 请求、校验 `mock-onboarding-query.v1` 契约与分页完整性，并返回 `requests / pageCount / recordCount / readableRecords / objectTypes`。**但它读的是内置合成 HTTP 数据源（`sourceKind: 'local_mock_http'`），不是任何真实企业连接器**——返回值与界面都必须标注这一点，不得表述为生产验收。
+
+**多租户贯穿约定**：系统类型、角色可见性策略、模板目录等属平台级共享资产（无 `tenantId`）；接入实例、建模会话、模型草稿/快照等属租户资产，状态读写一律经 `semanticTenantStateKey()` 落到当前租户工作区，租户标识只取受信身份上下文，不接受请求体传入。**已知不洁**：接入配置样例（责任人 / 同步频率 / 字段→对象映射）仍来自 demo 种子、尚未租户隔离，以 `configurationSource: 'demo_seed'` 显式标注。
+
 ## 2. 全局逻辑架构
 
 ```mermaid
@@ -42,8 +78,8 @@ flowchart TB
   DesktopWeb["桌面 Web 智脑\n浏览器工作台"]
   Electron["Electron 智脑\nWindows 原生容器"]
   Web["Web 管理端\n运营观察、权限与配置"]
-  SemanticOps["独立语义运营 Web / Electron\n自然语言建模、人工校对、版本与巡检"]
-  SemanticAgent["语义运营 Agent\n候选提取、Schema Critic、Diff 与发布门禁"]
+  SemanticOps["独立元域智营 Web / Electron\n自然语言建模、人工校对、版本与巡检"]
+  SemanticAgent["元域智营 Agent\n候选提取、Schema Critic、Diff 与发布门禁"]
   Workbench["共享 Agent Workbench\n对话、附件、告警、待办、确认卡"]
   SDK["共享 Agent SDK\n设备标识、会话、API 客户端"]
   API["Node 业务 API / 智脑运行时\n身份、联合授权、编排、工作流、审计"]
@@ -97,14 +133,20 @@ demo-platform/
 ├─ apps/
 │  ├─ mobile/                   移动端 Vue 智脑应用，可封装为 Tauri
 │  ├─ desktop/                  桌面 Web + Electron 智脑应用
-│  └─ semantic-operations-console/ 独立语义运营 Web + Electron
+│  └─ semantic-operations-console/ 独立元域智营 Web + Electron（系统接入 / Agent 建模 / 模型校对与版本）
 ├─ packages/agent-sdk/          多端共享 API 客户端、会话与设备标识逻辑
+├─ packages/agent-ui/           双端共用前端资产：元模型/本体面板、知识资料面板、异常助手面板、设计基线样式
 ├─ packages/agent-workbench/    多端共享智脑交互、状态和 Codex 风格视觉组件
-├─ packages/semantic-operations-sdk/ 语义运营共享协议与认证客户端
+├─ packages/semantic-operations-sdk/ 元域智营共享协议与认证客户端
 ├─ services/semantic-context/   独立 Python Semantica 适配服务
 ├─ docs/                        唯一文档中心：概览、架构、模块、开发、运维、指南与交付资料
 └─ deploy/                      部署环境变量示例
 ```
+
+后端 `backend/src/` 的分层：`routes/`（HTTP 编排）→ `domains/*/public-api.js`（领域契约面）→ `services/`（应用服务）、
+`repositories/`（持久化端口实现）、`infrastructure/domain-events/`（事件出箱与 Broker，
+**2026-09-26 由 `domains/events` 迁出**，见 [MODULARIZATION_AUDIT](MODULARIZATION_AUDIT.md) 第 4 节）。
+`domains/` 下**每一个**目录都必须是带 `public-api.js` 的业务边界（`INFRASTRUCTURE_DOMAINS` 已收敛为空集）。
 
 ### 3.1 前端与终端
 
@@ -114,6 +156,7 @@ demo-platform/
 | `apps/mobile` | `apps/mobile/src/App.vue` | 移动端智脑宿主：使用共享 Workbench，提供 OA/平台账号登录、告警、聊天、语音、受限图片/PDF 输入、确认卡、回执和待办。 |
 | `apps/desktop` | `apps/desktop/src/App.vue`、`apps/desktop/electron/*` | 桌面 Web 与 Electron 智脑宿主：与移动端功能等价；Electron 使用隔离 preload、关闭 Node 集成和 webview、限制导航/外链/权限/下载，并提供最小窗口控制 IPC。 |
 | `packages/agent-sdk` | `packages/agent-sdk/src/index.js` | 创建稳定设备 ID，维护身份会话，统一注入客户端/设备头，封装移动端与桌面端所需 API。 |
+| `packages/agent-ui` | `packages/agent-ui/src/index.js` | 双端共用前端资产的唯一包：`src/meta-model/`（元模型与本体面板）、`src/knowledge/`（知识资料与记忆校对面板）、`src/agent/`（异常助手面板）、`src/system-access/`（接入侧的元模型连接模板/草稿治理）、`src/styles/`（企业设计基线 `main.css` 与元模型样式）。依赖经 `package.json` 的具名 `exports` 声明，**不用相对路径穿透兄弟包的私有源码**（见 [ADR-010](adr/ADR-010-agent-ui-package-extraction.md)）。 |
 | `packages/agent-workbench` | `packages/agent-workbench/src/AgentWorkbench.vue` | 统一三端的身份登录、对话、语音、材料上传、告警转分析、确认执行、待办和中性深色视觉系统，避免终端功能漂移。 |
 
 移动端和桌面端均使用 Vue 3 + Vite。移动端保留 Tauri 2 封装配置；桌面端以浏览器 Web 为渲染基线，并以 Electron 作为主桌面容器，浏览器和 Electron 共用同一个构建产物。旧 `src-tauri/` 仅保留为兼容实验配置，不是当前桌面发布链路。
@@ -134,6 +177,20 @@ demo-platform/
 | 模型、提示词安全与多模态 | `local-model-gateway.js`、`prompt-security-service.js`、`multimodal-input-service.js` | 选择 Mock/内网/外部模型；标准化并扫描直接/间接注入，隔离风险上下文，校验模型输出和附件签名，并在连续失败时熔断降级。 |
 | 密钥控制 | `key-center/key-center-service.js`、`key-center/kms-adapter.js`、`services/key-center/app.js` | 在进程内模拟租约签发、轮换、吊销与审计；提供独立控制面 `/v1` 契约，供后续工作负载身份调用。 |
 | 状态化流程模拟 | `mock-scenario-service.js`、`system-integration-service.js` | 通过 Mock Connector 将基础种子数据与运行时事件合并；演练场景会生成模拟 OA 审批、受控模拟写回、Connector 故障注入、健康状态告警与审计回放。 |
+
+### 3.3 前端组件的三层归位判据（2026-09-26）
+
+此前「什么进 `components/`、什么留在 `features/`」没有可复用判据：7 个 feature 目录只含 1 个文件，
+`components/` 只有 3 个文件——当 1 个文件的 feature 与 7 个文件的 feature 平级时，目录结构不再传达信息量。
+现已明确三层，**归位按「是否取数据」与「是否跨端」判定，不按文件数**：
+
+| 层 | 位置 | 判据 | 反例（不属于本层） |
+| --- | --- | --- | --- |
+| 展示组件 | `<端>/src/components/` | **无业务语义**：只受 props、不发请求、不读全局状态 | 组件内部自己 `fetch` 或读 pinia/reactive 全局 → 属下一个 |
+| 跨端共享业务组件 | `packages/agent-ui/src/<domain>/` | **跨端共享**：被两个及以上端引用，且依赖经 `package.json` 的具名 `exports` 声明 | 用相对路径穿透兄弟应用的 `src/`（见 [ADR-010](adr/ADR-010-agent-ui-package-extraction.md)，棘轮基线 0） |
+| 单端页面级组件 | `<端>/src/features/<domain>/` | **单端专用**：只有本端路由/页面引用，含取数与业务流程 | 被第二个端引用 → 上提到 `packages/agent-ui` |
+
+判据与 [MODULARIZATION_AUDIT](MODULARIZATION_AUDIT.md) 第 6 节一致；审计第 9 节执行顺序第 5 项由此关闭。
 
 ## 4. 核心对象与元模型架构
 
@@ -443,7 +500,7 @@ flowchart TB
 5. **本地持久化仍不是生产数据库**：关键 Mock 状态已迁入 SQLite，支持跨重启恢复；Agent 确认使用 SQLite `BEGIN IMMEDIATE` 原子占用，并有双进程竞争回归。限流桶和部分聚合遥测仍是进程内状态；SQLite 也不适合作为多节点生产数据层。生产必须使用 PostgreSQL 条件更新/事务、Redis 分布式限流与撤销、Outbox 和幂等键保证策略发布、确认占用、外部写入与审计一致。
 6. **连接器未真实接入**：MCP 目录和 ERP 写入是模拟实现；Agent 层已拒绝命令替换与重复消费，真实连接器仍需自己的认证、幂等键、审批回调、失败补偿与回执对账。
 7. **语义图与知识库未持久化**：需要图存储、事件采集、数据分级、来源回链、版本治理和冲突处理闭环。
-8. **可观测性与安全测试仍需生产化**：`npm.cmd run test:all` 覆盖共享契约、客户端兼容、非功能工具、架构边界、领域事件、Agent 安全/回答治理与证据链、会话和长任务、告警、权限/IAM、语义运营、桌面执行、学习治理及持久化；数量以该次运行输出为准。PostgreSQL 专项包含 migration checksum、IAM 请求快照、写后可见、并发最后管理账号约束和风险/采购并发幂等状态迁移；生产仍需真实消息 Broker、水平扩展消费者、电话 Provider、企业压测、KMS/HSM 签名和可信时间戳。
+8. **可观测性与安全测试仍需生产化**：`npm.cmd run test:all` 覆盖共享契约、客户端兼容、非功能工具、架构边界、领域事件、Agent 安全/回答治理与证据链、会话和长任务、告警、权限/IAM、元域智营、桌面执行、学习治理及持久化；数量以该次运行输出为准。PostgreSQL 专项包含 migration checksum、IAM 请求快照、写后可见、并发最后管理账号约束和风险/采购并发幂等状态迁移；生产仍需真实消息 Broker、水平扩展消费者、电话 Provider、企业压测、KMS/HSM 签名和可信时间戳。
 9. **IAM 仍需生产化**：当前可演示组织树、人员多角色、页面/按钮 RBAC、五类数据范围、版本冲突和审计，但仍需接入企业 IdP、持久化策略库、分布式策略缓存与精准失效，并在组织/角色/人员状态变更后撤销旧会话。
 
 ## 14. 推荐阅读顺序

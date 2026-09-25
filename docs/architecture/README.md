@@ -6,7 +6,7 @@
 
 **架构决策记录（ADR）**：影响全局、难以逆转的决策及其理由与退出条件，见 [ADR 索引](adr/README.md)。读架构文档前建议先读 ADR，理解「为什么这样设计」。
 
-**现状测绘与收敛建议**：[架构分析与优化](ARCHITECTURE_ANALYSIS_AND_OPTIMIZATION.md)（含实测数据、结构性问题和分阶段优化路线）。**模块化与组件化审计**：[模块化与组件化审计](MODULARIZATION_AUDIT.md)（前端与包边界、跨包引用穿透、组件分层判据）。
+**现状测绘与收敛建议**：[架构分析与优化](ARCHITECTURE_ANALYSIS_AND_OPTIMIZATION.md)（含实测数据、结构性问题和分阶段优化路线）。**模块化与组件化审计**：[模块化与组件化审计](MODULARIZATION_AUDIT.md)（前端与包边界、跨包引用穿透、组件分层判据）。**系统接入与建模重构方案**：[「系统接入 → 选系统建模 → 模型治理」整体重构方案](SYSTEM_ONBOARDING_RESTRUCTURE_PLAN.md)（状态：待确认，未实施）。
 
 **约束与守护**：架构债务已登记为「只降不升」的棘轮基线，见 `backend/test/architecture-baseline.js`；违反基线的改动会在 `backend/test/architecture-boundaries.test.js` 直接失败。测绘当前实况用 `node scripts/architecture-baseline.mjs`（只读，刻意不自动写回基线）。已落地棘轮：领域导出规模上限、跨领域依赖边、服务文件规模、跨包相对路径穿透（`CROSS_PACKAGE_IMPORT_BASELINE`，8 处，见审计 2.5 节）。
 

@@ -31,10 +31,12 @@ routes/*.js  ──全部──▶  domains/*/public-api.js  ✅ 纪律严格（
                               │
         ┌─────────────────────┼─────────────────────┐
         ▼                     ▼                     ▼
-  services/*.js          repositories/         domains/events
-  （互相直接 import，     （仅 4 个文件）       （outbox/broker）
-   无中介、无接口）
+  services/*.js          repositories/      infrastructure/
+  （互相直接 import，     （仅 4 个文件）      domain-events/
+   无中介、无接口）                            （outbox/broker）
 ```
+
+> **2026-09-26 更新**：末列原为 `domains/events`，已迁到 `infrastructure/domain-events/`（见 [MODULARIZATION_AUDIT](MODULARIZATION_AUDIT.md) 第 3 节，已完成）。
 
 **关键观测**：路由层到领域层的边界是真实的（且有回归测试守护）；但**领域层内部是「扁平服务汤」**——137 个 service 通过相对路径 `./xxx-service.js` 自由互相 import，没有任何接口契约或依赖倒置。
 
@@ -235,7 +237,7 @@ export const agentApi = {
 | 前后端契约独立 | `packages/api-contracts` 独立包 | 多端复用基础 |
 | 多语言边界清晰 | Python 语义服务经 HTTP 通信 | 无跨语言耦合 |
 | 横切关注点已有独立模块 | `prompt-security` / `access-control` / `model-gateway` 已存在 | 只需收敛调用方式，不需重写 |
-| 事件基础设施已就位 | `domains/events` 有 outbox + broker | 生产演进已备好骨架 |
+| 事件基础设施已就位 | `infrastructure/domain-events`（原 `domains/events`，2026-09-26 迁出）有 outbox + broker | 生产演进已备好骨架 |
 
 **结论：当前架构需要的是「收敛与约束」，不是「重写」。**
 

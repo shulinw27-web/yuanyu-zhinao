@@ -345,7 +345,7 @@ def add_cover(doc):
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.paragraph_format.space_after = Pt(28)
-    r = p.add_run("企业 Agent 工作台与独立语义运营平台")
+    r = p.add_run("企业 Agent 工作台与独立元域智营平台")
     set_font(r, size=13.5, color=MUTED)
     paragraph_bottom_border(p, color=CYAN, size="14", space="12")
 
@@ -424,7 +424,7 @@ def add_inline_runs(paragraph, text, default_size=11, default_color=NAVY):
 def add_architecture_visual(doc):
     rows = [
         ("业务与交互", "企业用户 / 管理者", "管理 Web  ·  智脑 Web  ·  移动端  ·  Electron", PALE_CYAN),
-        ("语义运营", "独立运营 Agent", "Web / Electron  ·  候选建模  ·  人工校对  ·  发布与巡检", PALE_BLUE),
+        ("元域智营", "独立运营 Agent", "Web / Electron  ·  候选建模  ·  人工校对  ·  发布与巡检", PALE_BLUE),
         ("身份与策略", "账号中心 / IAM", "身份会话  ·  角色  ·  页面/按钮权限  ·  组织数据范围", PALE_BLUE),
         ("Agent 控制", "Agent Runtime", "任务与上下文  ·  技能与工具  ·  工作流  ·  确认执行", "DCEAF7"),
         ("语义与信任", "语义 / 证据 / Key", "核心对象与知识  ·  Evidence Trace  ·  Key Center", "E8EEF5"),
@@ -642,7 +642,7 @@ def main():
 
     props = doc.core_properties
     props.title = "元域智脑整体平台介绍说明"
-    props.subject = "企业 Agent 工作台与独立语义运营平台"
+    props.subject = "企业 Agent 工作台与独立元域智营平台"
     props.author = "元域智脑项目组"
     props.keywords = "元域智脑, Agent, 平台架构, IAM, Evidence Trace, Mock"
     props.comments = "2026-09-03 项目目录整理及平台现状校准修订"

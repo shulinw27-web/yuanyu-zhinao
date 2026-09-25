@@ -2,7 +2,7 @@
 
 ## 1. 目标
 
-`backend/src/domains/events/domain-event-outbox.js` 为模块化单体提供持久化领域事件出口。业务聚合变更和 Outbox 记录通过 `runtime-state-repository.mutateStates` 在同一 SQLite 事务提交，避免“业务成功但事件丢失”。Memory 驱动用于隔离测试，生产数据库应以同样方式在一个数据库事务写业务表和 outbox 表。
+`backend/src/infrastructure/domain-events/domain-event-outbox.js` 为模块化单体提供持久化领域事件出口。业务聚合变更和 Outbox 记录通过 `runtime-state-repository.mutateStates` 在同一 SQLite 事务提交，避免“业务成功但事件丢失”。Memory 驱动用于隔离测试，生产数据库应以同样方式在一个数据库事务写业务表和 outbox 表。
 
 告警模块原有 `outbox` 是通知、电话等“送达任务队列”；本模块是跨领域的“事实事件队列”，二者职责不同。事件消费者可以把 `risk.case.acknowledged` 转换成告警、证据、搜索投影或外部消息，但不能反向修改事件事实。
 
@@ -77,4 +77,4 @@ npm.cmd run run:event-worker
 - `governance.meta_model.published`、`governance.world_model.published`。
 - `agent.tool_execution.succeeded`、`agent.tool_execution.failed`。
 
-`backend/src/domains/events/brokers/domain-event-broker.js` 提供四种 Broker。Demo 使用进程内投影适配器；Webhook 采用 CloudEvents 风格 Header、`eventId` 幂等键、HMAC-SHA256 签名、超时和非 2xx 重试/死信。Kafka 使用 `kafkajs` 幂等 Producer、`acks=-1`、事件 ID Header 和聚合键；RabbitMQ 使用 `amqplib` durable topic exchange、persistent message、publisher confirm 和 messageId。生产 Webhook/Kafka/RabbitMQ 分别要求 HTTPS、TLS/SASL、AMQPS；凭据由 KMS/Secret Manager 或工作负载身份注入，健康信息和日志不包含凭据。元模型和世界模型运行态已去除模块级可变缓存，草稿/校验使用持久化聚合，发布使用同事务 Outbox。Agent run 的成功/失败终态也与工具回执事件原子提交，Payload 仅含业务记录标识和稳定状态，不包含 Prompt、密钥或原始错误。每个新事件必须补充 Schema、幂等消费者测试、回滚测试和数据分级评审。
+`backend/src/infrastructure/domain-events/brokers/domain-event-broker.js` 提供四种 Broker。Demo 使用进程内投影适配器；Webhook 采用 CloudEvents 风格 Header、`eventId` 幂等键、HMAC-SHA256 签名、超时和非 2xx 重试/死信。Kafka 使用 `kafkajs` 幂等 Producer、`acks=-1`、事件 ID Header 和聚合键；RabbitMQ 使用 `amqplib` durable topic exchange、persistent message、publisher confirm 和 messageId。生产 Webhook/Kafka/RabbitMQ 分别要求 HTTPS、TLS/SASL、AMQPS；凭据由 KMS/Secret Manager 或工作负载身份注入，健康信息和日志不包含凭据。元模型和世界模型运行态已去除模块级可变缓存，草稿/校验使用持久化聚合，发布使用同事务 Outbox。Agent run 的成功/失败终态也与工具回执事件原子提交，Payload 仅含业务记录标识和稳定状态，不包含 Prompt、密钥或原始错误。每个新事件必须补充 Schema、幂等消费者测试、回滚测试和数据分级评审。

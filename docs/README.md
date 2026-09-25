@@ -4,7 +4,7 @@
 
 2026-09-19 审阅修复：[企业接入操作与验证](development/MOCK_ENTERPRISE_ONBOARDING.md)。读取方案面板新增操作代次保护，阻断旧导入、旧模型提案和旧策略响应覆盖当前候选；客户端、草稿或权限改变时清除候选与发送确认。完整自动建模、发布与智脑问答仍未完成。
 
-2026-09-18 Mock 接入更新：[企业接入操作与验证](development/MOCK_ENTERPRISE_ONBOARDING.md)。已有材料、连接、可视化映射、原文版本引用及到语义运营 Agent 的待审阅建模交接，修复缺主键有依据补充后的审阅阻塞。新增完整合成快照到受控对象查询的内部适配，交接草稿配合测试授权和人工方案通过跨系统计算及 16 个回放分支；全量 quality 820 次执行通过。面向用户的计算方案生成、完整发布及智脑问答仍待推进，不能视为自动建模或真实企业连接器已完成。
+2026-09-18 Mock 接入更新：[企业接入操作与验证](development/MOCK_ENTERPRISE_ONBOARDING.md)。已有材料、连接、可视化映射、原文版本引用及到元域智营 Agent 的待审阅建模交接，修复缺主键有依据补充后的审阅阻塞。新增完整合成快照到受控对象查询的内部适配，交接草稿配合测试授权和人工方案通过跨系统计算及 16 个回放分支；全量 quality 820 次执行通过。面向用户的计算方案生成、完整发布及智脑问答仍待推进，不能视为自动建模或真实企业连接器已完成。
 
 2026-09-17 计划调整：[Mock 优先开发路线](development/DEVELOPMENT_ROADMAP.md)。当前无真实企业验证场景，先用合成材料和模拟接口完成接入、业务对齐、世界模型、双 Agent、持续更新和场景复用验证。本次仅调整计划，未新增功能或重跑业务验收；真实接入和生产门禁保持。
 
@@ -64,11 +64,11 @@
 | 准备未来真实系统联调 | [开发准备事项](development/DEVELOPMENT_READINESS.md) |
 | 理解整体设计 | [整体架构](architecture/ARCHITECTURE.md) → [模块文档](modules/README.md) |
 | 了解参考 WeKnora 的升级方向 | [采纳点与验证路线](architecture/WEKNORA_UPGRADE_REFERENCE.md) · [分批实施与接口验收](development/WEKNORA_UPGRADE_ACCEPTANCE.md) · [D 盘本地部署](operations/WEKNORA_LOCAL_DEPLOYMENT.md)（聊天与 2048 维 Embedding 原生调用通过；双端只读适配器已开发，真实集成未启用） |
-| 使用智脑或语义运营端 | [操作指南目录](guides/README.md) |
+| 使用智脑或元域智营端 | [操作指南目录](guides/README.md) |
 | 按业务场景建设本体、配置质量判断 | [场景建模指南](guides/ONTOLOGY_SCENARIO_MODELING.md) · [验收记录](development/ONTOLOGY_MODELING_ACCEPTANCE.md) |
 | 模拟真实业务材料并评估快速建模 | [制造案例需求与材料](development/SEMANTIC_MANUFACTURING_REQUIREMENTS.md) · [初测问题](development/SEMANTIC_MANUFACTURING_EVALUATION.md) · [修复回归](development/SEMANTIC_MANUFACTURING_REPAIR.md) · [操作指南](guides/SEMANTIC_MATERIAL_WORKSPACE.md) |
 | 验证语义建模后智脑是否真正理解新业务 | [跨仓履约复杂场景](development/SEMANTIC_WORKBENCH_COMPLEX_SCENARIO.md) · [修复前联测](development/SEMANTIC_WORKBENCH_LOOP_EVALUATION.md) · [闭环修复报告](development/SEMANTIC_WORKBENCH_LOOP_REPAIR.md) · [配置指南](guides/PUBLISHED_MODEL_WORKBENCH.md) |
-| 确认两个 Agent 的能力与边界 | [智脑能力范围](overview/ZHINAO_CAPABILITY_SCOPE.md) · [语义运营能力范围](overview/SEMANTIC_OPERATIONS_CAPABILITY_SCOPE.md) |
+| 确认两个 Agent 的能力与边界 | [智脑能力范围](overview/ZHINAO_CAPABILITY_SCOPE.md) · [元域智营能力范围](overview/SEMANTIC_OPERATIONS_CAPABILITY_SCOPE.md) |
 | 连续对话、字典追问与更正目标 | [对话及上下文使用说明](guides/AGENT_DIALOGUE_AND_CONTEXT.md) |
 | 上传文件、理解图片、核对多模态能力 | [多模态指南](guides/AGENT_MULTIMODAL_GUIDE.md) · [验证与修复报告](development/AGENT_MULTIMODAL_ACCEPTANCE_2026-09-07.md) |
 | 部署、回滚或判断能否上线 | [运维目录](operations/README.md) → [生产 Checklist](operations/PRODUCTION_TODO_CHECKLIST.md) |

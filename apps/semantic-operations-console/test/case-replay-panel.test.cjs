@@ -1,10 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
-const { resolve } = require('node:path');
+const { resolve, dirname } = require('node:path');
 const { parse, compileScript } = require('@vue/compiler-sfc');
 const vue = require('vue');
-const filename = resolve(__dirname, '../../../frontend/src/features/meta-model/OntologyCaseReplay.vue');
+// 组件源码已上提到 @healthcare-ai/agent-ui；这里通过包的声明式入口解析目录，
+// 不再用相对路径穿透兄弟包的私有源码（见 docs/architecture/MODULARIZATION_AUDIT.md 第 2 节）。
+const metaModelDir = dirname(require.resolve('@healthcare-ai/agent-ui/meta-model'));
+const filename = resolve(metaModelDir, 'OntologyCaseReplay.vue');
 const { descriptor } = parse(readFileSync(filename, 'utf8'), { filename });
 const compiled = compileScript(descriptor, { id: 'case-replay-test' }).content;
 const executable = compiled.replace(/import\s*\{([^}]+)\}\s*from\s*['"]vue['"];?/gu, (_match, names) => `const { ${names.replace(/\s+as\s+/gu, ': ')} } = Vue;`).replace('export default', 'return');

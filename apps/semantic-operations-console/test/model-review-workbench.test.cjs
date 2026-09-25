@@ -1,9 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { readFile } = require('node:fs/promises');
-const { resolve } = require('node:path');
+const { resolve, dirname } = require('node:path');
 
-const sourcePath = resolve(__dirname, '../../../frontend/src/features/meta-model/OAMetaModelStudio.vue');
+// 组件源码已上提到 @healthcare-ai/agent-ui，按包的声明式入口解析目录。
+const sourcePath = resolve(dirname(require.resolve('@healthcare-ai/agent-ui/meta-model')), 'OAMetaModelStudio.vue');
 
 test('human review exposes guided object, relation, and issue workspaces', async () => {
   const source = await readFile(sourcePath, 'utf8');

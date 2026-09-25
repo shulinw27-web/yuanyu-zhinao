@@ -1,10 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
-const { resolve } = require('node:path');
+const { resolve, dirname } = require('node:path');
 const { parse, compileScript } = require('@vue/compiler-sfc');
 const vue = require('vue');
-const filename = resolve(__dirname, '../../../frontend/src/features/meta-model/OntologyReadPlanPanel.vue');
+// 组件已上提到 @healthcare-ai/agent-ui，按包的声明式入口解析目录。
+const metaModelDir = dirname(require.resolve('@healthcare-ai/agent-ui/meta-model'));
+const filename = resolve(metaModelDir, 'OntologyReadPlanPanel.vue');
 const { descriptor } = parse(readFileSync(filename, 'utf8'), { filename });
 const compiled = compileScript(descriptor, { id: 'read-plan-panel-test' }).content;
 const executable = compiled.replace(/import\s*\{([^}]+)\}\s*from\s*['"]vue['"];?/gu, (_match, names) => `const { ${names.replace(/\s+as\s+/gu, ': ')} } = Vue;`)
@@ -15,7 +17,7 @@ const plan = id => ({ id, label: id, datasets: [{ id: 'orders', objectType: 'Ord
 const file = value => ({ target: { files: [{ size: 100, text: () => Promise.resolve(JSON.stringify(plan(value))) }], value: 'file' } });
 const renderer = vue.createRenderer({ createElement: () => ({}), createText: () => ({}), createComment: () => ({}), setText() {}, setElementText() {}, parentNode() {}, nextSibling() {}, patchProp() {}, insert() {}, remove() {} });
 async function mount(t, client) {
-  const helpers = await import('../../../frontend/src/features/meta-model/ontology-read-plan-import.js');
+  const helpers = await import('@healthcare-ai/agent-ui/ontology-read-plan');
   const Component = new Function('Vue', 'helpers', executable)(vue, helpers);
   const props = vue.reactive({ draft: { objectTypes: [{ id: 'Order' }], scenario: { readPlans: [] } }, canEdit: true, client, savedFingerprint: 'a'.repeat(24), hasUnsavedChanges: false });
   const emitted = []; let state;

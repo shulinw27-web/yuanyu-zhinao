@@ -11,8 +11,8 @@
 | Mobile | `mobile` | 0.3.0 | 企业签名、MDM/MAM、设备合规 |
 | 钉钉手机 H5 | `dingtalk-mobile` | 0.3.0 | 企业内部微应用、HTTPS、成员绑定和真机免登验收 |
 | 钉钉 PC H5 | `dingtalk-pc` | 0.3.0 | 同一 H5 站点，不能使用 Electron 本机桥接 |
-| 语义运营 Web | `semantic-web` | 0.2.0 | 语义运营角色、发布门禁 |
-| 语义运营 Desktop | `semantic-desktop` | 0.2.0 | 签名包、受信导航、语义运营角色 |
+| 元域智营 Web | `semantic-web` | 0.2.0 | 元域智营角色、发布门禁 |
+| 元域智营 Desktop | `semantic-desktop` | 0.2.0 | 签名包、受信导航、元域智营角色 |
 
 客户端通过 `x-client-platform` 与 `x-client-version` 声明协议版本。生产环境中缺失标识或低于最低版本返回 HTTP 426，并可从 `/api/platform/client-policy` 获取兼容策略。版本升级应先发布兼容服务端，再灰度客户端；回滚服务端前必须确认当前客户端仍受上一版本支持。
 

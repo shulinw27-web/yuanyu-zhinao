@@ -10,7 +10,7 @@
 
 `core-meta-object-service.js`、`meta-model-service.js`、`world-model-template-service.js`、`semantic-context-service.js`、`enterprise-knowledge-service.js`、`semantic-operations-agent-service.js`、`semantic-operations-task-service.js`，以及独立 `services/semantic-context/app.py`。
 
-语义运营 UI 已从业务管理前端拆出，独立应用位于 `apps/semantic-operations-console`（开发端口 `5174`）。业务端智脑不承担建模和发布职责，原世界模型页面只保留已登记语义上下文和人工精调入口。
+元域智营 UI 已从业务管理前端拆出，独立应用位于 `apps/semantic-operations-console`（开发端口 `5174`）。业务端智脑不承担建模和发布职责，原世界模型页面只保留已登记语义上下文和人工精调入口。
 
 ## 子域与所有权
 
@@ -65,7 +65,7 @@ Review Queue / 明确确认
 
 ## 本地模型规划与来源发现
 
-语义运营 Agent 复用平台模型网关调用本地 Qwen3-8B。模型只返回 `semantic-operations-plan.v1` 结构化建议，包括目标、相关系统、规划依据和必要澄清问题。服务器的确定性分类和来源预检结果仍是权威边界；模型建议与服务器冲突时，任务保留冲突记录并采用服务器绑定的命令、权限、系统范围和确认策略。
+元域智营 Agent 复用平台模型网关调用本地 Qwen3-8B。模型只返回 `semantic-operations-plan.v1` 结构化建议，包括目标、相关系统、规划依据和必要澄清问题。服务器的确定性分类和来源预检结果仍是权威边界；模型建议与服务器冲突时，任务保留冲突记录并采用服务器绑定的命令、权限、系统范围和确认策略。
 
 来源发现由 `semantic-source-discovery-service.js` 完成，汇总 MCP 连接器目录、角色数据域、企业 Connector 配置就绪度和已有字段映射。发现过程只读取结构元数据，不访问业务明细，也不探测下游接口。未登记系统、越权数据域、不安全端点和缺失凭据会成为显式阻断项；仅有 Mock 目录时必须标记为准备提醒，不能宣称已连接真实系统。
 
