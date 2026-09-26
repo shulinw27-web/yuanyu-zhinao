@@ -44,7 +44,7 @@ test('OpenAPI 契约可解析、operationId 唯一并覆盖核心模块', async 
   for (const path of ['/access/me', '/permission-management', '/agent/message', '/agent/traces', '/agent/learning-profile', '/agent/desktop-endpoint/heartbeat', '/risk-cases', '/alerting/workspace', '/procurement/launch', '/simulation/overview']) {
     assert.ok(document.paths[path], `缺少核心路径 ${path}`);
   }
-  for (const path of ['/semantic-operations/tasks', '/semantic-operations/tasks/{id}/trace', '/semantic-operations/inspections', '/semantic-operations/notifications', '/semantic-operations/tasks/{id}/report-export']) assert.ok(document.paths[path], `缺少元域智营路径 ${path}`);
+  for (const path of ['/semantic-operations/tasks', '/semantic-operations/tasks/{id}/trace', '/semantic-operations/inspections', '/semantic-operations/notifications', '/semantic-operations/tasks/{id}/report-export']) assert.ok(document.paths[path], `缺少元域智语路径 ${path}`);
   assert.deepEqual(document.paths['/auth/local/login'].post.security, []);
   assert.equal(document.components.securitySchemes.oidcBearer.scheme, 'bearer');
   assert.equal(document.paths['/permission-management/roles/{id}/policy'].post['x-button-permission'], 'permission.policy.save');

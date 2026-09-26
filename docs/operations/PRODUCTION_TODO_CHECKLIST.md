@@ -2,7 +2,7 @@
 
 > 文档版本：v1.14
 > 更新日期：2026-09-17
-> 适用范围：管理 Web、智脑 Web、移动端、Electron、Node API、Agent Runtime、Key Center、语义服务、领域事件 Worker，以及 OA/MES/LIMS/QMS/ERP/OMS 等企业连接器。  
+> 适用范围：元域智营、智脑 Web、移动端、Electron、Node API、Agent Runtime、Key Center、语义服务、领域事件 Worker，以及 OA/MES/LIMS/QMS/ERP/OMS 等企业连接器。  
 > 当前结论：项目已具备可运行的 Mock 演练与生产适配边界，但**尚不满足真实生产上线条件**。所有 P0 阻断项关闭并完成签字前，不得连接生产系统或处理真实敏感数据。
 
 ## 1. 使用规则
@@ -96,7 +96,7 @@
 - [x] 提案/答案字符数分开，解释阶段耗时覆盖校验和渲染；生产返回不含被拒绝的模型原文，权限/版本复验保持。
 - [x] 解释改用原生 JSON 对象，避免内嵌字符串漏引号；区分 240 字简短建议与 600 字符协议硬限，保留总预算及超限拒绝。普通对话协议不变。
 - [x] 已复现的“核销仅存 bank_id 所以缺少订单/发票链路”错误增加有真实路径前提的拒绝保护；断链、缺发票、行级需求反例保留，不自动修词或放行错误。
-- [x] 最终代码质量：ESLint、Vue 类型检查、498 次 Node 测试和 6 次 Python 测试通过；管理 Web/元域智营 Web/桌面前端构建通过，文档和提交安全检查完成。
+- [x] 最终代码质量：ESLint、Vue 类型检查、498 次 Node 测试和 6 次 Python 测试通过；元域智营/元域智语 Web/桌面前端构建通过，文档和提交安全检查完成。
 - [x] 最终财务定向实测：原生协议、补充外键说明后四组合 4/4 通过并逐条复核；不覆盖此前完整矩阵的两条失败，不声称生产稳定性。
 - [ ] 任意自然语言解释的逐句事实蕴含、长期稳定生成及生产 SLA：本次契约只保证来源/指标/缺口引用，`narrativeEntailmentVerified=false`。不能以一次测试全通过代替生产验收。
 
@@ -194,14 +194,14 @@
 ## 2. 当前开发基线
 
 - [x] Mock OA、MES、LIMS、QMS、ERP、OMS 数据和状态化流程可用于演练。
-- [x] 管理 Web、智脑 Web、移动端和 Electron 共用 Agent SDK/Workbench 核心协议。
+- [x] 元域智营、智脑 Web、移动端和 Electron 共用 Agent SDK/Workbench 核心协议。
 - [x] 页面、按钮、多角色和组织数据权限具备 Demo 闭环。
 - [x] OIDC Bearer 已具备 JWKS、issuer、audience、tenant、算法及时效校验边界。
 - [x] PostgreSQL Schema、异步 Repository、身份会话灰度能力和 IAM 异步事务底座已实现。
 - [x] 领域事件 Outbox、幂等 Worker、Kafka/RabbitMQ/Webhook 适配边界已实现。
 - [x] Key Center 已具备远程凭据 Broker、opaque handle、超时失败关闭和就绪探针。
 - [x] Agent 提示词安全、回答治理、确认执行、证据链、服务端工具 Schema、持久任务和可撤销长期记忆已形成开发基线；自动化数量以对应运行记录为准。
-- [x] 元域智营端已形成独立认证与设备会话、多附件、共享 SDK、执行追踪、连续任务、巡检通知和受控报告导出的开发基线。
+- [x] 元域智语端已形成独立认证与设备会话、多附件、共享 SDK、执行追踪、连续任务、巡检通知和受控报告导出的开发基线。
 
 以上勾选项仍需要在企业测试环境使用真实基础设施重新验证。
 

@@ -117,7 +117,7 @@ if (getLocalModelRuntime().mode === 'mock' || !/主键|primary.?key|字段|\bfie
 
 **三、`'订单'` 命中 `PurchaseOrder` 是已知的过泛词，本 ADR 不处理。** 实测 `PurchaseOrder.terms` 含 `'订单'`，任何含「订单」的材料都会命中「采购订单」——而在 OMS 语境里「订单」通常是**销售订单**。这是受控目录的**词表质量**问题，与披露无关；已记在此，避免下次被当成新发现。
 
-**四、本增量的验收规模**：`test:semantic` **6/6 + 60/60 + 94/94**（第三组 92 → 94，`semantic-operations-agent.test.js` 29 → **31**）；`npm run lint` 干净；`docs:check` **183 份 Markdown / 1125 个本地链接**；`npm run quality` 端到端 **EXIT=0**（1m39s，全量 35 个 Node 测试块 `fail=0`、0 处 `not ok`）；**5 端构建通过**（web 2.90s + 元域智营 2.62s、desktop 3.33s、mobile 3.10s、dingtalk 5.01s，分端调用避开沙箱 `safe-delete` 单次阈值）；全部为**内置合成数据**验收，**不代表真实企业系统验收**。
+**四、本增量的验收规模**：`test:semantic` **6/6 + 60/60 + 94/94**（第三组 92 → 94，`semantic-operations-agent.test.js` 29 → **31**）；`npm run lint` 干净；`docs:check` **183 份 Markdown / 1125 个本地链接**；`npm run quality` 端到端 **EXIT=0**（1m39s，全量 35 个 Node 测试块 `fail=0`、0 处 `not ok`）；**5 端构建通过**（web 2.90s + 元域智语 2.62s、desktop 3.33s、mobile 3.10s、dingtalk 5.01s，分端调用避开沙箱 `safe-delete` 单次阈值）；全部为**内置合成数据**验收，**不代表真实企业系统验收**。
 
 ## 退出/复审条件
 

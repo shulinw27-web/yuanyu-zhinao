@@ -52,7 +52,7 @@ async function scoped(options, write, work) {
   try {
     const access = getEffectiveAccess(roleId, identity);
     if (!access.principalResolved || !access.roleIds.includes(roleId)) return fail('MOCK_ONBOARDING_ROLE_DENIED', '当前身份未获授此角色。', 403);
-    if (!access.pagePermissionIds.includes('page.world.view')) return fail('MOCK_ONBOARDING_PAGE_DENIED', '当前身份没有元域智营页面访问权限。', 403);
+    if (!access.pagePermissionIds.includes('page.world.view')) return fail('MOCK_ONBOARDING_PAGE_DENIED', '当前身份没有元域智语页面访问权限。', 403);
     if (write && (!hasButtonPermission(roleId, PERMISSION) || !access.buttonPermissionIds.includes(PERMISSION))) return fail('MOCK_ONBOARDING_PERMISSION_DENIED', `需要 ${PERMISSION} 权限。`, 403);
     return await runWithSemanticTenant(identity, () => work({ owner: semanticOperationsPrincipalKey(identity), roleId, key: JSON.stringify(['principal-role-v1', identity.tenantId, identity.subjectId, roleId]) }));
   } catch (error) {

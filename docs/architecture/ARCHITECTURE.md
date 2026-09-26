@@ -12,7 +12,7 @@
 
 2026-09-08 身份层增量：各端经统一身份源适配器验证外部身份，再映射到平台 IAM；会话服务不再包含钉钉专属逻辑。身份源可为钉钉或多个企业 OIDC，业务授权及数据范围不由外部角色声明决定。配置、扩展契约与限制见 [身份源适配指南](../guides/IDENTITY_PROVIDER_ADAPTERS.md)。
 
-平台面向企业业务协作与日常工作场景，提供由移动端、桌面 Web 与 Electron 承载的受控 AI 能力层，以及独立的元域智营 Agent。
+平台面向企业业务协作与日常工作场景，提供由移动端、桌面 Web 与 Electron 承载的受控 AI 能力层，以及独立的元域智语 Agent。
 
 核心目标如下：
 
@@ -20,7 +20,7 @@
 2. 将企业数据、模型、连接器和高风险工作流置于服务端控制平面，客户端不持有高权限凭据。
 3. 将“人员、原材料、产品、设备、门店”作为跨域业务与语义上下文的统一锚点。
 4. 让智脑只根据可访问的证据生成计划；写入动作必须经过确认、审批、审计和受控连接器。
-5. 分离员工智脑、元域智营 Agent 与管理控制面：分别负责业务/日常任务、语义模型建设、运行观察与权限配置。
+5. 分离员工智脑、元域智语 Agent 与管理控制面：分别负责业务/日常任务、语义模型建设、运行观察与权限配置。
 
 平台采用以下原则：
 
@@ -36,17 +36,17 @@
 
 ### 1.1 系统接入的三层目标模型（2026-09-25）
 
-元域智营端的语义建设按三层组织，**接入是最底层前提**：语义建模的一切输入都必须可追溯到某个已接入系统。
+元域智语端的语义建设按三层组织，**接入是最底层前提**：语义建模的一切输入都必须可追溯到某个已接入系统。
 
 | 层 | 实体 | 生命周期 | 归属 | 说明 |
 | --- | --- | --- | --- | --- |
-| 接入层 | `SystemConnection`（每系统一条） | **长期资产**：草稿 → 已登记 → 已授权 → 已连通 →（已停用 ⇄ 已连通） | 元域智营端 | 系统「类型」属平台级、全租户共享；接入「实例」属租户资产，按租户隔离 |
-| 建模层 | `ModelingSession`（一次建模尝试） | **一次性**：选系统（N≥1）+ 材料 + 诉求 → 提案 → 复核 → 采纳/驳回 | 元域智营端 Agent 工作台 | 选系统为必选前提，空选择不允许提交 |
-| 治理层 | `SemanticModel` / `Version` / `Snapshot` | **长期资产**：草稿 → 校验 → 确认 → 发布 → 回滚 | 元域智营端 | 沿用既有治理链路（Schema Critic → Diff → 复核 → 确认令牌 → 发布 → 快照） |
+| 接入层 | `SystemConnection`（每系统一条） | **长期资产**：草稿 → 已登记 → 已授权 → 已连通 →（已停用 ⇄ 已连通） | 元域智语端 | 系统「类型」属平台级、全租户共享；接入「实例」属租户资产，按租户隔离 |
+| 建模层 | `ModelingSession`（一次建模尝试） | **一次性**：选系统（N≥1）+ 材料 + 诉求 → 提案 → 复核 → 采纳/驳回 | 元域智语端 Agent 工作台 | 选系统为必选前提，空选择不允许提交 |
+| 治理层 | `SemanticModel` / `Version` / `Snapshot` | **长期资产**：草稿 → 校验 → 确认 → 发布 → 回滚 | 元域智语端 | 沿用既有治理链路（Schema Critic → Diff → 复核 → 确认令牌 → 发布 → 快照） |
 
 统一事实源为 `backend/src/data/system-catalog.js`（系统目录）与 `backend/src/services/system-registry-service.js`（租户级接入实例）。此前系统清单分散在 5 处且互不一致，已收敛；决策理由与退出条件见 [ADR-009](adr/ADR-009-system-registry-single-source.md)，实施进度见 [系统接入重构方案](SYSTEM_ONBOARDING_RESTRUCTURE_PLAN.md)。
 
-**接入层已落地为独立领域（2026-09-25）**：`backend/src/domains/system-onboarding/`（契约面 4 项导出）+ `backend/src/services/system-access-service.js`（面向运营视图的组装与**真实连通性探测**）。职责分界是「注册表是事实源，接入服务只做组装与探测」——后者不新增任何系统定义、不复制任何清单，连接器信息一律读注册表 `definition.connector`。主视角在**元域智营端**（`apps/semantic-operations-console/src/components/SystemAccessWorkspace.vue`），管理 Web 已不再有接入入口。决策理由、放弃项与退出条件见 [ADR-011](adr/ADR-011-system-onboarding-domain-extraction.md)。
+**接入层已落地为独立领域（2026-09-25）**：`backend/src/domains/system-onboarding/`（契约面 4 项导出）+ `backend/src/services/system-access-service.js`（面向运营视图的组装与**真实连通性探测**）。职责分界是「注册表是事实源，接入服务只做组装与探测」——后者不新增任何系统定义、不复制任何清单，连接器信息一律读注册表 `definition.connector`。主视角在**元域智语端**（`apps/semantic-operations-console/src/components/SystemAccessWorkspace.vue`），元域智营已不再有接入入口。决策理由、放弃项与退出条件见 [ADR-011](adr/ADR-011-system-onboarding-domain-extraction.md)。
 
 **建模层的「选系统」已落为范围契约（2026-09-25）**：`build_model` 与 `discover_sources` 两类意图必须携带 `systemCodes`，空选择一律 400，**没有「推断为空就回落到全部可访问连接器」**。范围只有两个显式入口（请求体的 `systemCodes`，或调用方显式声明 `includeAllRegistered`），返回的 `selectionSource` 如实标注范围怎么来的；文本里出现的系统名降级为「提到但未选择」的提示素材。越权选择**阻断而非裁剪**（403）。覆盖结果以 `task.systemScope` 如实上报。决策理由与 4 条复审条件见 [ADR-012](adr/ADR-012-explicit-modeling-scope.md)。
 
@@ -78,8 +78,8 @@ flowchart TB
   DesktopWeb["桌面 Web 智脑\n浏览器工作台"]
   Electron["Electron 智脑\nWindows 原生容器"]
   Web["Web 管理端\n运营观察、权限与配置"]
-  SemanticOps["独立元域智营 Web / Electron\n自然语言建模、人工校对、版本与巡检"]
-  SemanticAgent["元域智营 Agent\n候选提取、Schema Critic、Diff 与发布门禁"]
+  SemanticOps["独立元域智语 Web / Electron\n自然语言建模、人工校对、版本与巡检"]
+  SemanticAgent["元域智语 Agent\n候选提取、Schema Critic、Diff 与发布门禁"]
   Workbench["共享 Agent Workbench\n对话、附件、告警、待办、确认卡"]
   SDK["共享 Agent SDK\n设备标识、会话、API 客户端"]
   API["Node 业务 API / 智脑运行时\n身份、联合授权、编排、工作流、审计"]
@@ -133,11 +133,11 @@ demo-platform/
 ├─ apps/
 │  ├─ mobile/                   移动端 Vue 智脑应用，可封装为 Tauri
 │  ├─ desktop/                  桌面 Web + Electron 智脑应用
-│  └─ semantic-operations-console/ 独立元域智营 Web + Electron（系统接入 / Agent 建模 / 模型校对与版本）
+│  └─ semantic-operations-console/ 独立元域智语 Web + Electron（系统接入 / Agent 建模 / 模型校对与版本）
 ├─ packages/agent-sdk/          多端共享 API 客户端、会话与设备标识逻辑
 ├─ packages/agent-ui/           双端共用前端资产：元模型/本体面板、知识资料面板、异常助手面板、设计基线样式
 ├─ packages/agent-workbench/    多端共享智脑交互、状态和 Codex 风格视觉组件
-├─ packages/semantic-operations-sdk/ 元域智营共享协议与认证客户端
+├─ packages/semantic-operations-sdk/ 元域智语共享协议与认证客户端
 ├─ services/semantic-context/   独立 Python Semantica 适配服务
 ├─ docs/                        唯一文档中心：概览、架构、模块、开发、运维、指南与交付资料
 └─ deploy/                      部署环境变量示例
@@ -294,7 +294,7 @@ flowchart LR
 
 ### 6.1 当前身份链路
 
-客户端经 `Agent SDK` 发送以下上下文：设备 ID、平台、版本、设备会话，以及统一身份会话、企业 Bearer 或（仅 Demo）角色头三者之一。后端优先校验 `x-identity-session` / `x-oa-session`；否则使用企业 JWKS 校验 Bearer 的 issuer、audience、tenant、算法与时效并映射 IAM 人员；最后才允许非生产 Demo Header。账号状态、角色集合或角色策略变化后，权限会在下一次请求实时收敛。管理 Web 与智脑三端通过异步 Token Provider 按请求取令牌，不写入浏览器持久化存储。
+客户端经 `Agent SDK` 发送以下上下文：设备 ID、平台、版本、设备会话，以及统一身份会话、企业 Bearer 或（仅 Demo）角色头三者之一。后端优先校验 `x-identity-session` / `x-oa-session`；否则使用企业 JWKS 校验 Bearer 的 issuer、audience、tenant、算法与时效并映射 IAM 人员；最后才允许非生产 Demo Header。账号状态、角色集合或角色策略变化后，权限会在下一次请求实时收敛。元域智营与智脑三端通过异步 Token Provider 按请求取令牌，不写入浏览器持久化存储。
 
 Agent 运行时不把“角色相同”视为“用户相同”。run 创建与 `/agent/runs` 查询按 `tenant + subject` 裁剪；多角色查询只聚合当前仍有效角色的 run，operations 使用同一集合统计，工作项还要求创建角色或审批角色可见。次角色撤销后对应 run、统计和工作项立即退出可见集。对待确认命令，还必须使用创建时的 `session + device` 与一次性凭据；memory 仍按主角色与主体隔离，不随历史查询范围扩大。
 
@@ -453,7 +453,7 @@ OpenAI、DeepSeek、compatible 和 local 模型必须直接返回严格 `agent-s
 | 语义上下文服务 | `npm.cmd run dev:semantic` | `http://127.0.0.1:3011` |
 | Key Center 控制面 | `npm.cmd run dev:key-center` | `http://127.0.0.1:3010` |
 
-根目录使用 npm workspaces 管理 `frontend`、`backend`、`packages/*` 与 `apps/*`。管理 Web 构建命令为 `npm.cmd run build`；桌面智脑 Web 与移动端分别使用 `build:desktop`、`build:mobile`。`npm.cmd run pack:electron` 生成 Windows 解包目录，`npm.cmd run dist:electron` 生成安装包与便携版。
+根目录使用 npm workspaces 管理 `frontend`、`backend`、`packages/*` 与 `apps/*`。元域智营构建命令为 `npm.cmd run build`；桌面智脑 Web 与移动端分别使用 `build:desktop`、`build:mobile`。`npm.cmd run pack:electron` 生成 Windows 解包目录，`npm.cmd run dist:electron` 生成安装包与便携版。
 
 ### 11.2 目标生产拓扑
 
@@ -500,7 +500,7 @@ flowchart TB
 5. **本地持久化仍不是生产数据库**：关键 Mock 状态已迁入 SQLite，支持跨重启恢复；Agent 确认使用 SQLite `BEGIN IMMEDIATE` 原子占用，并有双进程竞争回归。限流桶和部分聚合遥测仍是进程内状态；SQLite 也不适合作为多节点生产数据层。生产必须使用 PostgreSQL 条件更新/事务、Redis 分布式限流与撤销、Outbox 和幂等键保证策略发布、确认占用、外部写入与审计一致。
 6. **连接器未真实接入**：MCP 目录和 ERP 写入是模拟实现；Agent 层已拒绝命令替换与重复消费，真实连接器仍需自己的认证、幂等键、审批回调、失败补偿与回执对账。
 7. **语义图与知识库未持久化**：需要图存储、事件采集、数据分级、来源回链、版本治理和冲突处理闭环。
-8. **可观测性与安全测试仍需生产化**：`npm.cmd run test:all` 覆盖共享契约、客户端兼容、非功能工具、架构边界、领域事件、Agent 安全/回答治理与证据链、会话和长任务、告警、权限/IAM、元域智营、桌面执行、学习治理及持久化；数量以该次运行输出为准。PostgreSQL 专项包含 migration checksum、IAM 请求快照、写后可见、并发最后管理账号约束和风险/采购并发幂等状态迁移；生产仍需真实消息 Broker、水平扩展消费者、电话 Provider、企业压测、KMS/HSM 签名和可信时间戳。
+8. **可观测性与安全测试仍需生产化**：`npm.cmd run test:all` 覆盖共享契约、客户端兼容、非功能工具、架构边界、领域事件、Agent 安全/回答治理与证据链、会话和长任务、告警、权限/IAM、元域智语、桌面执行、学习治理及持久化；数量以该次运行输出为准。PostgreSQL 专项包含 migration checksum、IAM 请求快照、写后可见、并发最后管理账号约束和风险/采购并发幂等状态迁移；生产仍需真实消息 Broker、水平扩展消费者、电话 Provider、企业压测、KMS/HSM 签名和可信时间戳。
 9. **IAM 仍需生产化**：当前可演示组织树、人员多角色、页面/按钮 RBAC、五类数据范围、版本冲突和审计，但仍需接入企业 IdP、持久化策略库、分布式策略缓存与精准失效，并在组织/角色/人员状态变更后撤销旧会话。
 
 ## 14. 推荐阅读顺序

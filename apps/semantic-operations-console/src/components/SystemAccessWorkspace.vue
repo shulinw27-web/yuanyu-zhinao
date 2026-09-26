@@ -4,7 +4,7 @@ import { WorldModelTemplateConfig } from '@healthcare-ai/agent-ui/system-access'
 
 // 系统接入视图（阶段 2）。
 //
-// 定位：元域智营端的「系统接入」取代原「企业接入」的主视角，材料准备降为同页次级标签。
+// 定位：元域智语端的「系统接入」取代原「企业接入」的主视角，材料准备降为同页次级标签。
 // 数据来源：/api/semantic-operations/systems*（后端 system-onboarding 域）。
 //
 // 权限分界（与后端一致，不在此处放宽）：
@@ -24,6 +24,7 @@ const emit = defineEmits(['open-agent']);
 const filters = [
   { id: 'all', label: '全部' },
   { id: 'connected', label: '已连通' },
+  { id: 'suspended', label: '已停用' },
   { id: 'pending', label: '待接入' },
   { id: 'unregistered', label: '未登记' },
   { id: 'probeable', label: '可探测' },
@@ -39,6 +40,9 @@ const selectedCode = ref('');
 const filter = ref('all');
 const faultMode = ref('none');
 const mappingMessage = ref('');
+const transitionReason = ref('');
+const lifecycleMessage = ref('');
+const transitioning = ref(false);
 const loading = ref(false);
 const detailLoading = ref(false);
 const probing = ref(false);
@@ -215,6 +219,58 @@ function sendToAgent() {
   emit('open-agent', `依据 ${detail.value.system.code}（${detail.value.system.name}）的 ${objectTypes} 建立语义模型。`);
 }
 
+// ── 接入生命周期操作面（2026-09-26 新增） ───────────────────────────────────
+// 状态机由服务端定义（draft→registered→authorized→connected⇄suspended），前端只把
+// 「当前允许的下一步」渲染成可执行动作；接通（→connected）的服务端门禁是
+// 「最近一次连通性探测 verified」，这里只做同一条门禁的预判提示，不做本地放行。
+const LIFECYCLE_STEPS = Object.freeze([
+  { id: 'draft', label: '未登记' },
+  { id: 'registered', label: '已登记' },
+  { id: 'authorized', label: '已授权' },
+  { id: 'connected', label: '已连通' }
+]);
+const TRANSITION_LABELS = Object.freeze({
+  registered: '登记接入',
+  authorized: '确认数据域授权',
+  connected: '接通系统',
+  suspended: '停用接入',
+  draft: '退回 / 下线登记'
+});
+const lifecycleStepIndex = (state) => LIFECYCLE_STEPS.findIndex((step) => step.id === state);
+
+const lifecycleActions = computed(() => (detail.value?.lifecycle?.transitions || []).map((to) => {
+  const noWrite = !props.canProbe
+    ? '当前营运身份没有 meta_model.draft.save 权限，接入状态操作被拒绝。' : '';
+  const needsProbe = to === 'connected' && detail.value?.lastProbe?.status !== 'verified'
+    ? '接通前必须先完成一次通过验证的连通性测试（verified），再到本面板执行接通。' : '';
+  const disabledReason = needsProbe || noWrite;
+  return { to, label: TRANSITION_LABELS[to] || to, disabled: Boolean(disabledReason), disabledReason };
+}));
+
+async function runTransition(to) {
+  if (transitioning.value) return;
+  if (!transitionReason.value.trim()) {
+    lifecycleMessage.value = '请填写操作理由（必填，不超过 200 字），操作人、时间与理由都会进入审计记录。';
+    return;
+  }
+  const code = selectedCode.value;
+  const generation = detailGeneration;
+  transitioning.value = true;
+  lifecycleMessage.value = '';
+  try {
+    const result = await props.client.transitionSystemConnection(code, { to, reason: transitionReason.value.trim() });
+    if (disposed || generation !== detailGeneration) return;
+    lifecycleMessage.value = `接入状态已推进：${result.from} → ${result.to}（${result.lifecycle.label}），操作人与时间已记录。`;
+    transitionReason.value = '';
+    await loadOverview();
+    await selectSystem(code);
+  } catch (err) {
+    if (!disposed) lifecycleMessage.value = errorMessage(err, '接入状态推进失败。');
+  } finally {
+    if (!disposed) transitioning.value = false;
+  }
+}
+
 onMounted(async () => { await Promise.all([loadOverview(), loadMappingSurface()]); });
 onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; detailGeneration += 1; });
 </script>
@@ -234,6 +290,7 @@ onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; detailGenerati
       <div class="sa-summary">
         <article><span>系统总数</span><b>{{ overview.summary.total }}</b></article>
         <article><span>已连通</span><b>{{ overview.summary.connected }}</b></article>
+        <article><span>已停用</span><b>{{ overview.summary.suspended ?? 0 }}</b></article>
         <article><span>待接入</span><b>{{ overview.summary.pending }}</b></article>
         <article><span>未登记</span><b>{{ overview.summary.notRegistered }}</b></article>
         <article><span>本角色已授权</span><b>{{ overview.summary.authorized }}</b></article>
@@ -244,10 +301,12 @@ onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; detailGenerati
       <div class="sa-filters" role="tablist" aria-label="系统筛选">
         <button v-for="item in filters" :key="item.id" type="button" role="tab" :aria-selected="filter === item.id" :class="{ active: filter === item.id }" @click="filter = item.id">{{ item.label }}</button>
         <button type="button" class="sa-refresh" :disabled="loading" @click="loadOverview">刷新</button>
+        <button type="button" class="sa-new" data-testid="start-onboarding" @click="filter = 'unregistered'">＋ 新增接入</button>
       </div>
 
       <div class="sa-layout">
         <aside class="sa-list" aria-label="系统清单">
+          <p v-if="filter === 'unregistered'" class="sa-empty">未登记＝平台目录里尚未开始接入的系统。选择一个系统，在右侧「接入流程与生命周期」面板执行「登记接入」。</p>
           <p v-if="!visibleSystems.length" class="sa-empty">当前筛选下没有系统。</p>
           <button v-for="item in visibleSystems" :key="item.code" type="button" class="sa-card" :class="{ selected: selectedCode === item.code }" :aria-pressed="selectedCode === item.code" @click="selectSystem(item.code)">
             <div class="sa-card-top"><i :style="{ background: item.health?.color || (item.connector ? '#2f7fd3' : '#4a5b6b') }">{{ item.code }}</i><span :class="item.lifecycleState">{{ item.lifecycleLabel }}</span></div>
@@ -272,6 +331,25 @@ onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; detailGenerati
               <button type="button" class="sa-outline" @click="sendToAgent">交给 Agent 建模</button>
             </div>
             <p v-if="detail.system.blockedReason" class="sa-blocked">{{ detail.system.blockedReason }}</p>
+
+            <section class="sa-panel" aria-label="接入流程与生命周期">
+              <div class="sa-panel-head"><div><span class="eyebrow">ONBOARDING LIFECYCLE</span><h4>接入流程与生命周期</h4></div><span class="sa-src" :class="detail.lifecycle.state">{{ detail.lifecycle.label }}<template v-if="detail.lifecycle.reason"> · {{ detail.lifecycle.reason }}</template></span></div>
+              <p class="sa-help">接入流程：登记接入（补充连接信息）→ 确认数据域授权 → 连通性测试通过（verified）→ 接通系统。已接通系统可停用（保留登记与授权）；停用后可重新接通或下线登记。每次推进都会记录操作人、时间与理由。</p>
+              <div class="sa-lifecycle-steps" data-testid="lifecycle-steps">
+                <span v-for="(step, index) in LIFECYCLE_STEPS" :key="step.id" :class="{ done: lifecycleStepIndex(detail.lifecycle.state) >= index && detail.lifecycle.state !== 'suspended', active: detail.lifecycle.state === step.id }"><i>{{ index + 1 }}</i>{{ step.label }}</span>
+                <span v-if="detail.lifecycle.state === 'suspended'" class="suspended-badge">已停用（登记与授权保留，可重新接通或下线）</span>
+              </div>
+              <template v-if="detail.lifecycle.updatedAt">
+                <p class="sa-help">最近一次变更：{{ displayTime(detail.lifecycle.updatedAt) }} · 操作人 {{ detail.lifecycle.updatedBy || '—' }}<template v-if="detail.lifecycle.reason"> · 理由：{{ detail.lifecycle.reason }}</template></p>
+              </template>
+              <div class="sa-lifecycle-actions">
+                <button v-for="action in lifecycleActions" :key="action.to" type="button" :class="action.to === 'connected' ? 'sa-primary' : 'sa-outline'" :disabled="action.disabled || transitioning" :data-testid="`lifecycle-${action.to}`" :title="action.disabledReason" @click="runTransition(action.to)">{{ transitioning ? '处理中…' : action.label }}</button>
+                <span v-if="!lifecycleActions.length" class="sa-help">当前状态没有允许的下一步跃迁。</span>
+              </div>
+              <p v-for="action in lifecycleActions.filter((item) => item.disabledReason)" :key="`reason-${action.to}`" class="sa-help sa-blocked-inline">{{ action.label }}：{{ action.disabledReason }}</p>
+              <label class="sa-lifecycle-reason">操作理由（必填，≤200 字）<input v-model="transitionReason" maxlength="200" data-testid="lifecycle-reason" placeholder="例如：已与系统负责人核对连接配置与数据域授权，登记接入。" :disabled="!canProbe" /></label>
+              <p v-if="lifecycleMessage" class="sa-notice" role="status" data-testid="lifecycle-message">{{ lifecycleMessage }}</p>
+            </section>
 
             <section class="sa-panel">
               <div class="sa-panel-head"><div><span class="eyebrow">CONNECTION</span><h4>连接配置</h4></div><span class="sa-src" :class="{ demo: detail.connectionConfiguration.source === 'demo_seed' }">{{ detail.connectionConfiguration.source === 'demo_seed' ? '来源：demo 种子样例' : '无配置' }}</span></div>
@@ -399,6 +477,17 @@ onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; detailGenerati
 .sa-filters button { font-size: 11px; padding: 5px 10px; }
 .sa-filters button.active { border-color: #62a5b2; background: #143647; color: #eaf7fb; }
 .sa-refresh { margin-left: auto; }
+.sa-new { border-color: #4e8b7c; background: #123128; color: #b7e8d4; }
+.sa-lifecycle-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.sa-lifecycle-steps span { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #2c4354; border-radius: 20px; background: #0c2131; color: #8ea9ba; font-size: 11px; padding: 5px 11px; }
+.sa-lifecycle-steps span.done { border-color: #3d7a68; background: #10302a; color: #a4dccb; }
+.sa-lifecycle-steps span.active { border-color: #62a5b2; background: #143647; color: #eaf7fb; }
+.sa-lifecycle-steps span i { font-style: normal; font-size: 10px; font-weight: 700; }
+.sa-lifecycle-steps .suspended-badge { border-color: #8a7333; background: #322c18; color: #e6d08d; }
+.sa-lifecycle-actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; margin-bottom: 10px; }
+.sa-lifecycle-reason { display: block; margin-bottom: 10px; }
+.sa-lifecycle-reason input { display: block; width: 100%; box-sizing: border-box; margin-top: 5px; padding: 8px 10px; border: 1px solid #345268; border-radius: 7px; background: #081927; color: #e2eef5; font: inherit; }
+.sa-lifecycle-reason input:focus-visible { outline: 2px solid #7cddda; outline-offset: 3px; }
 .sa-layout { display: grid; grid-template-columns: 320px minmax(0,1fr); gap: 16px; align-items: start; }
 .sa-list { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
 .sa-card { display: block; width: 100%; text-align: left; padding: 13px; border: 1px solid #2a4354; border-radius: 9px; background: #0a1b29; min-width: 0; overflow-wrap: anywhere; }

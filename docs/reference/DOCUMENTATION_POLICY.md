@@ -29,7 +29,7 @@
 | 生成器 | 来源或用途 |
 | --- | --- |
 | `build_zhinao_docs.py` | Agent 架构、智脑多端使用说明的 Markdown 转 Word |
-| `build_semantic_ops_guide_doc.py` | 元域智营指南 Markdown 转 Word，复用 `word_helpers.py` |
+| `build_semantic_ops_guide_doc.py` | 元域智语指南 Markdown 转 Word，复用 `word_helpers.py` |
 | `build_platform_introduction_doc.py` | 平台介绍 Markdown 转 Word |
 | `build_semantic_test_data_dictionary_docx.py` | 可复现模拟系统的数据字典 |
 | 其他 `build_*_doc.py` / `build_deployment_guide.py` | 特定版本交付内容的生成源；重新使用前核对当前实现 |

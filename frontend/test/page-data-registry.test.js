@@ -10,7 +10,7 @@ test('配置页结构上不再请求世界模型 / 系统接入接口', async ()
   const api = new Proxy({}, {
     get: (_, name) => async () => {
       called.push(String(name));
-      if (forbidden.includes(String(name))) throw new Error(`配置页不应再调用 ${String(name)}：入口已迁至元域智营端系统接入视图`);
+      if (forbidden.includes(String(name))) throw new Error(`配置页不应再调用 ${String(name)}：入口已迁至元域智语端系统接入视图`);
       return String(name).endsWith('s') ? [] : {};
     }
   });

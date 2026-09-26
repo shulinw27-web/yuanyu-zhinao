@@ -689,12 +689,12 @@ async function loadSelectedTrace() {
 }
 
 async function exportReport() {
-  if (!selected.value || !desktopBridge?.exportReport) { message.value = '受控报告导出仅在元域智营桌面端开放。'; return; }
-  if (!globalThis.confirm('确认把当前任务摘要和证据链导出到“文档/元域智营报告”？')) return;
+  if (!selected.value || !desktopBridge?.exportReport) { message.value = '受控报告导出仅在元域智语桌面端开放。'; return; }
+  if (!globalThis.confirm('确认把当前任务摘要和证据链导出到“文档/元域智语报告”？')) return;
   busy.value = true;
   try {
     const report = { reportType: 'semantic_operations_task', exportedAt: new Date().toISOString(), task: selected.value, evidenceTrace: selectedTrace.value };
-    const receipt = await desktopBridge.exportReport({ name: `元域智营-${selected.value.title}-${selected.value.id.slice(-6)}`, format: 'json', content: report });
+    const receipt = await desktopBridge.exportReport({ name: `元域智语-${selected.value.title}-${selected.value.id.slice(-6)}`, format: 'json', content: report });
     await props.client.recordReportExport(selected.value.id, { destination: receipt.destination, fileName: receipt.fileName, bytes: receipt.bytes, sha256: receipt.sha256, createdAt: receipt.createdAt });
     exportedReport.value = receipt; message.value = `报告已受控导出：${receipt.fileName}`; await loadTasks(selected.value.id); await loadSelectedTrace();
   } catch (error) { message.value = error.message || '报告导出失败。'; }
@@ -726,7 +726,7 @@ watch(() => selected.value?.id, () => nextTick(() => {
     <div class="task-conversation">
       <div ref="transcript" class="task-transcript">
         <template v-if="selected">
-        <article v-for="(item, index) in selected.messages" :key="`${item.time}-${index}`" :class="['task-message', item.role === 'user' ? 'user' : 'agent']"><span>{{ item.role === 'user' ? '运营人员' : '元域智营 Agent' }} · 第 {{ Math.floor(index / 2) + 1 }} 轮</span><p>{{ item.content }}</p></article>
+        <article v-for="(item, index) in selected.messages" :key="`${item.time}-${index}`" :class="['task-message', item.role === 'user' ? 'user' : 'agent']"><span>{{ item.role === 'user' ? '运营人员' : '元域智语 Agent' }} · 第 {{ Math.floor(index / 2) + 1 }} 轮</span><p>{{ item.content }}</p></article>
         <details v-if="selected.materialReview" class="task-message agent">
           <summary>附件读取范围 · {{ selected.materialReview.summary }}</summary>
           <div v-for="report in selected.materialReview.reports" :key="report.attachmentId">
@@ -1041,7 +1041,7 @@ watch(() => selected.value?.id, () => nextTick(() => {
         </section>
         <label class="adoption-mode">建模采纳方式 <select v-model="adoptionMode" :disabled="busy" aria-label="建模采纳方式"><option value="merge">合并到当前草稿（保留既有对象）</option><option value="replace">替换当前草稿（确认后保留回滚快照）</option></select><small>当前工作区只有一个活动模型；此选项不创建并行模型。</small></label>
         <p v-if="message" class="task-message-bar">{{ message }}</p>
-        <div class="task-composer"><div v-if="files.length" class="task-files"><span v-for="(file, index) in files" :key="`${file.name}-${index}`">{{ file.name }}<button @click="files.splice(index, 1)">×</button></span></div><textarea v-model="input" :disabled="busy" aria-label="向元域智营 Agent 提交任务" :placeholder="selected ? '继续当前语义任务，例如：再补充WMS库位对象，并检查映射。' : '例如：检查当前语义模型状态；或者上传WMS数据字典建设采购到入库模型。'" @keydown.ctrl.enter="createTask"/><footer><div><button class="attach" :disabled="busy" @click="fileInput?.click()">＋ 添加材料</button><small>最多5份、合计12MB；支持 PDF / 图片 / DOCX / XLSX / JSON / YAML / CSV</small></div><div class="composer-actions"><small>{{ selected ? '将承接当前任务上下文' : 'Ctrl + Enter 发送' }}</small><button class="send" :disabled="!canSubmit" @click="createTask">{{ busy ? 'Agent处理中…' : selected ? '继续任务' : '交给Agent' }}</button></div></footer><input ref="fileInput" type="file" hidden multiple accept="image/jpeg,image/png,image/webp,application/pdf,application/json,.json,.yaml,.yml,text/csv,.csv,.docx,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" @change="chooseFiles"/></div>
+        <div class="task-composer"><div v-if="files.length" class="task-files"><span v-for="(file, index) in files" :key="`${file.name}-${index}`">{{ file.name }}<button @click="files.splice(index, 1)">×</button></span></div><textarea v-model="input" :disabled="busy" aria-label="向元域智语 Agent 提交任务" :placeholder="selected ? '继续当前语义任务，例如：再补充WMS库位对象，并检查映射。' : '例如：检查当前语义模型状态；或者上传WMS数据字典建设采购到入库模型。'" @keydown.ctrl.enter="createTask"/><footer><div><button class="attach" :disabled="busy" @click="fileInput?.click()">＋ 添加材料</button><small>最多5份、合计12MB；支持 PDF / 图片 / DOCX / XLSX / JSON / YAML / CSV</small></div><div class="composer-actions"><small>{{ selected ? '将承接当前任务上下文' : 'Ctrl + Enter 发送' }}</small><button class="send" :disabled="!canSubmit" @click="createTask">{{ busy ? 'Agent处理中…' : selected ? '继续任务' : '交给Agent' }}</button></div></footer><input ref="fileInput" type="file" hidden multiple accept="image/jpeg,image/png,image/webp,application/pdf,application/json,.json,.yaml,.yml,text/csv,.csv,.docx,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" @change="chooseFiles"/></div>
       </div>
     </div>
   </section>

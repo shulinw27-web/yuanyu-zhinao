@@ -44,9 +44,9 @@
 以下文件在完成迁移前应设置高等级 review：
 
 - `backend/src/app.js`：所有后端模块的当前组合根；
-- `frontend/src/App.vue`：管理 Web 的当前页面协调器；
+- `frontend/src/App.vue`：元域智营的当前页面协调器；
 - `backend/src/data/seed.js`：多个领域共享的 Demo 数据；
 - `backend/src/data/iam-seed.js`：权限目录与初始策略；
-- `frontend/src/api/client.js`：管理 Web 公共 API 契约；
+- `frontend/src/api/client.js`：元域智营公共 API 契约；
 - `packages/agent-sdk/src/index.js`：三端智脑公共契约；
 - `backend/src/repositories/runtime-state-repository.js`：所有运行态持久化基础。

@@ -4,7 +4,7 @@
 
 - `@healthcare-ai/agent-sdk`：认证会话、设备标识、Agent/通知/证据 API；
 - `@healthcare-ai/agent-workbench`：Web/Electron/移动端共享 Vue 工作台；
-- `frontend/src/api/client.js`：管理 Web API 客户端。
+- `frontend/src/api/client.js`：元域智营 API 客户端。
 
 SDK 自动携带 `x-client-platform`、`x-client-version`、稳定设备 ID 和身份会话。默认使用同源 `/api`；桌面容器可通过安全 bridge/显式配置覆盖，禁止把 `file://` 等非 HTTP origin 当 API。
 

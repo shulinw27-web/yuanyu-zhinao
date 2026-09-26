@@ -5,7 +5,7 @@ import KeyCenterPanel from './KeyCenterPanel.vue';
 import SimulationControlCenter from './SimulationControlCenter.vue';
 
 // 2026-09-25 阶段 2：本页已迁出「接入系统配置」「当前生效映射」「元模型连接模板」三项，
-// 它们统一归口到元域智营端的「系统接入」视图（/api/semantic-operations/systems*）。
+// 它们统一归口到元域智语端的「系统接入」视图（/api/semantic-operations/systems*）。
 // 本页只保留平台级配置：监控/安全策略摘要、账号权限中心、Key Center、模拟控制中心、大模型连接配置。
 const props = defineProps({ configuration: Object, modelConfig: Object, modelConfigMessage: String, simulation: Object, simulationMessage: String, accountCenter: Object, permissionCenter: Object, keyCenter: Object, keyCenterMessage: String, role: String, buttonPermissionIds: { type: Array, default: () => [] } });
 const emit = defineEmits(['run-simulation-scenario', 'decide-simulation-approval', 'set-simulation-connector-fault', 'reset-simulation', 'save-model-config', 'rotate-key-policy', 'revoke-key-lease']);
@@ -37,7 +37,7 @@ function saveModelConnection() {
 
 <template>
   <div v-if="configuration" class="page config-page">
-    <div class="section-header"><div><span class="eyebrow">PLATFORM CONFIGURATION</span><h2>配置管理</h2><p>统一管理监控与安全策略、账号权限、密钥中心、模拟运行时与大模型连接；系统接入与元模型映射已迁至元域智营端，Demo 中只展示受控配置快照。</p></div></div>
+    <div class="section-header"><div><span class="eyebrow">PLATFORM CONFIGURATION</span><h2>配置管理</h2><p>统一管理监控与安全策略、账号权限、密钥中心、模拟运行时与大模型连接；系统接入与元模型映射已迁至元域智语端，Demo 中只展示受控配置快照。</p></div></div>
     <section class="config-summary"><article><span>监控策略</span><strong>{{ configuration.global.monitoring.enabled ? '已开启' : '已关闭' }}</strong><p>P0 {{ configuration.global.monitoring.p0EscalationMinutes }} 分钟升级 · {{ configuration.global.monitoring.riskRules }} 条风险规则</p></article><article><span>安全策略</span><strong>{{ configuration.global.security.policyMode }}</strong><p>{{ configuration.global.security.kmsMode }} · 审计保留 {{ configuration.global.security.auditRetentionDays }} 天</p></article><article><span>模型编排</span><strong>{{ configuration.global.models.orchestrator }}</strong><p>{{ configuration.global.models.production }} · {{ configuration.global.models.marketing }}</p></article></section>
     <AccountPermissionCenter :account-center="accountCenter" :permission-center="permissionCenter" :role="role" />
     <KeyCenterPanel :center="keyCenter" :role="role" :message="keyCenterMessage" :button-permission-ids="buttonPermissionIds" @rotate="$emit('rotate-key-policy', $event)" @revoke="$emit('revoke-key-lease', $event)" />

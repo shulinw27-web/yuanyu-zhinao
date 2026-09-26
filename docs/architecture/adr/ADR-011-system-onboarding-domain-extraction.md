@@ -1,4 +1,4 @@
-# ADR-011: 接入能力独立成域，主视角从管理 Web 迁至元域智营端
+# ADR-011: 接入能力独立成域，主视角从元域智营迁至元域智语端
 
 ## Status
 
@@ -11,11 +11,11 @@ Accepted
 - 「系统接入 → 选系统建模 → 模型治理」重构的**阶段 0 已把系统清单收敛为单一事实源**（[ADR-009](ADR-009-system-registry-single-source.md)）：系统类型与连接器定义属平台，接入生命周期与探测结果属租户。
 - **阶段 1 已把跨端共享前端资产提升为声明式包**（[ADR-010](ADR-010-agent-ui-package-extraction.md)）：跨包穿透基线归零，迁文件不再触发棘轮失败。
 - 架构棘轮的 `DOMAIN_EXPORT_CEILING.governance` 已达 **92 上限且规则是「只降不升」**。
-- 双端职责在方案里已划定：**元域智营端是语义建设与运营的入口**，管理 Web 是平台治理入口。
+- 双端职责在方案里已划定：**元域智语端是语义建设与运营的入口**，元域智营是平台治理入口。
 
 ### 实测问题一：两个「空按钮」
 
-管理 Web `config` 页（`frontend/src/features/config/ConfigManagementPage.vue`）原有：
+元域智营 `config` 页（`frontend/src/features/config/ConfigManagementPage.vue`）原有：
 
 ```html
 <button>连通性测试</button>
@@ -26,7 +26,7 @@ Accepted
 
 ### 实测问题二：主视角错位
 
-接入是「每个企业各自为政」的业务运营行为（租户隔离的生命周期 + 租户自有的连接配置），却被放在**平台级管理 Web**里。同时模型/版本治理要收敛到元域智营端（阶段 6），若接入留在管理 Web，运营人员将在两个系统间来回跳转。
+接入是「每个企业各自为政」的业务运营行为（租户隔离的生命周期 + 租户自有的连接配置），却被放在**平台级元域智营**里。同时模型/版本治理要收敛到元域智语端（阶段 6），若接入留在元域智营，运营人员将在两个系统间来回跳转。
 
 ### 实测问题三：把服务塞进 governance 域会抬高基线
 
@@ -102,10 +102,10 @@ POST /api/semantic-operations/systems/:code/mapping-drafts/:id/publish   (world.
 
 同时透出 `readScenarioId`（探测实际读取的那个场景），界面如实注明「目录是各场景声明的并集，探测只读其中之一」。
 
-### 8. 管理 Web 收窄，旧端点本阶段不删
+### 8. 元域智营收窄，旧端点本阶段不删
 
 - `ConfigManagementPage.vue` 删除三个区块与 3 个 emit，54 → 46 行；`App.vue`、`governance-actions.js`、`page-data-registry.js` 删除对应状态与动作；config 页的 `Promise.all` 从 7 个降到 6 个。
-- **旧端点保留一个版本周期**，但管理 Web 不再有入口，迁移后可通过 404 计数确认无残留调用。
+- **旧端点保留一个版本周期**，但元域智营不再有入口，迁移后可通过 404 计数确认无残留调用。
 
 ### 9. 迁移与收窄必须同步更新测试的断言口径
 
@@ -123,12 +123,12 @@ POST /api/semantic-operations/systems/:code/mapping-drafts/:id/publish   (world.
 ### 变困难了
 
 - **跨域边基线 8 → 10**（新增 2 条）。这是「只降不升」规则下的**有意增加**，理由是两条边均为组装依赖而非领域耦合；**刻意没有新增** `system-access → world-model-template` 那条边——连接模板仍属 governance 域，由**路由层组合两个域的 public-api**。这条判断需要在评审时能说清楚。
-- 接入视图与材料视图在元域智营端成为**主/次双标签**，`SemanticOnboardingWorkspace` 从主视角降为次级；两个视图共享 `open-agent` 出口，行为一致性需要测试守住。
+- 接入视图与材料视图在元域智语端成为**主/次双标签**，`SemanticOnboardingWorkspace` 从主视角降为次级；两个视图共享 `open-agent` 出口，行为一致性需要测试守住。
 - 「真正接上」意味着探测会**真的占用本地端口并发请求**，测试必须覆盖六种故障模式，不能让「探测失败」被伪装成成功。
 
 ### 放弃了什么
 
-- **放弃了「管理 Web 也是接入入口」的双入口便利**。接入只在元域智营端，管理 Web 的 config 页只保留监控/安全/账号/Key Center/模拟运行时/大模型连接。
+- **放弃了「元域智营也是接入入口」的双入口便利**。接入只在元域智语端，元域智营的 config 页只保留监控/安全/账号/Key Center/模拟运行时/大模型连接。
 - **放弃了在 governance 域里顺手放 3 个导出的省事做法**。代价是多一个域与一条棘轮登记，收益是基线不被抬高。
 - **放弃了本阶段合并两套权限模型**（推迟到阶段 6），因此现阶段同一屏内会出现两套权限标识并存的情况。
 - **放弃了自动合并跨场景字段声明**。代价是界面上会看到冲突提示，收益是不会有「目录随遍历顺序漂移」的静默错误。
@@ -137,7 +137,7 @@ POST /api/semantic-operations/systems/:code/mapping-drafts/:id/publish   (world.
 
 - `systemConfigurations`（责任人 / 同步频率 / 字段→对象映射）**仍来自 demo 种子、尚未租户隔离**，返回值以 `configurationSource: 'demo_seed'` 标注，界面显示「来源：demo 种子样例」。属阶段 6 范围。
 - 字段目录中的 `StockPosition` 类冲突**是既有合成数据的真实不一致**，本阶段只做显式暴露，**未修改 `examples/` 下的夹具数据**（改夹具会牵动 supply-chain 回归，超出本阶段范围）。
-- 管理 Web 中 `.config-menu` / `.ontology-mapping` / `.integration-settings` / `.mapping-*` 等 CSS 规则**已成为死代码，尚未清理**。
+- 元域智营中 `.config-menu` / `.ontology-mapping` / `.integration-settings` / `.mapping-*` 等 CSS 规则**已成为死代码，尚未清理**。
 - 本阶段**未做**真实企业连接器、未做生产多租户验收；所有探测结论均为内置合成数据源。
 
 ## 退出/复审条件
@@ -148,7 +148,7 @@ POST /api/semantic-operations/systems/:code/mapping-drafts/:id/publish   (world.
 2. **出现第三个消费 `system-access-service` 的界面/服务** —— 说明「面向运营视图的组装」被复用到非运营场景，应拆出探测能力为独立服务。
 3. **真实企业连接器接入** —— 探测路径必须从 `mock-onboarding-source` 切换到真实连接器，`sourceKind` 与界面文案同步更新（ADR-009 退出条件 3 的凭据校验同时到期）。
 4. **`fieldCatalog.conflicts` 长期非空且无人处理** —— 说明合成场景的字典需要先收敛，届时应把两个夹具字典统一为一份，而不是继续在界面上标注冲突。
-5. **管理 Web 旧端点在一个版本周期后仍有调用** —— 说明迁移不彻底，需先清理调用方再删除端点。
+5. **元域智营旧端点在一个版本周期后仍有调用** —— 说明迁移不彻底，需先清理调用方再删除端点。
 
 ## 关联
 

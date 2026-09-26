@@ -7,7 +7,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
-OUT = Path(__file__).resolve().parents[2] / 'docs' / 'reference' / 'exports' / '元域智营AI基座-部署说明.docx'
+OUT = Path(__file__).resolve().parents[2] / 'docs' / 'reference' / 'exports' / '元域智脑AI基座-部署说明.docx'
 BLUE, DARK, INK, MUTED = '2E74B5', '1F4D78', '0B2545', '5B6773'
 LIGHT_BLUE, LIGHT_GRAY, CALLOUT = 'E8EEF5', 'F2F4F7', 'F4F6F9'
 
@@ -161,7 +161,7 @@ configure_style(doc.styles['Heading 3'], 12, DARK, 10, 5, True, 1.0)
 
 header = section.header.paragraphs[0]
 header.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-set_font(header.add_run('元域智营 AI 基座 | 部署说明'), size=8.5, color=MUTED)
+set_font(header.add_run('元域智脑 AI 基座 | 部署说明'), size=8.5, color=MUTED)
 footer = section.footer.paragraphs[0]
 footer.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 set_font(footer.add_run('内部技术文档  |  '), size=8.5, color=MUTED)
@@ -174,7 +174,7 @@ p.paragraph_format.space_after = Pt(2)
 set_font(p.add_run('技术部署与运行手册'), size=10.5, color=DARK, bold=True)
 p = doc.add_paragraph()
 p.paragraph_format.space_after = Pt(5)
-set_font(p.add_run('元域智营 AI 基座\n部署说明'), size=25, color=INK, bold=True)
+set_font(p.add_run('元域智脑 AI 基座\n部署说明'), size=25, color=INK, bold=True)
 p = doc.add_paragraph()
 p.paragraph_format.space_after = Pt(14)
 set_font(p.add_run('适用于本地开发、测试/预生产及生产环境'), size=13, color=DARK)
@@ -320,7 +320,7 @@ add_matrix(doc, ['能力', '当前 Mock 部署行为', '生产替换方式'], [
 ], [1700, 4550, 3110], fill=LIGHT_GRAY)
 add_body(doc, '部署模拟环境时，管理端、移动端与 Agent 均应通过业务 API 读取模拟 Connector 输出，禁止页面直接读取种子文件。运行“原料质量异常”场景后，可用批次号 RMB-VC-20260801 查询 LIMS OOS、QMS 偏差、MES 冻结和 CAPA 草稿的完整证据链。', '演练验证：')
 
-doc.core_properties.title = '元域智营 AI 基座 - 部署说明'
+doc.core_properties.title = '元域智脑 AI 基座 - 部署说明'
 doc.core_properties.subject = '本地、测试、预生产与生产部署手册'
 doc.core_properties.author = '项目团队'
 doc.save(OUT)

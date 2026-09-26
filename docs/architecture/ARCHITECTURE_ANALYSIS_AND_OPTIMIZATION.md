@@ -18,7 +18,7 @@
 | 路由文件 | 13 | 全部只依赖 `domains/*/public-api.js` ✅ |
 | 工作区包 | 5 | 依赖图 **无环、方向干净** ✅ |
 | 最大后端文件 | `private-agent-service.js` **1206 行** | 直接 import **33** 个 service |
-| 前端文件（管理 Web） | 43 | 最大 `App.vue` 404 行 ✅ |
+| 前端文件（元域智营） | 43 | 最大 `App.vue` 404 行 ✅ |
 | Python 语义服务 | 10 个 py | 通过 HTTP 通信，边界清晰 ✅ |
 
 ### 1.2 依赖图实测

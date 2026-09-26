@@ -269,7 +269,7 @@ def configure_section(section, first=False):
     p = header.paragraphs[0]
     p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     p.paragraph_format.space_after = Pt(0)
-    r = p.add_run('元域智营 AI 基座 | 智脑操作手册')
+    r = p.add_run('元域智脑 AI 基座 | 智脑操作手册')
     set_font(r, 8.5, MUTED)
     footer = section.footer
     footer.is_linked_to_previous = False

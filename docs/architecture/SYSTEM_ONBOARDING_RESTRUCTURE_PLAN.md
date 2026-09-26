@@ -2,9 +2,9 @@
 
 状态：**已确认并实施中（Accepted）**。更新：2026-09-25。
 
-本文是对「企业接入升级为系统接入、Agent 工作台以选中的系统为必选前提开展建模、模型与版本管理收敛到元域智营」这一整体方案的分析与实施草案。文中的现状数字均为 2026-09-25 本机实测所得。**实施进度见文末「实施台账」**；未在台账中标注完成的条目均为计划，不代表已完成的能力。
+本文是对「企业接入升级为系统接入、Agent 工作台以选中的系统为必选前提开展建模、模型与版本管理收敛到元域智语」这一整体方案的分析与实施草案。文中的现状数字均为 2026-09-25 本机实测所得。**实施进度见文末「实施台账」**；未在台账中标注完成的条目均为计划，不代表已完成的能力。
 
-**产品命名变更（2026-09-25）**：该运营端产品名由「语义运营」改为「**元域智营**」（与业务端「元域智脑」成对：智脑承接业务、智营承接运营）。技术标识保持不变，映射关系见下方「命名映射」。
+**产品命名变更（2026-09-25）**：该运营端产品名由「语义运营」改为「**元域智语**」（与业务端「元域智脑」成对：智脑承接业务、智营承接运营）。技术标识保持不变，映射关系见下方「命名映射」。
 
 关联阅读：[整体架构说明](ARCHITECTURE.md)、[语义层元模型与元对象建设说明](SEMANTIC_MODEL_AUTHORING.md)、[模块化与组件化审计](MODULARIZATION_AUDIT.md)、[架构分析与优化](ARCHITECTURE_ANALYSIS_AND_OPTIMIZATION.md)、[Mock 企业接入](../development/MOCK_ENTERPRISE_ONBOARDING.md)、[开发路线](../development/DEVELOPMENT_ROADMAP.md)、[ADR-009 系统注册表](adr/ADR-009-system-registry-single-source.md)、[ADR-010 共享前端包](adr/ADR-010-agent-ui-package-extraction.md)、[ADR-011 接入独立成域](adr/ADR-011-system-onboarding-domain-extraction.md)、[ADR-012 建模范围显式化](adr/ADR-012-explicit-modeling-scope.md)、[ADR-013 范围作为过滤器](adr/ADR-013-scope-as-filter-with-explicit-exclusions.md)、[ADR-014 标识对应作为假设](adr/ADR-014-identity-linking-as-assumption.md)。
 
@@ -12,14 +12,14 @@
 
 | 层面 | 变更后 | 说明 |
 | --- | --- | --- |
-| 产品/界面显示名 | **元域智营** | 导航、标题、文档口径、Electron `productName`、快捷方式名 |
+| 产品/界面显示名 | **元域智语** | 导航、标题、文档口径、Electron `productName`、快捷方式名 |
 | 目录 | `apps/semantic-operations-console`（不变） | 改目录名会波及 workspace 配置、脚本、测试与棘轮基线中的 5 条路径，收益不足以抵消风险 |
 | npm 包名 | `@healthcare-ai/semantic-operations-console` / `-sdk`（不变） | 技术标识 |
 | API 命名空间 | `/api/semantic-operations/*`（不变） | 对外契约 |
 | 权限点 | `meta_model.*`（不变） | 权限矩阵与测试绑定 |
 | 测试脚本 | `test:semantic`（不变） | 组合分组名 |
 
-即：**「元域智营」= 显示名，「semantic-operations」= 技术标识，二者指同一端。** 新增代码优先使用显示名于文案层，技术标识沿用既有约定，避免一次性重命名造成大面积不可控改动。
+即：**「元域智语」= 显示名，「semantic-operations」= 技术标识，二者指同一端。** 新增代码优先使用显示名于文案层，技术标识沿用既有约定，避免一次性重命名造成大面积不可控改动。
 
 ## 需求增补（2026-09-25，用户确认）
 
@@ -28,13 +28,13 @@
 | # | 要求 | 落地方式 |
 | --- | --- | --- |
 | 4 | **整体开发过程必须考虑多租户** | 凡「可被租户持有」的新实体一律：状态经 `semanticTenantStateKey()` 落租户工作区；租户标识只取受信上下文（`runWithSemanticTenant` 的 AsyncLocalStorage），绝不接受请求体传入；平台级共享资产（系统类型、角色策略、模板目录）显式标注无租户维度。已写入 ADR-009「多租户贯穿原则」 |
-| 5 | 元域智营端与智脑一样**接入大模型做真实联调** | 已把运行中 API 的模型通道由 `local`（端点未起、版本精确匹配被拒）切换为 `workbuddy` 云 Provider（`deepseek-v4-pro`，免密钥），并修复「模型不可用时入口变成死路」的回落缺陷。实测证据见实施台账 |
+| 5 | 元域智语端与智脑一样**接入大模型做真实联调** | 已把运行中 API 的模型通道由 `local`（端点未起、版本精确匹配被拒）切换为 `workbuddy` 云 Provider（`deepseek-v4-pro`，免密钥），并修复「模型不可用时入口变成死路」的回落缺陷。实测证据见实施台账 |
 
 ---
 
 ## 0. 一句话结论
 
-**方向成立，且比现有实现更接近目标态；但当前「接入」的最小单元不是系统而是「场景项目」，系统是硬编码常量，所以第一条要求不是"改名搬家"，而是"重构接入的领域模型"。** 同时，第三条「模型管理迁到元域智营」存在一个结构性前置：元域智营端已经在用相对路径穿透 `frontend/src/features/meta-model/*`（模块化审计 P0，已冻结在跨包棘轮基线 8 处中），**不先建包就直接搬迁文件，会让棘轮测试当场失败**。
+**方向成立，且比现有实现更接近目标态；但当前「接入」的最小单元不是系统而是「场景项目」，系统是硬编码常量，所以第一条要求不是"改名搬家"，而是"重构接入的领域模型"。** 同时，第三条「模型管理迁到元域智语」存在一个结构性前置：元域智语端已经在用相对路径穿透 `frontend/src/features/meta-model/*`（模块化审计 P0，已冻结在跨包棘轮基线 8 处中），**不先建包就直接搬迁文件，会让棘轮测试当场失败**。
 
 ---
 
@@ -46,13 +46,13 @@
 | --- | --- | --- | --- |
 | 1 | 流程第一步必须是系统层面接入，系统接入是基石 | **接入的原子单位 = 单个业务系统**（ERP / QMS / LIMS / WMS / MES / OMS / OA…）。每个系统有独立的接入生命周期：登记 → 授权 → 连通 → 字段/对象目录 → 状态与健康。语义建模的一切输入都必须可追溯到某个已接入系统。 | 领域模型重构 |
 | 1b | 「企业接入」改成「系统接入」 | 概念与命名、菜单、权限点、文档口径统一替换；「企业」只作为**租户归属**（不可由界面切换），不再作为接入单元。 | 命名 + 数据模型 |
-| 1c | 所有系统接入模块从管理 Web 迁到元域智营（Web + 桌面端） | 管理 Web `config` 页的「接入系统配置 / 当前生效映射」与「元模型连接模板」整体迁出；元域智营端新增「系统接入」视图，Web 与 Electron 两版同源。 | 模块迁移 |
+| 1c | 所有系统接入模块从元域智营迁到元域智语（Web + 桌面端） | 元域智营 `config` 页的「接入系统配置 / 当前生效映射」与「元模型连接模板」整体迁出；元域智语端新增「系统接入」视图，Web 与 Electron 两版同源。 | 模块迁移 |
 | 2 | Agent 工作台选 1~N 个系统建模，作为必选项 | **建模会话（Modeling Session）** 必须携带非空 `selectedSystems[]`。空选择不允许提交。选择是显式的用户动作，不再只靠自然语言推断。 | 前后端契约 + UI 门禁 |
 | 2b | 用户可通过自然语言和多模态内容建模 | 材料通道需从「5 类文本/JSON 材料」扩展到 **PDF / Word / 图片 / 音频**，并保留脱敏、出域、注入与大小防护。 | 能力扩展（有硬前置） |
 | 2c | Agent 按所选单/多系统分析，连接解释出的要素，整理成真实业务模型 | 从「结构化材料解析 / 硬编码对象目录」升级为：**按系统范围抽取对象与标识 → 跨系统连接同义业务实体 → 推导关系与基数 → 形成业务模型提案**。 | 核心算法（最难） |
 | 2d | 交给 Semantica 抽离规范世界模型 | 沿用既有链路：提案 → Schema Critic → `simulate-build` → Semantica 定义二次校验 → 规范世界模型。 | 已实现，复用 |
 | 2e | 用户复核确认是否理解正确并发布模型 | 沿用既有人工复核 → 确认令牌 → 发布闸门，不新增旁路。 | 已实现，复用 |
-| 3 | 已有模型管理、版本管理模块迁到元域智营 | 元模型草稿/精调画布/快照/版本/回滚统一只存在于元域智营端；管理 Web 不再持有模型写入入口。 | 模块迁移 + 权限合并 |
+| 3 | 已有模型管理、版本管理模块迁到元域智语 | 元模型草稿/精调画布/快照/版本/回滚统一只存在于元域智语端；元域智营不再持有模型写入入口。 | 模块迁移 + 权限合并 |
 
 ---
 
@@ -62,9 +62,9 @@
 
 | 端 | 路径 | 端口 | 现有内容 |
 | --- | --- | --- | --- |
-| 管理 Web | `frontend/` | 5173 | 8 页：dashboard / intelligence / agent / risks / world / channels / config / permissions |
-| 元域智营 Web | `apps/semantic-operations-console/` | 5174 | 5 视图：企业接入 / Agent 工作台 / 模型校对 / 版本与回滚 / 知识资料 |
-| 元域智营 Electron | 同上 | — | `pack:semantic-ops-electron` |
+| 元域智营 | `frontend/` | 5173 | 8 页：dashboard / intelligence / agent / risks / world / channels / config / permissions |
+| 元域智语 Web | `apps/semantic-operations-console/` | 5174 | 5 视图：企业接入 / Agent 工作台 / 模型校对 / 版本与回滚 / 知识资料 |
+| 元域智语 Electron | 同上 | — | `pack:semantic-ops-electron` |
 | 业务智脑 Web/桌面 | `apps/desktop/` | 5184 | 仅 `import { AgentWorkbench }`，无自有页面 |
 | 移动 H5 | `apps/mobile/` | 5175 | — |
 | 钉钉 H5 | `apps/dingtalk/` | — | — |
@@ -73,9 +73,9 @@
 
 | 位置 | 载体 | 是否有写动作 | 实测证据 |
 | --- | --- | --- | --- |
-| 管理 Web `config` 页 | `ConfigManagementPage.vue:48-51`「接入系统配置 + 当前生效映射」 | **否**。「连通性测试」「新增映射」两个按钮**无事件绑定**，纯静态展示 | 源码 `<button>连通性测试</button>` 无 `@click` |
-| 管理 Web `config` 页 | `WorldModelTemplateConfig.vue`「元模型连接模板」 | **是**（唯一）`world.draft.create/validate/publish` | 模板 × 目标系统 → 生成草稿 → 校验 → 发布 |
-| 元域智营端 `onboarding` 视图 | `SemanticOnboardingWorkspace.vue`（556 行）「模拟企业接入」 | **是**，`meta_model.draft.save` | 场景 × 五类材料 × Mock HTTP 连接 × 业务对齐 × 交接 |
+| 元域智营 `config` 页 | `ConfigManagementPage.vue:48-51`「接入系统配置 + 当前生效映射」 | **否**。「连通性测试」「新增映射」两个按钮**无事件绑定**，纯静态展示 | 源码 `<button>连通性测试</button>` 无 `@click` |
+| 元域智营 `config` 页 | `WorldModelTemplateConfig.vue`「元模型连接模板」 | **是**（唯一）`world.draft.create/validate/publish` | 模板 × 目标系统 → 生成草稿 → 校验 → 发布 |
+| 元域智语端 `onboarding` 视图 | `SemanticOnboardingWorkspace.vue`（556 行）「模拟企业接入」 | **是**，`meta_model.draft.save` | 场景 × 五类材料 × Mock HTTP 连接 × 业务对齐 × 交接 |
 | 业务智脑工作台侧栏 | `AgentWorkbench.vue:839`「企业数据通道」 | 否，只读状态条 | `operations.telemetry.enterpriseConnectors` |
 
 **系统清单在三处独立定义，互不一致：**
@@ -104,14 +104,14 @@
 
 | 能力 | 位置 | 状态 |
 | --- | --- | --- |
-| 元模型精调画布 `OAMetaModelStudio` | 管理 Web `world` 页 **且** 元域智营端（相对路径穿透 `../../../frontend/src/...`） | 两处共用同一文件 |
-| 核心元对象层 `CoreMetaObjectLayer` | 管理 Web `world` 页 | 未迁 |
-| 语义上下文面板 `SemanticContextPanel` | 管理 Web `world` 页 | 未迁 |
-| 草稿 / 快照 / 版本 Diff / 回滚 | 元域智营端 `App.vue` 内联 | **已迁** |
-| 元模型连接模板草稿/版本 | 管理 Web `config` 页 `WorldModelTemplateConfig.vue` | 未迁 |
-| 大模型连接配置（mock/ark/local/openai/deepseek） | 管理 Web `config` 页 | 属性待定，见 4.2 |
+| 元模型精调画布 `OAMetaModelStudio` | 元域智营 `world` 页 **且** 元域智语端（相对路径穿透 `../../../frontend/src/...`） | 两处共用同一文件 |
+| 核心元对象层 `CoreMetaObjectLayer` | 元域智营 `world` 页 | 未迁 |
+| 语义上下文面板 `SemanticContextPanel` | 元域智营 `world` 页 | 未迁 |
+| 草稿 / 快照 / 版本 Diff / 回滚 | 元域智语端 `App.vue` 内联 | **已迁** |
+| 元模型连接模板草稿/版本 | 元域智营 `config` 页 `WorldModelTemplateConfig.vue` | 未迁 |
+| 大模型连接配置（mock/ark/local/openai/deepseek） | 元域智营 `config` 页 | 属性待定，见 4.2 |
 
-管理 Web `world` 页自身已声明：「元域智营 Agent 已迁移到独立运营端……自然语言建模、Schema Critic、Diff 与回滚请在元域智营端执行」——即**迁移方向早已确立，只是没有收口**。
+元域智营 `world` 页自身已声明：「元域智语 Agent 已迁移到独立运营端……自然语言建模、Schema Critic、Diff 与回滚请在元域智语端执行」——即**迁移方向早已确立，只是没有收口**。
 
 ### 2.5 结构性前置：跨包棘轮基线
 
@@ -145,7 +145,7 @@ apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/met
 1. **「系统接入是基石」在架构上更正确。** 现状把系统当场景的属性（`scenarios[].systems`），导致「接入」实际描述的是「一个项目的材料准备度」，而不是「系统能不能被读懂」。以系统为单元后，就绪度、授权、字段目录、映射、健康才有地方挂。
 2. **「必选项」是对的，而且比现状更安全。** 现状 `detectRequestedSemanticSystems` 推断为空时回落到全部可访问连接器（`semantic-source-discovery-service.js:64-66`），这在语义上是「用户没说清 → 系统替他放大了范围」。改为显式必选是**收窄默认授权**，方向正确。
 3. **「多系统要素连接 → 真实业务模型」抓住了当前的真正短板。** 上一轮实测（`.runtime/probe/nl-modeling-probe.mjs`）已证明：候选对象只来自「结构化材料解析」或「硬编码 12 对象目录 + 关键词命中」，**没有任何跨系统连接推导**。这是能力缺口，不是配置问题。
-4. **「模型/版本管理收敛到元域智营」与项目已有意图一致。** 管理 Web `world` 页自己就写着让用户去元域智营端做建模；元域智营端也已承载草稿/快照/回滚。
+4. **「模型/版本管理收敛到元域智语」与项目已有意图一致。** 元域智营 `world` 页自己就写着让用户去元域智语端做建模；元域智语端也已承载草稿/快照/回滚。
 
 ### 3.2 需要修正的部分（我认为你的表述需要改）
 
@@ -153,20 +153,20 @@ apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/met
 把 `mockOnboardingScenarios.systems` 从常量变成用户可选的系统集合，意味着接入项目的数据模型、材料归属（材料属于系统还是属于项目？）、连接测试对象、对齐规则作用域、交接范围全部要重新定义。**「改名 + 搬家」约占 20%，「系统为中心的数据模型重构」约占 80%。**
 
 **修正 2：「系统接入是第一步」与「模型通道是前置」冲突——顺序上要并行，不能串行。**
-上一轮实测结论：元域智营端任何自然语言建模请求当前都返回 `intent: conversation / status: failed`（本地模型端点未起 + 模型版本精确匹配被治理拒绝）。如果严格按「接入 → 选系统 → 建模」串行推进，**第 2 条会在验收时被模型通道卡死，而第 1 条本身不依赖模型**。所以第 1 条（接入重构与迁移）与「打通模型通道」应并行，第 2 条排在两者之后。
+上一轮实测结论：元域智语端任何自然语言建模请求当前都返回 `intent: conversation / status: failed`（本地模型端点未起 + 模型版本精确匹配被治理拒绝）。如果严格按「接入 → 选系统 → 建模」串行推进，**第 2 条会在验收时被模型通道卡死，而第 1 条本身不依赖模型**。所以第 1 条（接入重构与迁移）与「打通模型通道」应并行，第 2 条排在两者之后。
 
 **修正 3：「多模态」当前是零基建，且依赖模型具备视觉能力。**
 现状：`multimodal-understanding.js` / `multimodal-security-gateway.js` 存在且有测试组，但**未接入接入或建模链路**；`mock-onboarding-catalog.js` 明确拒绝 PDF/Word/图片/音频；09-24 评测记录「workbuddy 图片多模态未接入（仅文本）」。所以「自然语言 + 多模态建模」应拆成两条：**自然语言建模（依赖文本模型通道）** 与 **多模态材料（依赖视觉模型通道 + 安全闸门）**，后者单独排期。
 
 **修正 4：「所有模型管理」边界不清，其中有一个不该迁。**
 「模型」在本项目有**两种完全不同的含义**：
-- **语义模型 / 元模型**（业务定义）→ 迁元域智营，**正确**；
-- **大模型连接配置**（`mock/ark/local/openai/deepseek` provider，`agent.model.configure` 权限，仅 executive）→ 这是**出网通道与数据出域策略**，属平台基础设施治理。若一并迁入元域智营，该端将同时持有「定义业务语义」和「配置数据出网」两类高风险权限，**建议不迁**（见 4.2）。
+- **语义模型 / 元模型**（业务定义）→ 迁元域智语，**正确**；
+- **大模型连接配置**（`mock/ark/local/openai/deepseek` provider，`agent.model.configure` 权限，仅 executive）→ 这是**出网通道与数据出域策略**，属平台基础设施治理。若一并迁入元域智语，该端将同时持有「定义业务语义」和「配置数据出网」两类高风险权限，**建议不迁**（见 4.2）。
 
 **修正 5：「包括 web 和桌面端」有歧义。**
-我理解为「元域智营的 Web 版与 Electron 版都要有系统接入视图」（该端已有两个打包，同源代码，成本近乎为零）。但如果你的意思是「业务智脑桌面端（`apps/desktop`）也要有系统接入」，那性质完全不同——业务端出现接入配置入口会打破「业务端不做建模治理」的既有边界（`AgentWorkbench.vue:175` 明确写「独立运营端，不属于业务端智脑」）。**需你确认。**
+我理解为「元域智语的 Web 版与 Electron 版都要有系统接入视图」（该端已有两个打包，同源代码，成本近乎为零）。但如果你的意思是「业务智脑桌面端（`apps/desktop`）也要有系统接入」，那性质完全不同——业务端出现接入配置入口会打破「业务端不做建模治理」的既有边界（`AgentWorkbench.vue:175` 明确写「独立运营端，不属于业务端智脑」）。**需你确认。**
 
-**修正 6：管理 Web 迁移后会出现权限目录空洞。**
+**修正 6：元域智营迁移后会出现权限目录空洞。**
 `iam-seed.js` 中 `menu.config` 描述为「连接、密钥与模型治理」、`menu.world` 为「对象、关系与事实层」。迁走后这两个菜单的语义与按钮权限（`world.draft.create/validate/publish`）需要同步重构，涉及 5 个角色的权限矩阵（executive / quality_manager / production_manager / procurement_manager / marketing_manager）。**不是删几个组件就完事。**
 
 ---
@@ -183,14 +183,14 @@ apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/met
 
 ### 4.2 大模型连接配置（provider / endpoint / apiKey / 出域策略）去留？
 
-- **A. 留在管理 Web（我建议）**：属平台基础设施 + 数据出域治理，与元域智营的高风险业务定义权分离。
-- **B. 迁到元域智营**：元域智营端闭环更完整，但权限集中风险升高。
-- **C. 迁到元域智营但拆权限**：配置只读在元域智营，写入仍在管理 Web。
+- **A. 留在元域智营（我建议）**：属平台基础设施 + 数据出域治理，与元域智语的高风险业务定义权分离。
+- **B. 迁到元域智语**：元域智语端闭环更完整，但权限集中风险升高。
+- **C. 迁到元域智语但拆权限**：配置只读在元域智语，写入仍在元域智营。
 
-### 4.3 管理 Web 的 `world`（元模型）菜单如何处置？
+### 4.3 元域智营的 `world`（元模型）菜单如何处置？
 
-- **A. 全迁 + 删菜单（我建议）**：模型相关只存在于元域智营端，管理 Web 不再有模型入口。
-- **B. 全迁 + 保留只读指针页**：管理 Web 保留「去元域智营端建模」的引导与已发布模型只读摘要。
+- **A. 全迁 + 删菜单（我建议）**：模型相关只存在于元域智语端，元域智营不再有模型入口。
+- **B. 全迁 + 保留只读指针页**：元域智营保留「去元域智语端建模」的引导与已发布模型只读摘要。
 - **C. 部分迁**：只迁草稿/精调/版本，保留「核心元对象层 + 语义上下文 + 模型实例风险图」作为业务观察视图。
 
 > 注意：C 中的「模型实例风险图」是**业务侧观察**语义模型的产物，与「模型管理」（定义）性质不同，可考虑保留。
@@ -217,9 +217,9 @@ apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/met
 
 | 层 | 实体 | 生命周期 | 归属 |
 | --- | --- | --- | --- |
-| 接入层 | `SystemConnection`（每系统一条） | 长期资产：登记 → 授权 → 连通 → 字段目录 → 健康 | 元域智营端 |
-| 建模层 | `ModelingSession`（一次建模尝试） | 一次性：选系统(N≥1) + 材料 + 诉求 → 提案 → 复核 → 采纳/驳回 | 元域智营端 Agent 工作台 |
-| 治理层 | `SemanticModel` / `Version` / `Snapshot` | 长期资产：草稿 → 校验 → 确认 → 发布 → 回滚 | 元域智营端 |
+| 接入层 | `SystemConnection`（每系统一条） | 长期资产：登记 → 授权 → 连通 → 字段目录 → 健康 | 元域智语端 |
+| 建模层 | `ModelingSession`（一次建模尝试） | 一次性：选系统(N≥1) + 材料 + 诉求 → 提案 → 复核 → 采纳/驳回 | 元域智语端 Agent 工作台 |
+| 治理层 | `SemanticModel` / `Version` / `Snapshot` | 长期资产：草稿 → 校验 → 确认 → 发布 → 回滚 | 元域智语端 |
 
 统一事实源：单一系统注册表（收敛 2.2 表的 5 处重复定义）。
 
@@ -260,32 +260,32 @@ apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/met
 
 **验收**
 - `test:architecture` 通过且基线条目**减少**（不是持平）——证明是收敛而非搬运
-- 两端构建通过；`test:semantic`（元域智营端测试）全绿
+- 两端构建通过；`test:semantic`（元域智语端测试）全绿
 - 前端组件行数上限棘轮不违反
 
 **边界**：纯结构性搬迁，组件行为与视觉**零改动**；不新增功能。
 
 ---
 
-### 阶段 2：接入模块迁移到元域智营端 —— **已完成（2026-09-25）**
+### 阶段 2：接入模块迁移到元域智语端 —— **已完成（2026-09-25）**
 
 **范围**
-- 元域智营端导航：`企业接入` → `系统接入`（替换 `SemanticOnboardingWorkspace` 的主视角）
+- 元域智语端导航：`企业接入` → `系统接入`（替换 `SemanticOnboardingWorkspace` 的主视角）
   - 系统列表视图：每系统显示 状态 / 授权 / 健康 / 最后同步 / 对象目录 / 映射数 / 责任人
-  - 系统详情：连接配置、字段目录、字段→元模型对象映射、连通性测试（**把管理 Web 那两个空按钮真正接上**）
-- 从管理 Web `config` 页迁出「接入系统配置」「当前生效映射」「元模型连接模板」
-- 管理 Web `config` 页保留：监控策略 / 安全策略 / 账号权限中心 / Key Center / 模拟控制中心 /（大模型连接配置按 4.2 决策）
+  - 系统详情：连接配置、字段目录、字段→元模型对象映射、连通性测试（**把元域智营那两个空按钮真正接上**）
+- 从元域智营 `config` 页迁出「接入系统配置」「当前生效映射」「元模型连接模板」
+- 元域智营 `config` 页保留：监控策略 / 安全策略 / 账号权限中心 / Key Center / 模拟控制中心 /（大模型连接配置按 4.2 决策）
 - Web 与 Electron 两版同源（同一组件，无需分支）
 
-**产物**：元域智营端「系统接入」视图 + 管理 Web `config` 页收窄 + 迁出的后端端点按元域智营命名空间重整
+**产物**：元域智语端「系统接入」视图 + 元域智营 `config` 页收窄 + 迁出的后端端点按元域智语命名空间重整
 
 **验收**
 - 浏览器实测 1440/1024/768/390 无横向溢出，两版（Web + Electron `dev:electron`）均可打开
 - 权限测试：接入写入仍需 `meta_model.draft.save`；页面读取权限判定不变
-- 管理 Web `test:permissions`（含 `frontend/test/page-data-registry.test.js`）同步更新并通过
+- 元域智营 `test:permissions`（含 `frontend/test/page-data-registry.test.js`）同步更新并通过
 - 全组回归 0 失败
 
-**边界**：本阶段**不删**旧端点（保留一个版本周期），但管理 Web 不再有入口；迁移后可观测 404 计数确认无残留调用。
+**边界**：本阶段**不删**旧端点（保留一个版本周期），但元域智营不再有入口；迁移后可观测 404 计数确认无残留调用。
 
 ---
 
@@ -348,10 +348,10 @@ apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/met
 
 ---
 
-### 阶段 6：模型管理 / 版本管理收敛到元域智营
+### 阶段 6：模型管理 / 版本管理收敛到元域智语
 
 **范围**
-- 按 4.3 决策处置管理 Web `world` 页
+- 按 4.3 决策处置元域智营 `world` 页
 - 权限合并：`world.draft.*` → `meta_model.*`（需决定合并策略，涉及 5 个角色矩阵）
 - 「元模型连接模板」的草稿/发布权限并入语义建模权限体系
 - `iam-seed.js` 菜单描述与按钮权限同步重构
@@ -362,10 +362,10 @@ apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/met
 
 ---
 
-### 阶段 7：管理 Web 收口与文档同步
+### 阶段 7：元域智营收口与文档同步
 
 **范围**
-- 管理 Web 菜单收缩（按 4.3 决策）
+- 元域智营菜单收缩（按 4.3 决策）
 - 全量文档同步：`PROJECT_STATUS.md` / `workbuddy_work.md` / `DEVELOPMENT_ROADMAP.md`（六阶段路线需与本次重构对齐）/ `MOCK_ENTERPRISE_ONBOARDING.md` / `SEMANTIC_MODEL_AUTHORING.md` / `ARCHITECTURE.md` / `docs/modules/*`
 - `docs:check` 通过
 
@@ -380,7 +380,7 @@ apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/met
 | 跨包棘轮阻断 | 不先建包直接搬迁会当场失败 | 阶段 1 前置；基线只降不升是**保护**而非障碍 |
 | 模型通道未通 | 阶段 4 / 5 无法端到端验收 | 轨道二并行；阶段 0-3 全部可在 mock 下验证 |
 | 权限矩阵破坏 | 5 个角色 × 菜单 × 按钮，迁移易漏 | 每阶段跑 `test:permissions` + 前端权限导航测试 |
-| 旧端点残留调用 | 迁移后管理 Web 可能仍调旧接口 | 保留一个版本周期 + 观测 404 |
+| 旧端点残留调用 | 迁移后元域智营可能仍调旧接口 | 保留一个版本周期 + 观测 404 |
 | 概念混淆回流 | 「项目 / 会话 / 系统」三个词被混用 | 阶段 0 冻结术语，写入 ADR |
 | 合成数据被误读为生产验收 | 本项目历史高发风险 | 每阶段验收报告显式标注「合成材料 / 受控环境」 |
 
@@ -438,7 +438,7 @@ apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/met
 - 两套角色可见性策略是否统一，需业务确认（ADR-009 退出条件 1）；
 - 租户接入状态暂存于运行时 JSON 存储，迁移 PostgreSQL 时需按 ADR-004 前置一并处理。
 
-### 元域智营接入云大模型（对应需求增补第 5 条）—— **已完成（2026-09-25）**
+### 元域智语接入云大模型（对应需求增补第 5 条）—— **已完成（2026-09-25）**
 
 **动作**
 
@@ -512,7 +512,7 @@ apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/met
 - `packages/agent-ui` 现被 5 个顶层区引用，成为新的耦合热点；ADR-010 已给出拆分触发条件（第 4 个无关关注点 / 单包超 30 文件）。
 - 本阶段**不新增任何功能**，也不改变任何组件 API。
 
-### 阶段 2：接入模块迁移到元域智营端 —— **已完成（2026-09-25）**
+### 阶段 2：接入模块迁移到元域智语端 —— **已完成（2026-09-25）**
 
 **产物**
 
@@ -528,7 +528,7 @@ apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/met
 
 **核心动作：把两个「空按钮」真正接上**
 
-管理 Web `config` 页原有的「连通性测试」「新增映射」是**无 `@click` 的装饰性按钮**（历史上从未实现）。本阶段不是换位置重放，而是真做：
+元域智营 `config` 页原有的「连通性测试」「新增映射」是**无 `@click` 的装饰性按钮**（历史上从未实现）。本阶段不是换位置重放，而是真做：
 
 | 能力 | 实现 | 实测 |
 | --- | --- | --- |
@@ -538,10 +538,10 @@ apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/met
 
 **路由匹配顺序（顺序风险）**：字面量子路径（`mapping-templates` / `connection-targets` / `mapping-drafts`）必须排在 `:code` 之前，否则 `mapping-templates` 会被当成一个系统码。测试第 9 项专门守住这一点。
 
-**管理 Web 收窄**
+**元域智营收窄**
 
 - `ConfigManagementPage.vue` 删除「接入系统配置」「当前生效映射」「元模型连接模板」三区块与 3 个 emit（54 → 46 行）；`App.vue` / `governance-actions.js` / `page-data-registry.js` 同步删除对应状态与动作（config 分支的 `Promise.all` 由 7 个降到 6 个）。
-- **旧端点本阶段不删**，保留一个版本周期；管理 Web 已无入口，迁移后可用 404 计数确认无残留调用。
+- **旧端点本阶段不删**，保留一个版本周期；元域智营已无入口，迁移后可用 404 计数确认无残留调用。
 - 断言口径同步改写：`frontend/test/page-data-registry.test.js` 原以 `canAccessPage: () => false` 跳过 world 拉取，签名去掉该参数后这个写法会**悄悄失效（永远为真）**。已重写为「断言**不存在**这条调用路径」（`forbidden` 名单 + Proxy 记录调用），而不是「被权限挡住」。
 
 **实测验收**
@@ -567,7 +567,7 @@ apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/met
 2. **错误码语义错**：`schema_drift` 是「读到了，但字段目录对不上」，**不得与「失败」混为一谈**，故生成 `status: 'schema_drift'` + `issue.code: 'MOCK_SOURCE_SCHEMA_DRIFT'`，而不是 `status: 'failed'`。
 3. **字段目录计数虚高 + 重复键**：初版逐场景 `push`，而同一对象会被多个合成场景声明（WMS 的 `StockPosition`/`Warehouse`、OMS 的 `SalesOrder`），导致「对象目录」被重复项撑大（**WMS 10 → 实际 8，OMS 8 → 实际 7**），且前端以 `table.name` 作 `v-for` 的 `:key` **产生重复键**。改为按 `name` 归并并记录 `scenarioIds`。进一步实测发现归并**不等于**合并语义：WMS `StockPosition` 在两个场景里字段声明**确实不同**（`fulfillment` 含 `stock_id`/`ownership`/`unit`；`quality_incident` 只有 `lot_id`/`warehouse_id`/`qty`/`status`），因此字段签名不一致时进入 `fieldCatalog.conflicts` 由界面显式呈现，**不静默取先出现的那个**（否则「字段目录」会随场景遍历顺序漂移）。同时透出 `readScenarioId`（探测实际读取的场景），界面注明「目录是各场景声明的并集，探测只读其中之一」。
 
-**同时修正了一处被遗漏的测试契约（与阶段 2 无关，属前一增量遗留）**：`backend/test/ark-model-gateway.test.js` 中一项断言 `createSemanticOperationsTask` 在模型传输失败时 `status === 'failed'`。但「元域智营接入云大模型」增量**有意**把该路径改为**回落服务端确定性分类**（否则模型一抖入口就变死路，已被实测复现），`status` 相应变为 `'completed'`，而该测试**未被同步更新**——`test:ark` 因此长期为 38/39。已按新契约改写，并**加强**而非放宽断言：要求 `modelUnavailable === true`、`routing.mode === 'server_rules_fallback'`、`routing.degraded === true`、`routing.modelFailureCode` 非空、事件含 `model_understanding_unavailable`，同时 `command` / `proposal` / `requiredPermission` 均为 `null`、`confirmationRequired === false`。**降级必须显式可归因，不得获得任何执行能力。**
+**同时修正了一处被遗漏的测试契约（与阶段 2 无关，属前一增量遗留）**：`backend/test/ark-model-gateway.test.js` 中一项断言 `createSemanticOperationsTask` 在模型传输失败时 `status === 'failed'`。但「元域智语接入云大模型」增量**有意**把该路径改为**回落服务端确定性分类**（否则模型一抖入口就变死路，已被实测复现），`status` 相应变为 `'completed'`，而该测试**未被同步更新**——`test:ark` 因此长期为 38/39。已按新契约改写，并**加强**而非放宽断言：要求 `modelUnavailable === true`、`routing.mode === 'server_rules_fallback'`、`routing.degraded === true`、`routing.modelFailureCode` 非空、事件含 `model_understanding_unavailable`，同时 `command` / `proposal` / `requiredPermission` 均为 `null`、`confirmationRequired === false`。**降级必须显式可归因，不得获得任何执行能力。**
 
 **同时修正了一处既有并发缺陷（与阶段 2 无关，但会污染验收结论，故一并修掉）**：跑完整质量门禁时 `test:multitenant` 的 `MT-15` 与 `tenant-runtime-sqlite` 会**间歇性**失败（`real SQLite CLI: ... cross-process quota`）。隔离复现确认与阶段 2 无关：单文件重复运行 12 次，基线 **2/3 失败**。
 
@@ -582,7 +582,7 @@ apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/met
 - `systemConfigurations`（责任人 / 同步频率 / 字段→对象映射）**仍来自 demo 种子、尚未租户隔离**，返回 `configurationSource: 'demo_seed'`，界面显示「来源：demo 种子样例」。属阶段 6 范围。
 - 探测读的是**内置合成 HTTP 数据源**（`sourceKind: 'local_mock_http'`），**不是真实企业连接器**；返回值与界面均显式标注，不得表述为生产验收。
 - `fieldCatalog.conflicts` 中的 `StockPosition` 差异是**既有合成数据的真实不一致**，本阶段只做显式暴露，**未修改 `examples/` 下的夹具数据**（改夹具会牵动 supply-chain 回归）。
-- 管理 Web 中 `.config-menu` / `.ontology-mapping` / `.integration-settings` / `.mapping-*` 等 CSS 规则**已成为死代码，尚未清理**。
+- 元域智营中 `.config-menu` / `.ontology-mapping` / `.integration-settings` / `.mapping-*` 等 CSS 规则**已成为死代码，尚未清理**。
 - 「材料与场景准备」降为同页次级标签（`SemanticOnboardingWorkspace` 保留，改懒挂载）。
 
 ---
@@ -1056,7 +1056,7 @@ requestedSystems.length ? requestedSystems : connectorCatalog.filter(item => ite
 
 `shape_unknown` 两条：`OMS.Order.sku`（null / agent）与 `QMS.QualityEvent.product`（null / agent）。
 
-**验收（本机实测，确定性用例，未调模型）**：`test:identity` **20/20**（新增用例 18/19/20：形状判定的三条拒绝路径 + 两个方向的重定级与「不写回声明」+ 已知缺口钉点）；`test:declaration` **12/12**、`test:attribution` **12/12** 未受影响；前端 `workspace-layout` **7/7**（三态表达与结构化映射编辑区，并**反向锁死**旧错误码 `..._REQUIRES_MAPPING_EVIDENCE` 不得残留）；lint / typecheck 干净；`docs:check` **181 份 Markdown / 1068 个本地链接**；`npm run quality` 端到端 **EXIT=0**（1m41s，全量 35 个 Node 测试块 `fail=0`、0 处 `not ok`）；**5 端构建通过**（web 2.03s + 元域智营 2.73s、desktop 2.31s、mobile 2.27s、dingtalk 3.62s，分端调用避开沙箱 safe-delete 阈值）。`test:architecture` **10/10（未增跨域边**，跨包基线仍为 0）。
+**验收（本机实测，确定性用例，未调模型）**：`test:identity` **20/20**（新增用例 18/19/20：形状判定的三条拒绝路径 + 两个方向的重定级与「不写回声明」+ 已知缺口钉点）；`test:declaration` **12/12**、`test:attribution` **12/12** 未受影响；前端 `workspace-layout` **7/7**（三态表达与结构化映射编辑区，并**反向锁死**旧错误码 `..._REQUIRES_MAPPING_EVIDENCE` 不得残留）；lint / typecheck 干净；`docs:check` **181 份 Markdown / 1068 个本地链接**；`npm run quality` 端到端 **EXIT=0**（1m41s，全量 35 个 Node 测试块 `fail=0`、0 处 `not ok`）；**5 端构建通过**（web 2.03s + 元域智语 2.73s、desktop 2.31s、mobile 2.27s、dingtalk 3.62s，分端调用避开沙箱 safe-delete 阈值）。`test:architecture` **10/10（未增跨域边**，跨包基线仍为 0）。
 
 **三处偏离与实测修正（如实）**
 
@@ -1111,7 +1111,7 @@ requestedSystems.length ? requestedSystems : connectorCatalog.filter(item => ite
 | `notInProposal` | 5 条（**含 1 条误报**） | 字段已拆为 `declarationSourced`（**5 条**，判据不变，只答「依据来自哪儿」）与 `eligible`（**7 条**，答「这次能不能并入」） |
 | 不可确认的确认请求 | `SEMANTIC_PROPOSAL_INVALID`（原因不符） | `..._ENDPOINT_OUT_OF_SCOPE`（点名对象） |
 
-**验收（本机实测，确定性用例，未调模型）**：`test:identity` **21/21**（改写用例 20 为「闭合缺口」，重写用例 18 为「资格先于形状 + 对照组 + 继承分流」，新增用例 21「形状三条拒绝路径的纯函数口径」；用例 2 补 `eligible` / `ineligible` 计数与「方案原文举的例子当前不可确认」的断言）；`test:declaration` 12/12、`test:attribution` 12/12 未受影响；`test:architecture` **10/10（未增跨域边）**；前端 `workspace-layout` **7/7**（新增「第四种状态」表达与反向锁死：`link.notInProposal` 与那句错话都不许残留）；lint / typecheck 干净；`docs:check` **182 份 Markdown / 1104 个本地链接**；`npm run quality` 端到端 **EXIT=0**（1m48s，全量 35 个 Node 测试块 `fail=0`、0 处 `not ok`）；**5 端构建通过**（web 2.31s + 元域智营 2.98s、desktop 2.50s、mobile 2.53s、dingtalk 3.88s，分端调用避开沙箱 safe-delete 阈值）。
+**验收（本机实测，确定性用例，未调模型）**：`test:identity` **21/21**（改写用例 20 为「闭合缺口」，重写用例 18 为「资格先于形状 + 对照组 + 继承分流」，新增用例 21「形状三条拒绝路径的纯函数口径」；用例 2 补 `eligible` / `ineligible` 计数与「方案原文举的例子当前不可确认」的断言）；`test:declaration` 12/12、`test:attribution` 12/12 未受影响；`test:architecture` **10/10（未增跨域边）**；前端 `workspace-layout` **7/7**（新增「第四种状态」表达与反向锁死：`link.notInProposal` 与那句错话都不许残留）；lint / typecheck 干净；`docs:check` **182 份 Markdown / 1104 个本地链接**；`npm run quality` 端到端 **EXIT=0**（1m48s，全量 35 个 Node 测试块 `fail=0`、0 处 `not ok`）；**5 端构建通过**（web 2.31s + 元域智语 2.98s、desktop 2.50s、mobile 2.53s、dingtalk 3.88s，分端调用避开沙箱 safe-delete 阈值）。
 
 **两处如实边界**
 
@@ -1158,7 +1158,7 @@ requestedSystems.length ? requestedSystems : connectorCatalog.filter(item => ite
 
 **改动文件**：`backend/src/services/semantic-natural-schema-service.js`（`NATURAL_SCHEMA_SKIP_REASONS` / `naturalSchemaSkipReason` / `discoverNaturalSchema` 返回结构化原因）、`backend/src/services/semantic-operations-agent-service.js`（`catalogHits`、`naturalSchemaSkip` 参数与传递、两条 `reviewNotes`、删除因此闲置的 `includesAny`）、`backend/test/semantic-operations-agent.test.js`（新增 2 条用例，29 → **31**）、[ADR-021](../architecture/adr/ADR-021-candidate-provenance-disclosure.md)（新建）与 ADR 索引行。
 
-**验收（本机实测，确定性用例，未调模型）**：`test:semantic` **6/6 + 60/60 + 94/94**（第三组 92 → 94，`semantic-operations-agent.test.js` 29 → **31**）；`npm run lint` 干净；`docs:check` **183 份 Markdown / 1125 个本地链接**；`npm run quality` 端到端 **EXIT=0**（1m39s，全量 35 个 Node 测试块 `fail=0`、0 处 `not ok`）；**5 端构建通过**（web 2.90s + 元域智营 2.62s、desktop 3.33s、mobile 3.10s、dingtalk 5.01s，分端调用避开沙箱 `safe-delete` 单次阈值）；全部为**内置合成数据**验收。
+**验收（本机实测，确定性用例，未调模型）**：`test:semantic` **6/6 + 60/60 + 94/94**（第三组 92 → 94，`semantic-operations-agent.test.js` 29 → **31**）；`npm run lint` 干净；`docs:check` **183 份 Markdown / 1125 个本地链接**；`npm run quality` 端到端 **EXIT=0**（1m39s，全量 35 个 Node 测试块 `fail=0`、0 处 `not ok`）；**5 端构建通过**（web 2.90s + 元域智语 2.62s、desktop 3.33s、mobile 3.10s、dingtalk 5.01s，分端调用避开沙箱 `safe-delete` 单次阈值）；全部为**内置合成数据**验收。
 
 **三处如实边界**
 
@@ -1207,7 +1207,7 @@ requestedSystems.length ? requestedSystems : connectorCatalog.filter(item => ite
 
 **改动文件**：`backend/src/services/semantic-candidate-catalog-service.js`（新建：受控目录 + 两项披露）、`backend/src/services/semantic-operations-agent-service.js`（导入替换、`candidateCoverage`、三条 `reviewNotes`、`publicProposal` 白名单）、`apps/semantic-operations-console/src/components/SemanticAgentWorkspace.vue`（新增覆盖面区块与样式；**顺带修正两处死界面**：`selected.value?.proposal?...` 在模板中恒为 `undefined`，使两段失效披露永不显示）、`backend/test/semantic-operations-agent.test.js`（+2 条用例，31 → **33**）、`apps/semantic-operations-console/test/workspace-layout.test.js`（+1 组，7 → **8**）、[ADR-022](../architecture/adr/ADR-022-candidate-coverage-disclosure.md)（新建）与 ADR 索引行。
 
-**验收（本机实测，确定性用例，未调模型）**：`test:semantic` **6/6 + 60/60 + 96/96**（第三组 94 → 96）；控制台 `workspace-layout` **8/8**；`test:architecture` **10/10**（未增跨域边）；`test:events` **17/17**（本段顺带完成模块化审计第 3 项后的回归）；`npm run lint` / `typecheck` 干净；`docs:check` **184 份 Markdown / 1169 个本地链接**；`npm run quality` 端到端 **EXIT=0**（1m38s，全量 35 个 Node 测试块 **969 / 969 通过**、0 处 `not ok`）；**5 端构建通过**（web 2.04s + 元域智营 2.83s、desktop 2.22s、mobile 2.19s、dingtalk 3.47s，分端调用避开沙箱 `safe-delete` 单次阈值）；全部为**内置合成数据**验收。
+**验收（本机实测，确定性用例，未调模型）**：`test:semantic` **6/6 + 60/60 + 96/96**（第三组 94 → 96）；控制台 `workspace-layout` **8/8**；`test:architecture` **10/10**（未增跨域边）；`test:events` **17/17**（本段顺带完成模块化审计第 3 项后的回归）；`npm run lint` / `typecheck` 干净；`docs:check` **184 份 Markdown / 1169 个本地链接**；`npm run quality` 端到端 **EXIT=0**（1m38s，全量 35 个 Node 测试块 **969 / 969 通过**、0 处 `not ok`）；**5 端构建通过**（web 2.04s + 元域智语 2.83s、desktop 2.22s、mobile 2.19s、dingtalk 3.47s，分端调用避开沙箱 `safe-delete` 单次阈值）；全部为**内置合成数据**验收。
 
 **三处如实边界**
 
@@ -1218,3 +1218,10 @@ requestedSystems.length ? requestedSystems : connectorCatalog.filter(item => ite
 
 
 
+### 阶段 2 补记（2026-09-26 晨）：接入生命周期操作面（ADR-023）
+
+阶段 2 迁出主视角时留下一个未闭合的缺口（用户 2026-09-26 指出）：**系统接入视图只能「看」**——状态机（draft→registered→authorized→connected⇄suspended）早在 `system-registry-service.js` 定义并实现，却从未暴露为可执行动作：路由层没有生命周期端点、前端没有操作入口，界面上的「已连通 / 待接入 / 未登记 / 可探测 / 未授权」全部是 `ONBOARDING_STATE_SEED` 给的种子静态值。由此产生两个产品缺口：**没有新增接入**（无法把目录里未登记的系统推入流程）、**没有已接通系统的管理**（无法停用 / 恢复 / 下线）。
+
+本段补齐：域契约 4 → 5（`transitionTenantSystemConnection`，`DOMAIN_EXPORT_CEILING` 显式抬棘轮）；路由 `POST /api/semantic-operations/systems/{code}/lifecycle`（权限沿用 `meta_model.draft.save`）；**接通门禁**——任何 `→ connected` 要求该租户最近一次探测 `verified`（409 `SYSTEM_CONNECT_PROBE_REQUIRED`），「先验证再接通」成为流程强制而非口头约定；理由必填（≤200 字）+ 操作人取受信上下文审计；前端新增「接入流程与生命周期」面板（渲染服务端 `lifecycle.transitions`，不本地硬编码）、「＋ 新增接入」入口（聚焦未登记系统）与「已停用」维度。**边界**：`draft→registered` 只推进状态不落连接配置（连接配置样例仍来自 demo 种子）；系统类型仍只能来自平台目录。
+
+**验收（本机实测，确定性用例，未调模型）**：`backend/test/system-access.test.js` **12 项（9 → 12）**；`workspace-layout` **9 项（8 → 9）**；`test:architecture` **10/10**（棘轮显式变更，未增跨域边）；`test:registry` 7/7；`test:access` 12/12；`test:semantic` 全链 EXIT=0。决策记录见 [ADR-023](adr/ADR-023-lifecycle-operation-surface.md)。

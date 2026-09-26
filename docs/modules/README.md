@@ -32,7 +32,7 @@
 | 07 | 模型与语义治理 | 元模型、世界模型、知识、语义上下文 | [model-semantic-governance](07-model-semantic-governance) |
 | 08 | 系统接入与模拟 | OA/MES/QMS/OMS 等接入、Mock 场景与故障 | [integration-simulation](08-integration-simulation) |
 | 09 | 密钥与凭据 | KMS 适配、策略、短时租约、轮换与吊销 | [key-credential](09-key-credential) |
-| 10 | 多端客户端 | 管理 Web、桌面 Web、Electron、移动端、共享 SDK | [client-platform](10-client-platform) |
+| 10 | 多端客户端 | 元域智营、桌面 Web、Electron、移动端、共享 SDK | [client-platform](10-client-platform) |
 | 11 | 平台运行基础 | HTTP 宿主、配置、Repository、限流、部署与测试 | [runtime-platform](11-runtime-platform) |
 
 ## 文档状态约定

@@ -392,7 +392,7 @@ export function createSemanticOperationsProposal({ input, multimodalContent, att
     granularity: inferObjectGranularity(item.id),
     semanticType: item.id, coreObject: item.coreObject, sourceSystems: [item.source.split('.')[0].toUpperCase()],
     fieldDefinitions: item.fields.map((name) => ({ name, type: 'string', required: name === item.key, primaryKey: name === item.key, sourceField: sourceFieldName(name), mappingStatus: 'mapped', reference: null, description: null })),
-    description: `由元域智营 Agent 根据${attachments.length ? '已通过内容扫描的材料与' : ''}自然语言描述生成的待审阅对象。`
+    description: `由元域智语 Agent 根据${attachments.length ? '已通过内容扫描的材料与' : ''}自然语言描述生成的待审阅对象。`
   }));
   const extractedObjectTypes = [...new Map([...(schemaDiscovery?.objectTypes || []), ...catalogCandidates].map((item) => [item.id, item])).values()];
   if (!extractedObjectTypes.length) return {
@@ -467,7 +467,7 @@ export function createSemanticOperationsProposal({ input, multimodalContent, att
     // 「未裁定」与「裁定为合并」是两种不同状态，前者意味着目录里的并集还是默认动作。
     declarationRulings: [],
     draft, critic: critiqueProposalDraft(draft, base, schemaDiscovery), diff: buildDiff(base, draft, adoptionMode), editDiff: buildEditDiff(draft, draft), impactAnalysis: buildImpactAnalysis(adoptionMode === 'replace' ? base : draft, draft), mappingValidation, reviewNotes: [
-      '这是元域智营 Agent 生成的待审阅草稿，尚未写入语义层或 Semantica。',
+      '这是元域智语 Agent 生成的待审阅草稿，尚未写入语义层或 Semantica。',
       adoptionMode === 'replace' ? `替换当前工作区草稿：现有 ${base.objectTypes.length} 类对象中未出现在候选的对象将移除；确认前请检查，采纳时保存回滚快照。不是新增并行模型。` : '合并到当前工作区草稿；保留既有对象，不会新建并行模型。',
       '采纳后只保存为元模型草稿；仍需校验、模拟构建和管理层登记。',
       '不复制原始业务记录，只保留对象结构、字段和关系。',

@@ -13,4 +13,4 @@ npm.cmd run build:desktop
 npm.cmd run build:mobile
 ```
 
-修改 Workbench 时必须同时检查桌面与移动布局；修改 SDK 错误契约时检查管理 Web 的授权失效逻辑。
+修改 Workbench 时必须同时检查桌面与移动布局；修改 SDK 错误契约时检查元域智营的授权失效逻辑。

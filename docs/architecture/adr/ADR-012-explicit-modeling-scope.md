@@ -8,7 +8,7 @@ Accepted
 
 ### 当时的约束
 
-- 「系统接入 → 选系统建模 → 模型治理」重构的阶段 0 已把系统清单收敛为单一事实源（[ADR-009](ADR-009-system-registry-single-source.md)），阶段 1 已清偿跨包穿透（[ADR-010](ADR-010-agent-ui-package-extraction.md)），阶段 2 已把接入主视角迁到元域智营端（[ADR-011](ADR-011-system-onboarding-domain-extraction.md)）。
+- 「系统接入 → 选系统建模 → 模型治理」重构的阶段 0 已把系统清单收敛为单一事实源（[ADR-009](ADR-009-system-registry-single-source.md)），阶段 1 已清偿跨包穿透（[ADR-010](ADR-010-agent-ui-package-extraction.md)），阶段 2 已把接入主视角迁到元域智语端（[ADR-011](ADR-011-system-onboarding-domain-extraction.md)）。
 - 语义层的一条既有原则是**语义关系不扩大数据范围**（[ADR-001](ADR-001-semantic-permission-separation.md)）：建立语义关系与提升数据授权是两件独立的事。
 - 方案 4.5 给出的三个选项：A 仅建模范围过滤 / B 数据授权门禁 / C = A + 超出角色数据域时明确阻断。方案倾向 C，用户在 2026-09-25 确认整体方案。
 
@@ -31,7 +31,7 @@ const selectedCodes = requestedSystems.length
 
 ### 为什么这一行值得写 ADR
 
-它同时触及三件难以逆转的事：建模任务的**范围语义**、`detectRequestedSemanticSystems` 的**权威等级**、以及越权选择时是**阻断还是裁剪**。三者都影响对外契约与授权语义，且改动会波及既有测试与调用方（巡检 worker、来源清单端点、管理 Web 客户端）。
+它同时触及三件难以逆转的事：建模任务的**范围语义**、`detectRequestedSemanticSystems` 的**权威等级**、以及越权选择时是**阻断还是裁剪**。三者都影响对外契约与授权语义，且改动会波及既有测试与调用方（巡检 worker、来源清单端点、元域智营客户端）。
 
 ## Decision
 

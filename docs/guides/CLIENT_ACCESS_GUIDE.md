@@ -1,6 +1,6 @@
 # 元域智脑各端接入指南
 
-版本：1.0｜核对日期：2026-09-08｜范围：业务智脑、元域智营、管理 Web、移动 H5、Windows Electron 及国内协同平台入口。
+版本：1.0｜核对日期：2026-09-08｜范围：业务智脑、元域智语、元域智营、移动 H5、Windows Electron 及国内协同平台入口。
 
 本文依据当前代码说明如何准备、部署、接入身份及验收。构建成功、页面能打开、身份验证成功、业务验收通过是四个不同阶段，不能相互替代。本文不包含海外协同平台。
 
@@ -12,9 +12,9 @@
 | 智脑 Windows 桌面端 | 需要受控本机文件操作的业务人员 | `apps/desktop` 的 Electron 宿主 | 有打包基线；签名、分发与企业登录仍需验收 |
 | 智脑移动 H5 | 手机浏览器中的业务工作台 | `apps/mobile` | H5 可构建；不是已验收的 Android/iOS/鸿蒙原生 App |
 | 钉钉手机/PC 工作台 | 从企业钉钉使用智脑 | `apps/dingtalk` | 专用 H5 及免登已有代码，待企业真机联调 |
-| 元域智营 Web | 建模、人工校对、发布、巡检 | `apps/semantic-operations-console` | 独立运营入口，使用运营 IAM 权限 |
-| 元域智营 Windows 桌面端 | 桌面建模及受控报告导出 | 同上，Electron 宿主 | 独立安装包；不等于业务端全部本机执行能力 |
-| 管理 Web | 平台管理、权限配置、治理看板 | `frontend` | 已有 Bearer 接口桥接；没有完整多身份源登录选择界面 |
+| 元域智语 Web | 建模、人工校对、发布、巡检 | `apps/semantic-operations-console` | 独立运营入口，使用运营 IAM 权限 |
+| 元域智语 Windows 桌面端 | 桌面建模及受控报告导出 | 同上，Electron 宿主 | 独立安装包；不等于业务端全部本机执行能力 |
+| 元域智营 | 平台管理、权限配置、治理看板 | `frontend` | 已有 Bearer 接口桥接；没有完整多身份源登录选择界面 |
 
 企业微信、飞书、WeLink、WPS 365 的入口方案及材料详见 [国内平台接入指南](DOMESTIC_PLATFORM_ACCESS_GUIDE.md)。这些平台的专用适配器尚未开发，不能直接把钉钉构建包改名使用。
 
@@ -41,7 +41,7 @@
 
 | 材料 | 需要确认的内容 |
 | --- | --- |
-| 入口 | 业务智脑/元域智营/管理端；Web/H5/Electron；目标终端版本 |
+| 入口 | 业务智脑/元域智语/管理端；Web/H5/Electron；目标终端版本 |
 | 应用 | 国内平台名称、企业 ID、应用 ID、环境及测试可见范围 |
 | 地址 | 应用首页、PC 首页（平台支持时）、准确回调地址、API Origin |
 | 身份 | 身份源 ID、外部用户 ID 的类型、绑定的平台账号、平台租户 |
@@ -59,10 +59,10 @@
 | 智脑 Web | `npm run build:desktop` | `apps/desktop/dist` |
 | 移动 H5 | `npm run build:mobile` | `apps/mobile/dist` |
 | 钉钉 H5 | `npm run build:dingtalk` | `apps/dingtalk/dist` |
-| 元域智营 Web | `npm run build:semantic-ops` | `apps/semantic-operations-console/dist` |
-| 管理 Web | `npm run build -w frontend` | `frontend/dist` |
+| 元域智语 Web | `npm run build:semantic-ops` | `apps/semantic-operations-console/dist` |
+| 元域智营 | `npm run build -w frontend` | `frontend/dist` |
 | 智脑 Windows 安装包 | `npm run dist:electron` | `apps/desktop/release/v0.3.0` |
-| 元域智营 Windows 安装包 | `npm run dist:semantic-ops-electron` | `apps/semantic-operations-console/release/v0.2.0` |
+| 元域智语 Windows 安装包 | `npm run dist:semantic-ops-electron` | `apps/semantic-operations-console/release/v0.2.0` |
 
 当前 Electron 发布配置为 Windows x64；不要据此声明已经具备 macOS、Linux 或国产桌面系统的安装验收。移动工程中的 Tauri 依赖也不代表已有通过签名分发的原生应用。
 
@@ -113,7 +113,7 @@ globalThis.__ZHINAO_RUNTIME_CONFIG__ = {
 
 移动工程包版本当前为 0.1.0，但页面上报客户端协议版本为 0.3.0。接入时以协议门禁为准，不要把 package 版本误用为请求版本。
 
-### 4.4 元域智营 Web 与 Windows 桌面端
+### 4.4 元域智语 Web 与 Windows 桌面端
 
 1. 独立部署运营站点或安装包，不复用业务用户入口的高权限登录态。
 2. 运营 SDK `createSemanticOperationsClient` 支持 `identityProviderId` 和 `accessTokenProvider`；宿主须真正提供登录及有效 Token。
@@ -121,11 +121,11 @@ globalThis.__ZHINAO_RUNTIME_CONFIG__ = {
 4. 逐项验证对象建模、校对、草稿、校验、发布和回滚。登录成功不代表允许发布。
 5. 平台内嵌运营入口属于后续宿主集成。优先在 PC 验收完整建模；手机先按查看、轻量校对范围设计，不能把业务端的手机布局验收套用于建模画布。
 
-### 4.5 管理 Web
+### 4.5 元域智营
 
 1. 部署 `frontend/dist`。API 地址可以由同源 `/api`、运行时 `apiBaseUrl` 或构建变量 `VITE_API_BASE_URL` 指定。
 2. 登录宿主可通过运行时 `getAccessToken` 或 `setAdminAccessTokenProvider` 提供令牌。
-3. 当前管理 Web 不会自动读取 `identityProviderId` 并发送选择头。可先对接服务端的单一 `defaultBearerProviderId`；若要在管理端切换多个身份源，仍需补充请求头和登录界面适配。
+3. 当前元域智营不会自动读取 `identityProviderId` 并发送选择头。可先对接服务端的单一 `defaultBearerProviderId`；若要在管理端切换多个身份源，仍需补充请求头和登录界面适配。
 4. 不使用开发角色选择器作为生产授权来源。托管身份模式会拒绝 Demo 角色回退。
 
 ## 5. 联通检查顺序
@@ -137,7 +137,7 @@ globalThis.__ZHINAO_RUNTIME_CONFIG__ = {
 
 `GET /api/auth/providers` 只证明服务端读到了适配配置，不证明企业平台已允许登录。`/api/health` 返回成功也不代表所有真实业务系统已接入。
 
-受保护请求需保留 `x-client-platform`、`x-client-version`、`x-client-device-id`。业务 Web 使用 `desktop`，管理 Web 使用 `web`；其他协议标识见 [兼容矩阵](../development/CLIENT_COMPATIBILITY_MATRIX.md)。不要为尚未开发的平台随意发送新标识，否则生产版本门禁可能拒绝。
+受保护请求需保留 `x-client-platform`、`x-client-version`、`x-client-device-id`。业务 Web 使用 `desktop`，元域智营使用 `web`；其他协议标识见 [兼容矩阵](../development/CLIENT_COMPATIBILITY_MATRIX.md)。不要为尚未开发的平台随意发送新标识，否则生产版本门禁可能拒绝。
 
 ## 6. 各端验收清单
 

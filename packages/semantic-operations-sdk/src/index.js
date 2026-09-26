@@ -45,7 +45,7 @@ export function createSemanticOperationsClient({ baseUrl, platform = 'semantic-w
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const error = new Error(payload.message || payload.error || '元域智营请求失败。');
+      const error = new Error(payload.message || payload.error || '元域智语请求失败。');
       error.status = response.status;
       error.code = payload.code || null;
       error.payload = payload;
@@ -115,6 +115,7 @@ export function createSemanticOperationsClient({ baseUrl, platform = 'semantic-w
     systemAccessConnectionTargets: () => request('/semantic-operations/systems/connection-targets'),
     systemAccessMappingDrafts: () => request('/semantic-operations/systems/mapping-drafts'),
     probeSystemConnection: (code, payload) => post(`/semantic-operations/systems/${encodeURIComponent(code)}/probe`, payload),
+    transitionSystemConnection: (code, payload) => post(`/semantic-operations/systems/${encodeURIComponent(code)}/lifecycle`, payload),
     createSystemMappingDraft: (code) => post(`/semantic-operations/systems/${encodeURIComponent(code)}/mapping-drafts`),
     validateSystemMappingDraft: (code, draftId) => post(`/semantic-operations/systems/${encodeURIComponent(code)}/mapping-drafts/${encodeURIComponent(draftId)}/validate`),
     publishSystemMappingDraft: (code, draftId) => post(`/semantic-operations/systems/${encodeURIComponent(code)}/mapping-drafts/${encodeURIComponent(draftId)}/publish`),

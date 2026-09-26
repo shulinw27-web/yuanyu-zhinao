@@ -3,14 +3,14 @@
 ## 当前结构
 
 ```text
-frontend/                 管理 Web，Vue/Vite
+frontend/                 元域智营，Vue/Vite
 apps/desktop/             桌面 Web + Electron 容器
 apps/mobile/              移动 Web/Tauri 容器
 packages/agent-sdk/       Agent API 客户端
 packages/agent-workbench/ 三端共享交互
 ```
 
-管理 Web 的页面查询注册位于 `page-data-registry.js`；`app-actions.js` 只组合 `actions/risk-procurement-actions.js`、`agent-actions.js`、`governance-actions.js` 和 `administration-actions.js`。`App.vue` 已从 667 行降到约 400 行，只保留壳层、授权生命周期、页面协调和状态绑定。Agent 三端继续共享 Workbench。
+元域智营的页面查询注册位于 `page-data-registry.js`；`app-actions.js` 只组合 `actions/risk-procurement-actions.js`、`agent-actions.js`、`governance-actions.js` 和 `administration-actions.js`。`App.vue` 已从 667 行降到约 400 行，只保留壳层、授权生命周期、页面协调和状态绑定。Agent 三端继续共享 Workbench。
 
 ## 状态边界
 
@@ -18,7 +18,7 @@ packages/agent-workbench/ 三端共享交互
 
 ## 企业认证通道
 
-管理 Web 和共享 Agent SDK 使用同一优先级：统一身份会话优先，企业 Bearer 次之，非生产 Demo 角色头最后。企业 Token 只能由宿主的异步 Provider 或短时内存注入，不能落入 localStorage、URL、日志或错误对象。共享 Workbench 能以 `/access/me` 初始化 OIDC 用户及实时 IAM 权限；退出时清空内存态并调用可选的企业注销回调。
+元域智营和共享 Agent SDK 使用同一优先级：统一身份会话优先，企业 Bearer 次之，非生产 Demo 角色头最后。企业 Token 只能由宿主的异步 Provider 或短时内存注入，不能落入 localStorage、URL、日志或错误对象。共享 Workbench 能以 `/access/me` 初始化 OIDC 用户及实时 IAM 权限；退出时清空内存态并调用可选的企业注销回调。
 
 浏览器宿主使用运行时 `getAccessToken` 回调，避免将 Token 作为全局字符串暴露；Electron 只能通过 context-isolated preload allowlist 提供同名能力，主进程应把 refresh token 交给操作系统凭据库或企业认证 SDK 保管。
 
@@ -28,4 +28,4 @@ packages/agent-workbench/ 三端共享交互
 
 ## 测试
 
-共享 Workbench 建立组件测试和三端契约套件；管理 Web 补页面 loader 的取消/权限撤销竞态测试；Electron 增加安全配置静态检查。
+共享 Workbench 建立组件测试和三端契约套件；元域智营补页面 loader 的取消/权限撤销竞态测试；Electron 增加安全配置静态检查。

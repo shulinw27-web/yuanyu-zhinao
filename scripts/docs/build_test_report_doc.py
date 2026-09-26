@@ -347,7 +347,7 @@ def add_masthead(doc: Document) -> None:
     title = doc.add_paragraph(style="Title")
     title.add_run("元域智脑整体测试报告")
     subtitle = doc.add_paragraph(style="Subtitle")
-    subtitle.add_run("业务端、元域智营端、后端服务、移动端及公共包")
+    subtitle.add_run("业务端、元域智语端、后端服务、移动端及公共包")
     metadata = [
         ("测试日期", "2026-09-05（UTC+8）"),
         ("测试环境", "Windows 10 / Node.js v24.14.1 / npm 9.8.1"),

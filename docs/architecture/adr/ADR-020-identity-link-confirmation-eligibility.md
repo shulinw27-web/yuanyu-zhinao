@@ -146,7 +146,7 @@ SEMANTIC_IDENTITY_CONFIRMATION_ENDPOINT_OUT_OF_SCOPE
 
 **二、`ADR-019` 的两处描述就此修正。** ADR-019「实测边界 一」写的「`WMS.InboundReceipt` 那类则是归属被记为材料推断」**与实测不符**：`WMS.InboundReceipt` 的目录 grounding 是 `source_system_declaration`，`sourceBasis` 是 `confirmed`，它属于真不可确认的那 4 条，与「材料推断归属」无关；本 ADR 的对照表逐行为准。ADR-019 同处「5 条……即接近一半的对应当前不可并入草稿」中「5 条」的正确数为 **4 条**（第 5 条 `ERP.Inventory.lot_no` 实测可确认）。两处已在 ADR-019 就地标注。
 
-**三、本增量的验收规模**：`test:identity` **21/21**（改写用例 20 为闭合缺口的用例、重写用例 18、新增用例 21），`test:declaration` 12/12、`test:attribution` 12/12 未受影响；`test:architecture` **10/10（未增跨域边）**；前端 `workspace-layout` **7/7**；`summary.eligible` **7** / `summary.ineligible` **4**（合计仍等于 `links = 11`）；`docs:check` **182 份 Markdown / 1104 个本地链接**；`npm run quality` 端到端 **EXIT=0**（1m48s，全量 35 个 Node 测试块 `fail=0`、0 处 `not ok`）；5 端构建通过（web 2.31s + 元域智营 2.98s、desktop 2.50s、mobile 2.53s、dingtalk 3.88s，分端调用避开沙箱 safe-delete 阈值）。
+**三、本增量的验收规模**：`test:identity` **21/21**（改写用例 20 为闭合缺口的用例、重写用例 18、新增用例 21），`test:declaration` 12/12、`test:attribution` 12/12 未受影响；`test:architecture` **10/10（未增跨域边）**；前端 `workspace-layout` **7/7**；`summary.eligible` **7** / `summary.ineligible` **4**（合计仍等于 `links = 11`）；`docs:check` **182 份 Markdown / 1104 个本地链接**；`npm run quality` 端到端 **EXIT=0**（1m48s，全量 35 个 Node 测试块 `fail=0`、0 处 `not ok`）；5 端构建通过（web 2.31s + 元域智语 2.98s、desktop 2.50s、mobile 2.53s、dingtalk 3.88s，分端调用避开沙箱 safe-delete 阈值）。
 
 ## 退出/复审条件
 

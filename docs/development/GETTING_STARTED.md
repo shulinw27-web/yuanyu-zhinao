@@ -25,12 +25,12 @@ npm ci
 | 入口 | 命令 | 默认地址/端口 |
 | --- | --- | --- |
 | 业务 API | `npm run dev:api` | `http://127.0.0.1:3001` |
-| 管理 Web | `npm run dev:web` | `http://127.0.0.1:5173` |
-| 元域智营 Web | `npm run dev:semantic-ops` | `http://127.0.0.1:5174` |
+| 元域智营 | `npm run dev:web` | `http://127.0.0.1:5173` |
+| 元域智语 Web | `npm run dev:semantic-ops` | `http://127.0.0.1:5174` |
 | 业务智脑 Web | `npm run dev:zhinao:web` | `http://127.0.0.1:5184` |
 | 移动端 Web | `npm run dev -w @healthcare-ai/mobile-app` | `http://127.0.0.1:5175` |
 | 业务智脑 Electron | `npm run dev:zhinao:electron` | 桌面窗口，启动脚本管理渲染器 |
-| 元域智营 Electron | `npm run dev:semantic-ops:electron` | 独立桌面窗口，启动脚本管理渲染器 |
+| 元域智语 Electron | `npm run dev:semantic-ops:electron` | 独立桌面窗口，启动脚本管理渲染器 |
 
 Electron 开发启动与同端 Web 可能争用端口；先确认已有实例。遇到端口占用不要直接终止所有 Node 进程，应核实对应服务后关闭该实例。
 
@@ -41,7 +41,7 @@ Invoke-RestMethod http://127.0.0.1:3001/api/health/live
 Invoke-RestMethod http://127.0.0.1:3001/api/health/ready
 ```
 
-登录和业务操作见 [智脑指南](../guides/ZHINAO_USER_GUIDE_V2.md)、[元域智营指南](../guides/元域智营-Agent操作指南-v1.0.md)。Demo 账号仅限本地演练，不允许用于生产。
+登录和业务操作见 [智脑指南](../guides/ZHINAO_USER_GUIDE_V2.md)、[元域智语指南](../guides/元域智语-Agent操作指南-v1.0.md)。Demo 账号仅限本地演练，不允许用于生产。
 
 ## Semantica 与后台服务
 

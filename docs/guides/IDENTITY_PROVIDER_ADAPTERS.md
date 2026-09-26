@@ -1,6 +1,6 @@
 # 企业身份源与权限适配指南
 
-更新：2026-09-17。适用于智脑、钉钉 H5 和元域智营共用的 API。已补齐IAM工作区租户隔离及认证链路回归，不代表真实企业单点登录或门户自动开通已验收。
+更新：2026-09-17。适用于智脑、钉钉 H5 和元域智语共用的 API。已补齐IAM工作区租户隔离及认证链路回归，不代表真实企业单点登录或门户自动开通已验收。
 
 ## 租户绑定与升级注意事项
 
@@ -78,7 +78,7 @@ $env:DEMO_ALLOW_ROLE_HEADER = 'false'
 
 ## 客户端与服务端接口
 
-智脑和元域智营 SDK 均接受 `identityProviderId`，也可从 `__ZHINAO_RUNTIME_CONFIG__.identityProviderId` 读取。`getAccessToken` 应返回企业宿主取得的访问令牌；浏览器不保存应用密钥。
+智脑和元域智语 SDK 均接受 `identityProviderId`，也可从 `__ZHINAO_RUNTIME_CONFIG__.identityProviderId` 读取。`getAccessToken` 应返回企业宿主取得的访问令牌；浏览器不保存应用密钥。
 
 ```javascript
 const client = createAgentClient({

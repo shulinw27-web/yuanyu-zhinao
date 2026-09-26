@@ -4,7 +4,7 @@
 
 ## 1. 架构目标与边界
 
-元域智脑由业务智脑与元域智营端两类产品入口组成。业务智脑只处理经授权的业务查询、分析和任务；元域智营 Agent 用于发现数据源、构建元对象/元模型、评审 Diff 和发布语义版本。两端共享身份、权限、审计、模型与连接器治理能力，但不共享角色权限，也不允许元域智营能力从业务端直接调用。
+元域智脑由业务智脑与元域智语端两类产品入口组成。业务智脑只处理经授权的业务查询、分析和任务；元域智语 Agent 用于发现数据源、构建元对象/元模型、评审 Diff 和发布语义版本。两端共享身份、权限、审计、模型与连接器治理能力，但不共享角色权限，也不允许元域智语能力从业务端直接调用。
 
 当前仓库可完成本地 Mock 闭环及生产适配开发，不等于已接入企业生产环境。企业 IdP、真实 OA/ERP/MES/WMS/LIMS/QMS/OMS、KMS/HSM、高可用 PostgreSQL、Redis、Broker、SIEM、内容安全平台、证书与签名体系仍需现场物料和联合验收。
 
@@ -16,8 +16,8 @@ flowchart LR
     BW[业务智脑 Web]
     BD[业务智脑 Desktop]
     BM[业务智脑 Mobile]
-    SW[元域智营 Web]
-    SD[元域智营 Desktop]
+    SW[元域智语 Web]
+    SD[元域智语 Desktop]
   end
 
   subgraph Edge[接入与安全边界]
@@ -32,7 +32,7 @@ flowchart LR
     ORCH[任务编排与 Worker]
     MEM[会话与长期记忆治理]
     SEM[语义上下文服务]
-    SOP[元域智营 Agent]
+    SOP[元域智语 Agent]
   end
 
   subgraph Govern[执行与治理]
@@ -112,8 +112,8 @@ sequenceDiagram
 | Node API | 3001 | IdP、PostgreSQL、Key Center | 强依赖可用且迁移版本受支持 |
 | Key Center | 3010 | Vault/云 KMS/HSM、mTLS | Provider 可用且工作负载身份有效 |
 | Semantic Context | 3011 | 持久化图/索引、IAM | 租户隔离与权限裁剪有效 |
-| 管理 Web | 5173（开发） | 同源 API/企业 SSO | 静态资源与 API 兼容 |
-| 元域智营 Web | 5174（开发） | Semantic Context/API | 版本、权限与发布门禁可用 |
+| 元域智营 | 5173（开发） | 同源 API/企业 SSO | 静态资源与 API 兼容 |
+| 元域智语 Web | 5174（开发） | Semantic Context/API | 版本、权限与发布门禁可用 |
 | Mobile Web | 5175（开发） | API、MDM/MAM | 设备合规与版本受支持 |
 | Desktop Web/Electron | 5184（开发） | API、代码签名/分发 | 可信导航、版本和签名有效 |
 | PostgreSQL | 5432 | TLS、备份、监控 | migration checksum、RLS、主从状态正常 |
@@ -136,7 +136,7 @@ sequenceDiagram
 2. 部署 PostgreSQL、Redis、Broker、WORM 审计存储等有状态依赖。
 3. 部署 Key Center、企业身份适配和 Semantic Context。
 4. 应用数据库迁移，再部署 API、领域事件/运行时/编排/审计 Worker。
-5. 部署管理 Web、元域智营端和业务智脑各客户端。
+5. 部署元域智营、元域智语端和业务智脑各客户端。
 6. 依次验证 liveness、readiness、身份/撤权、只读连接器、确认/审批、外部回执、SIEM 和证据链。
 7. 首个生产写流程必须双人观察并与源系统对账。
 

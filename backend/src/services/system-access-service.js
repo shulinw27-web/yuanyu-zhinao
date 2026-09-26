@@ -20,9 +20,10 @@
 //     不伪装成租户自有配置。
 import { systemConfigurations } from '../data/seed.js';
 import { mockOnboardingScenarios } from '../data/mock-onboarding-catalog.js';
-import { SYSTEM_CONNECTION_TRANSITIONS } from '../data/system-catalog.js';
+import { SYSTEM_CONNECTION_STATES, SYSTEM_CONNECTION_TRANSITIONS } from '../data/system-catalog.js';
 import {
-  getSystemByCode, getConnectorSurfaceSystemCodes, getTenantSystemConnections, getTenantSystemConnection, getDemoConnectedSystems
+  getSystemByCode, getConnectorSurfaceSystemCodes, getTenantSystemConnections, getTenantSystemConnection, getDemoConnectedSystems,
+  transitionSystemConnection
 } from './system-registry-service.js';
 import {
   readMockOnboardingSource, readMockScenarioDictionary, readMockScenarioSystems, mockOnboardingSourceFaults
@@ -177,6 +178,7 @@ export async function getSystemAccessOverview({ roleId } = {}) {
     summary: {
       total: systems.length,
       connected: systems.filter((item) => item.lifecycleState === 'connected').length,
+      suspended: systems.filter((item) => item.lifecycleState === 'suspended').length,
       pending: systems.filter((item) => item.lifecycleState === 'registered' || item.lifecycleState === 'authorized').length,
       notRegistered: systems.filter((item) => item.lifecycleState === 'draft').length,
       authorized: systems.filter((item) => item.authorized).length,
@@ -277,6 +279,59 @@ export async function getSystemAccessDetail({ code, roleId } = {}) {
     lastProbe: view.probe.last,
     faults: [...mockOnboardingSourceFaults]
   };
+}
+
+function lifecycleView(code) {
+  const connection = getTenantSystemConnection(code);
+  return {
+    state: connection?.lifecycleState || null,
+    label: LIFECYCLE_LABELS[connection?.lifecycleState] || connection?.lifecycleState || null,
+    reason: connection?.reason || null,
+    updatedAt: connection?.updatedAt || null,
+    updatedBy: connection?.updatedBy || null,
+    transitions: [...(SYSTEM_CONNECTION_TRANSITIONS[connection?.lifecycleState] || [])]
+  };
+}
+
+/**
+ * 接入生命周期操作面（2026-09-26 新增）：把注册表的状态机暴露为可执行的运营动作。
+ *
+ * 设计约束：
+ *   * 状态机本身仍由 system-registry-service 定义（单一事实源），本函数只做
+ *     「视图侧的门禁 + 审计字段组装」；不新增任何状态、不改任何跃迁规则。
+ *   * 「接通（→connected）」必须有前置：该租户对同一系统的最近一次连通性探测
+ *     结果为 verified。没有验证过的接通等于跳过验收门禁——这正是接入流程
+ *     此前「不可执行、状态只能看种子值」的根因补齐。
+ *   * 操作主体只取受信上下文（identityScope），与探测结果同租户记录。
+ */
+export function transitionTenantSystemConnection({ code, to, reason, identityScope } = {}) {
+  const definition = getSystemByCode(code);
+  if (!definition) return { error: `未登记的系统码：${code}`, code: 'SYSTEM_NOT_REGISTERED', status: 404 };
+  if (typeof to !== 'string' || !SYSTEM_CONNECTION_STATES.includes(to)) {
+    return { error: `未知的接入状态：${to}`, code: 'SYSTEM_STATE_UNKNOWN', status: 400 };
+  }
+  const trimmedReason = String(reason || '').trim();
+  if (!trimmedReason) {
+    return { error: '接入状态推进必须填写操作理由（不超过 200 字），供审计追溯。', code: 'SYSTEM_TRANSITION_REASON_REQUIRED', status: 400 };
+  }
+  if (to === 'connected') {
+    const last = readProbes()[definition.code];
+    if (last?.status !== 'verified') {
+      return {
+        error: `系统 ${definition.code} 在当前租户尚无一次通过验证的连通性探测，拒绝接通。请先执行连通性测试并取得 verified 结果。`,
+        code: 'SYSTEM_CONNECT_PROBE_REQUIRED',
+        status: 409
+      };
+    }
+  }
+  const actor = String(identityScope?.subjectId || identityScope?.tenantId || '').trim();
+  if (!actor) return { error: '缺少操作主体，拒绝推进接入状态。', code: 'SYSTEM_ACTOR_REQUIRED', status: 400 };
+  const outcome = transitionSystemConnection({ code: definition.code, to, actor, reason: trimmedReason });
+  if (outcome.error) {
+    const status = outcome.code === 'SYSTEM_TRANSITION_REJECTED' ? 409 : 400;
+    return { ...outcome, status };
+  }
+  return { code: definition.code, from: outcome.from, to, lifecycle: lifecycleView(definition.code) };
 }
 
 /**

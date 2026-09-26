@@ -70,7 +70,7 @@ function createWindow() {
     minHeight: 640,
     show: false,
     backgroundColor: '#07131f',
-    title: '元域智营 Agent',
+    title: '元域智语 Agent',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),

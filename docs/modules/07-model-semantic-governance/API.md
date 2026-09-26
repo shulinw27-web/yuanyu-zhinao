@@ -63,7 +63,7 @@
 | GET/POST | `/api/world-model/drafts` | 草稿；写需 `world.draft.create` |
 | POST | `/api/world-model/drafts/:id/validate|publish` | 对应按钮权限 |
 | GET | `/api/semantic-context` | 语义概览 |
-| GET | `/api/semantic-operations/tasks` | 当前身份的元域智营任务窗口与审计时间线 |
+| GET | `/api/semantic-operations/tasks` | 当前身份的元域智语任务窗口与审计时间线 |
 | GET | `/api/semantic-operations/sources?query=` | 按角色和自然语言范围返回来源目录、连接就绪度、已有映射和接入物料；不查询业务明细 |
 | POST | `/api/semantic-operations/tasks` | 从自然语言或 PDF/图片/JSON/YAML/CSV 受控材料生成任务；写类意图只形成待确认计划 |
 | PATCH | `/api/semantic-operations/tasks/:id/proposal` | 修订待确认提案的对象、字段、主键和关系；需 `meta_model.draft.save`、当前 `revision` 与任务所属身份 |
@@ -76,7 +76,7 @@
 
 写请求应携带 `expectedVersion`；目标发布接口支持幂等键、变更说明和审批引用。错误码：`MODEL_VALIDATION_FAILED`、`MODEL_VERSION_CONFLICT`、`SOURCE_NOT_ALLOWED`、`SEMANTIC_EVIDENCE_FORBIDDEN`。
 
-元域智营任务执行接口不接受客户端命令参数。命令、权限和目标建议均来自服务器端已持久化任务，避免确认请求被篡改为另一项操作。
+元域智语任务执行接口不接受客户端命令参数。命令、权限和目标建议均来自服务器端已持久化任务，避免确认请求被篡改为另一项操作。
 
 任务中的 `planning` 是模型建议，`authoritativeIntent` 才是服务器权威意图；`sourceDiscovery` 记录来源状态、阻断项、准备提醒和所需接入物料。客户端不能使用 `suggestedIntent` 构造执行请求。
 

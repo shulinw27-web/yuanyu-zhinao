@@ -213,7 +213,7 @@ apps/semantic-operations-console/test/read-plan-import.test.cjs → ../../../exa
 **比审计初版建议多做的部分（以及为什么）**：
 
 1. **多搬 3 个文件**：审计的「11 个文件」只覆盖「被跨包引用的 5 个组件及其闭包」。实际实施时按**包边界**而非「谁引用谁」圈定范围——`agent-workbench` 还引用了 `MemoryReviewPanel` 与 `AnomalyAssistantPanel`（基线第 6、8 条），且 `CoreMetaObjectLayer` 与元模型面板同属一个关注点；只搬闭包会留下半套组件，下次仍要再动一次。
-2. **样式一并上提**：`main.css`（企业设计基线）被元域智营端用于页面骨架，`meta-model.css` / `core-meta-objects.css` 是元模型专属样式。迁移后的组件仍依赖这些全局类，留在 `frontend` 会立刻产生新的穿透。
+2. **样式一并上提**：`main.css`（企业设计基线）被元域智语端用于页面骨架，`meta-model.css` / `core-meta-objects.css` 是元模型专属样式。迁移后的组件仍依赖这些全局类，留在 `frontend` 会立刻产生新的穿透。
 3. **显式具名 `exports` 而非通配**：只声明 9 个入口，刻意不开 `"./*": "./src/*"`。理由与代价见 ADR-010。
 
 **扫描盲区修正（自我修正）**：棘轮初版只收 `.js/.mjs/.ts/.vue`，**漏掉 `.cjs` 与 `.css`**。扩大扫描面后实测发现另有 3 处真实穿透：

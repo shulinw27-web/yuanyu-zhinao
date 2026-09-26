@@ -92,4 +92,4 @@ Accepted
 - [系统接入 → 选系统建模 → 模型治理整体重构方案](../SYSTEM_ONBOARDING_RESTRUCTURE_PLAN.md)（本 ADR 对应其阶段 0）；
 - [模块化与组件化审计](../MODULARIZATION_AUDIT.md)（跨包棘轮与包边界）；
 - ADR-004（运行时 JSON 持久化；本 ADR 的租户接入状态沿用同一存储）；
-- ADR-006（双 Agent 独立入口；元域智营端是系统接入的唯一写入端）。
+- ADR-006（双 Agent 独立入口；元域智语端是系统接入的唯一写入端）。

@@ -14,7 +14,7 @@
 
 业务源码、测试、依赖锁、部署模板与系统样例保留。`backend/.data/`、`.runtime/`、Python 虚拟环境、`node_modules/`、客户端构建/发布目录均未作为文档垃圾清理；这些目录可能关系到正在运行的实例。`output/` 保留用于自动生成的 SBOM 和许可证等检查报告，不再保存正式说明文档。
 
-平台介绍 Markdown 与 Word 同步修订了通用企业定位、独立元域智营端、工具边界、过期测试数字和目录路径；Word 保留原有样式，修复冗余分页并完成 15 页渲染检查。其余 Word/PPT 作为交付快照迁移，没有重新生成。本次未更改正在运行的服务、模型、数据库或真实连接器配置。
+平台介绍 Markdown 与 Word 同步修订了通用企业定位、独立元域智语端、工具边界、过期测试数字和目录路径；Word 保留原有样式，修复冗余分页并完成 15 页渲染检查。其余 Word/PPT 作为交付快照迁移，没有重新生成。本次未更改正在运行的服务、模型、数据库或真实连接器配置。
 
 ## 恢复方式
 
@@ -38,7 +38,7 @@
 | --- | --- |
 | 整理前 `npm run test:all` | 通过 |
 | 整理后 `npm run quality` | lint、类型检查及完整 Node 回归通过 |
-| `npm run build` | 管理 Web 与元域智营端构建通过 |
+| `npm run build` | 元域智营与元域智语端构建通过 |
 | `npm run build:desktop`、`npm run build:mobile` | 两端构建通过；未重打安装包 |
 | `npm run migrate:verify` | 4 个迁移版本校验通过；未执行数据库迁移 |
 | `npm run docs:check` | 108 份 Markdown、221 个本地链接通过 |

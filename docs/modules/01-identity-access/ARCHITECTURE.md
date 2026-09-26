@@ -10,7 +10,7 @@
 
 ## 企业 OIDC Bearer
 
-`enterprise-oidc-service.js` 使用 IdP JWKS 校验签名，并强制验证 issuer、audience、`sub/iat/exp`、算法白名单和租户 claim。Token 中的 role/group claim 不参与业务授权；验证后只使用 email、preferred_username 或 upn 映射本地 IAM 人员，再实时计算人员状态、角色策略和组织数据范围。身份会话优先于 Bearer，Bearer 优先于仅开发可用的 Demo Header。生产必须配置 `OIDC_ISSUER`、`OIDC_AUDIENCE`、`OIDC_JWKS_URI` 和 `OIDC_TENANT_ID`。管理 Web 与 Agent SDK 都支持由宿主注入异步 Access Token Provider；令牌按请求读取、仅放入 `Authorization`，不会写入 localStorage。移动/Web 宿主通过 `__ZHINAO_RUNTIME_CONFIG__.getAccessToken`，Electron 通过隔离 preload 暴露的 `zhinaoDesktop.auth.getAccessToken` 接入企业登录组件。
+`enterprise-oidc-service.js` 使用 IdP JWKS 校验签名，并强制验证 issuer、audience、`sub/iat/exp`、算法白名单和租户 claim。Token 中的 role/group claim 不参与业务授权；验证后只使用 email、preferred_username 或 upn 映射本地 IAM 人员，再实时计算人员状态、角色策略和组织数据范围。身份会话优先于 Bearer，Bearer 优先于仅开发可用的 Demo Header。生产必须配置 `OIDC_ISSUER`、`OIDC_AUDIENCE`、`OIDC_JWKS_URI` 和 `OIDC_TENANT_ID`。元域智营与 Agent SDK 都支持由宿主注入异步 Access Token Provider；令牌按请求读取、仅放入 `Authorization`，不会写入 localStorage。移动/Web 宿主通过 `__ZHINAO_RUNTIME_CONFIG__.getAccessToken`，Electron 通过隔离 preload 暴露的 `zhinaoDesktop.auth.getAccessToken` 接入企业登录组件。
 
 当前完成的是资源服务端 Bearer 验证和三端令牌传输边界；Authorization Code + PKCE 跳转、回调处理、静默续期、MFA/step-up 和 IdP 全局注销仍需按企业 IdP SDK 实施。客户端不得自行解析 JWT 作为授权依据，也不得把 Token 中的角色或组直接映射为平台权限。
 
@@ -53,7 +53,7 @@ modules/identity-access/
 - 业务模块接收完整 identity context，不接收可伪造的 role 字符串作为唯一依据。
 - 所有 `organizationIds` 都与同租户组织树验证；数据查询统一注入允许组织集。
 - 会话只保存身份快照/版本，不永久缓存撤销前权限。
-- 管理 Web 的权限矩阵不是策略引擎，策略真相位于服务端。
+- 元域智营的权限矩阵不是策略引擎，策略真相位于服务端。
 
 ## 演进
 

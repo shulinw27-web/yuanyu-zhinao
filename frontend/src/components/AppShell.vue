@@ -42,7 +42,7 @@ watch([() => props.page, () => props.role, visibleNavItems], ([currentPage]) => 
       <div class="sidebar-foot"><div><i/> 策略中心在线</div><span>身份、设备、数据域与工作流联合判定</span><em>KMS · 请求级短时凭据</em></div>
     </aside>
     <main class="main-content">
-      <header class="topbar"><div><span class="crumb">CONTROL PLANE <i/> {{ currentPageLabel }}</span><h1>保健品 AI 基座运营平台</h1></div><div class="top-actions"><div class="live"><i /> 7 × 24 事件监控在线</div><div class="security-chip"><span>POLICY</span><b>ENFORCED</b></div><label class="role-picker">当前视角<select :value="role" @change="emit('update:role', $event.target.value)"><option v-for="item in roles" :key="item.id" :value="item.id">{{ item.name }} · {{ item.team }}</option></select></label></div></header>
+      <header class="topbar"><div><span class="crumb">CONTROL PLANE <i/> {{ currentPageLabel }}</span><h1>元域智营管理台</h1></div><div class="top-actions"><div class="live"><i /> 7 × 24 事件监控在线</div><div class="security-chip"><span>POLICY</span><b>ENFORCED</b></div><label class="role-picker">当前视角<select :value="role" @change="emit('update:role', $event.target.value)"><option v-for="item in roles" :key="item.id" :value="item.id">{{ item.name }} · {{ item.team }}</option></select></label></div></header>
       <slot />
     </main>
   </div>

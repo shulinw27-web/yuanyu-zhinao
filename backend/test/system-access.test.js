@@ -17,6 +17,7 @@ import {
   getSystemAccessOverview,
   getSystemAccessDetail,
   probeSystemConnection,
+  transitionTenantSystemConnection,
   getSystemProbeResults
 } from '../src/services/system-access-service.js';
 
@@ -271,4 +272,93 @@ test('路由：接入读取沿用页面权限，接入写入仍需 meta_model.dr
 
   const roleMismatch = await callRoute({ method: 'GET', path: '/api/semantic-operations/systems/ERP', role: 'executive', actionRole: null });
   assert.equal(roleMismatch.status, 200, '读取不应受写入闸门影响');
+});
+
+// ── 6. 接入生命周期操作面（2026-09-26 新增：ADR-023） ───────────────────────
+// 此前状态机早已在注册表定义，却从未暴露为可执行动作——界面上的接入状态只能看
+// 种子值，没有「新增接入」也没有「已接通系统的管理」。这一节锁死操作面的行为。
+
+test('生命周期：登记→授权→（无 verified 探测拒绝接通）→探测→接通→停用→重新接通全链路可执行', async () => {
+  const tenant = 'lifecycle-tenant';
+  const call = (args) => callRoute({ tenant, ...args });
+
+  // 种子起点：OA 是 pending_onboarding → 生命周期 registered
+  const before = await call({ method: 'GET', path: '/api/semantic-operations/systems/OA' });
+  assert.equal(before.value.lifecycle.state, 'registered');
+  assert.deepEqual(before.value.lifecycle.transitions, ['authorized', 'draft']);
+
+  // 登记流程的服务端动作：确认数据域授权（registered → authorized）
+  const authorized = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', body: { to: 'authorized', reason: '已完成连接信息登记与数据域授权确认' } });
+  assert.equal(authorized.status, 200);
+  assert.equal(authorized.value.from, 'registered');
+  assert.equal(authorized.value.to, 'authorized');
+  assert.equal(authorized.value.lifecycle.label, '已授权');
+  assert.equal(authorized.value.lifecycle.updatedBy, 'same-operator');
+
+  // 接通门禁：该租户尚无 verified 探测，authorized → connected 必须被拒绝
+  const blocked = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', body: { to: 'connected', reason: '想直接接通' } });
+  assert.equal(blocked.status, 409);
+  assert.equal(blocked.value.code, 'SYSTEM_CONNECT_PROBE_REQUIRED');
+
+  // 通过连通性测试后，接通才被放行
+  const probe = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/probe', body: { faultMode: 'none' } });
+  assert.equal(probe.value.status, 'verified');
+  const connected = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', body: { to: 'connected', reason: '连通性测试通过，正式接通' } });
+  assert.equal(connected.status, 200);
+  assert.equal(connected.value.lifecycle.state, 'connected');
+
+  // 已接通系统的管理：停用（保留登记与授权）→ 重新接通
+  const suspended = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', body: { to: 'suspended', reason: '系统侧维护，暂停接入' } });
+  assert.equal(suspended.status, 200);
+  const overview = await call({ method: 'GET', path: '/api/semantic-operations/systems' });
+  assert.ok(overview.value.summary.suspended >= 1, '总览必须暴露停用计数');
+  const resumed = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', body: { to: 'connected', reason: '维护完成，恢复接入' } });
+  assert.equal(resumed.status, 200);
+  assert.equal(resumed.value.lifecycle.state, 'connected');
+
+  // 非法跃迁与未知状态：connected → registered 不在状态机里，必须显式拒绝
+  const illegal = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', body: { to: 'registered', reason: '非法跃迁' } });
+  assert.equal(illegal.status, 409);
+  assert.equal(illegal.value.code, 'SYSTEM_TRANSITION_REJECTED');
+});
+
+test('生命周期：理由必填、未知状态、未知系统、越权与租户隔离各自显式失败', async () => {
+  const tenant = 'lifecycle-guards';
+  const call = (args) => callRoute({ tenant, ...args });
+
+  const noReason = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', body: { to: 'authorized' } });
+  assert.equal(noReason.status, 400);
+  assert.equal(noReason.value.code, 'SYSTEM_TRANSITION_REASON_REQUIRED');
+
+  const unknownState = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', body: { to: 'enabled', reason: '未知状态' } });
+  assert.equal(unknownState.status, 400);
+  assert.equal(unknownState.value.code, 'SYSTEM_STATE_UNKNOWN');
+
+  const unknownSystem = await call({ method: 'POST', path: '/api/semantic-operations/systems/NOPE/lifecycle', body: { to: 'registered', reason: '未知系统' } });
+  assert.equal(unknownSystem.status, 404);
+  assert.equal(unknownSystem.value.code, 'SYSTEM_NOT_REGISTERED');
+
+  const denied = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', actionRole: null, body: { to: 'authorized', reason: '没有写入权限' } });
+  assert.equal(denied.status, 403);
+  assert.equal(denied.value.denied, 'meta_model.draft.save');
+
+  // 租户隔离：guards 租户推进 OA 不影响 demo-enterprise 的种子状态
+  await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', body: { to: 'authorized', reason: 'guards 租户内推进' } });
+  const other = await within('demo-enterprise', () => getTenantSystemConnection('OA'));
+  assert.equal(other.lifecycleState, 'registered', '其他租户不得继承本租户的接入生命周期推进');
+});
+
+test('生命周期：服务层直调与路由层行为一致（含接通门禁与审计字段）', async () => {
+  const result = await within('lifecycle-direct', () => transitionTenantSystemConnection({
+    code: 'OA', to: 'authorized', reason: '服务层直调', identityScope: identity('lifecycle-direct')
+  }));
+  assert.equal(result.to, 'authorized');
+  assert.equal(result.lifecycle.updatedBy, 'same-operator');
+  assert.match(result.lifecycle.reason, /服务层直调/);
+
+  const blocked = await within('lifecycle-direct', () => transitionTenantSystemConnection({
+    code: 'OA', to: 'connected', reason: '未探测就接通', identityScope: identity('lifecycle-direct')
+  }));
+  assert.equal(blocked.status, 409);
+  assert.equal(blocked.code, 'SYSTEM_CONNECT_PROBE_REQUIRED');
 });

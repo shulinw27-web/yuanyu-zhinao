@@ -8,7 +8,7 @@ Accepted
 
 ### 当时的约束
 
-- 项目是**多端共享 UI**：智脑工作台（desktop / mobile / dingtalk 三端共用 `packages/agent-workbench`）、元域智营端（`apps/semantic-operations-console`，Web + Electron 同源）、主 Web（`frontend`）。
+- 项目是**多端共享 UI**：智脑工作台（desktop / mobile / dingtalk 三端共用 `packages/agent-workbench`）、元域智语端（`apps/semantic-operations-console`，Web + Electron 同源）、主 Web（`frontend`）。
 - 团队规模小、阶段早：`frontend` 是 `private: true` 的**应用**，不是库；`packages/*` 才是可复用单元。
 - 已落地跨包边界棘轮（2026-09-24），规则是**只降不升**：`packages/*`、`apps/*` 不得用相对路径穿透兄弟包的私有源码。
 
@@ -33,7 +33,7 @@ apps/semantic-operations-console/src/main.js:4     → ../../../frontend/src/sty
 
 ### 为什么现在必须做（结构性前置）
 
-「系统接入 → 选系统建模 → 模型治理」重构（[方案](../SYSTEM_ONBOARDING_RESTRUCTURE_PLAN.md)）的**阶段 2（接入模块迁移到元域智营端）与阶段 6（模型/版本管理收敛）都要搬文件**。棘轮只降不升，**先迁文件后建包，`architecture-boundaries.test.js` 会当场失败**；同时「选系统建模」要复用元模型面板，双端共用是既成事实。所以这一步是纯结构性前置，不是可选项。
+「系统接入 → 选系统建模 → 模型治理」重构（[方案](../SYSTEM_ONBOARDING_RESTRUCTURE_PLAN.md)）的**阶段 2（接入模块迁移到元域智语端）与阶段 6（模型/版本管理收敛）都要搬文件**。棘轮只降不升，**先迁文件后建包，`architecture-boundaries.test.js` 会当场失败**；同时「选系统建模」要复用元模型面板，双端共用是既成事实。所以这一步是纯结构性前置，不是可选项。
 
 ### 一个此前未被发现的扫描盲区
 
@@ -93,7 +93,7 @@ const filename = resolve(metaModelDir, 'OntologyCaseReplay.vue');
 
 ### 5. 样式随组件走，而不是留在 `frontend`
 
-`main.css`（21KB 企业设计基线）、`meta-model.css`、`core-meta-objects.css` 一并迁入包内 `src/styles/`，由 `frontend` 与元域智营端各自显式 import。
+`main.css`（21KB 企业设计基线）、`meta-model.css`、`core-meta-objects.css` 一并迁入包内 `src/styles/`，由 `frontend` 与元域智语端各自显式 import。
 
 理由：迁移后的组件仍然依赖这些全局类（`.panel` / `.section-header` / `.eyebrow` / `.outline-button` 等），把它们留在 `frontend` 会立刻产生新的穿透。**共享组件与它依赖的设计基线必须同属一个可共享单元**——这也是方案文档在阶段 1 范围里列出「相关样式」的原因。
 
@@ -113,7 +113,7 @@ const filename = resolve(metaModelDir, 'OntologyCaseReplay.vue');
 - 依赖关系从「物理穿透」变为「声明式依赖」，可被工具校验；`frontend` 不再需要被当作库引用。
 - 棘轮基线归零，后续新增任何跨包穿透立即失败；扫描面扩大后不再有 `.cjs`/`.css` 盲区。
 - 阶段 2/6 的搬迁前置条件已消除，可以只搬业务代码而不必同时处理共享层。
-- 双端（智脑三端 + 元域智营端 + 主 Web）共用同一份组件与样式，视觉一致性由构造保证，不再依赖「改一处记得改另一处」。
+- 双端（智脑三端 + 元域智语端 + 主 Web）共用同一份组件与样式，视觉一致性由构造保证，不再依赖「改一处记得改另一处」。
 
 ### 变困难了
 

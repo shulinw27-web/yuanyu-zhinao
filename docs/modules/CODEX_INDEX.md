@@ -27,7 +27,7 @@
 | 元模型、世界模型、语义、企业知识 | [07](07-model-semantic-governance/CODEX_CONTEXT.md) |
 | OA/MES/QMS/OMS、Connector、Mock 场景 | [08](08-integration-simulation/CODEX_CONTEXT.md) |
 | KMS、租约、轮换、吊销 | [09](09-key-credential/CODEX_CONTEXT.md) |
-| 管理 Web、Electron、移动端、Workbench、SDK | [10](10-client-platform/CODEX_CONTEXT.md) |
+| 元域智营、Electron、移动端、Workbench、SDK | [10](10-client-platform/CODEX_CONTEXT.md) |
 | HTTP、Repository、SQLite、配置、部署、测试 | [11](11-runtime-platform/CODEX_CONTEXT.md) |
 
 ## 全局不可破坏约束

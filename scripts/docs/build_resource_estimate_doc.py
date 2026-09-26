@@ -7,7 +7,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
-OUT = Path(__file__).resolve().parents[2] / 'docs' / 'reference' / 'exports' / '元域智营AI基座-项目资源与配置估算.docx'
+OUT = Path(__file__).resolve().parents[2] / 'docs' / 'reference' / 'exports' / '元域智脑AI基座-项目资源与配置估算.docx'
 BLUE, DARK, INK, MUTED = '2E74B5', '1F4D78', '0B2545', '5B6773'
 LIGHT_BLUE, LIGHT_GRAY, CALLOUT = 'E8EEF5', 'F2F4F7', 'F4F6F9'
 
@@ -161,7 +161,7 @@ style(doc.styles['Heading 3'], 12, DARK, 10, 5, True, 1.0)
 
 h = sec.header.paragraphs[0]
 h.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-font(h.add_run('元域智营 AI 基座 | 资源与配置估算'), size=8.5, color=MUTED)
+font(h.add_run('元域智脑 AI 基座 | 资源与配置估算'), size=8.5, color=MUTED)
 f = sec.footer.paragraphs[0]
 f.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 font(f.add_run('内部规划稿  |  '), size=8.5, color=MUTED)
@@ -174,7 +174,7 @@ p.paragraph_format.space_after = Pt(2)
 font(p.add_run('容量规划与投入估算'), size=10.5, color=DARK, bold=True)
 p = doc.add_paragraph()
 p.paragraph_format.space_after = Pt(5)
-font(p.add_run('元域智营 AI 基座\n项目资源与配置估算'), size=25, color=INK, bold=True)
+font(p.add_run('元域智脑 AI 基座\n项目资源与配置估算'), size=25, color=INK, bold=True)
 p = doc.add_paragraph()
 p.paragraph_format.space_after = Pt(14)
 font(p.add_run('面向生产化开发、首批系统接入与试运行的基线规划'), size=13, color=DARK)
@@ -302,7 +302,7 @@ matrix(doc, ['时间', '建议动作', '应产出'], [
 ], [1750, 5000, 2610])
 callout(doc, '推荐起步配置', '在企业已有云原生与安全平台的前提下，先按 6 节点容器集群、4 至 8 vCPU/32 GB 高可用 PostgreSQL、3 节点消息服务、1 TB 对象存储、集中观测，以及 11 至 14 FTE 的首期团队推进。外部模型 API 先行并保留内网模型接口；GPU 采购应以真实调用与数据合规评估后再决定。')
 
-doc.core_properties.title = '元域智营 AI 基座 - 项目资源与配置估算'
+doc.core_properties.title = '元域智脑 AI 基座 - 项目资源与配置估算'
 doc.core_properties.subject = '生产化开发资源、容量与配置规划'
 doc.core_properties.author = '项目团队'
 doc.save(OUT)

@@ -8,7 +8,7 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
 
-OUTPUT = Path(__file__).resolve().parents[2] / "docs" / "reference" / "exports" / "元域智营-测试数据字典-v1.0.docx"
+OUTPUT = Path(__file__).resolve().parents[2] / "docs" / "reference" / "exports" / "元域智语-测试数据字典-v1.0.docx"
 
 NAVY = "17324D"
 BLUE = "2E74B5"
@@ -439,7 +439,7 @@ def configure_document(doc):
     hp = header.paragraphs[0]
     hp.alignment = WD_ALIGN_PARAGRAPH.LEFT
     hp.paragraph_format.space_after = Pt(0)
-    set_font(hp.add_run("元域智脑  |  元域智营测试资料"), size=8.5, bold=True, color=MUTED)
+    set_font(hp.add_run("元域智脑  |  元域智语测试资料"), size=8.5, bold=True, color=MUTED)
 
     footer = section.footer
     fp = footer.paragraphs[0]
@@ -454,7 +454,7 @@ def configure_document(doc):
 def build_document():
     doc = Document()
     configure_document(doc)
-    doc.core_properties.title = "元域智脑元域智营测试数据字典"
+    doc.core_properties.title = "元域智脑元域智语测试数据字典"
     doc.core_properties.subject = "ERP、WMS、QMS、OA 跨系统语义建模模拟输入"
     doc.core_properties.author = "元域智脑测试数据生成器"
     doc.core_properties.keywords = "数据字典,语义层,元对象,元模型,模拟数据"
@@ -465,7 +465,7 @@ def build_document():
     set_font(p.add_run("TECHNICAL DATA DICTIONARY"), size=9, bold=True, color=BLUE)
     title = doc.add_paragraph()
     title.paragraph_format.space_after = Pt(6)
-    set_font(title.add_run("元域智营测试数据字典"), size=25, bold=True, color=NAVY)
+    set_font(title.add_run("元域智语测试数据字典"), size=25, bold=True, color=NAVY)
     subtitle = doc.add_paragraph()
     subtitle.paragraph_format.space_after = Pt(18)
     set_font(subtitle.add_run("ERP · WMS · QMS · OA 跨系统模拟数据"), size=13, color=DARK_BLUE)
@@ -475,9 +475,9 @@ def build_document():
         ("版本", "v1.0"),
         ("数据性质", "完全虚构的合成数据，不对应任何真实企业或个人"),
         ("测试目标", "验证元对象抽取、字段归类、主外键识别、跨系统关系发现、枚举映射和冲突校正"),
-        ("建议输入", "将本 DOCX 作为数据字典上传至元域智营 Agent，要求先生成草稿，不直接发布"),
+        ("建议输入", "将本 DOCX 作为数据字典上传至元域智语 Agent，要求先生成草稿，不直接发布"),
     ])
-    add_callout(doc, "测试提醒", "本文故意保留 6 类建模歧义。合格的元域智营 Agent 应把它们标记为待确认，而不是自行猜测并直接发布。")
+    add_callout(doc, "测试提醒", "本文故意保留 6 类建模歧义。合格的元域智语 Agent 应把它们标记为待确认，而不是自行猜测并直接发布。")
 
     add_heading(doc, "1. 文档说明", 1)
     add_body(doc, "本数据字典模拟一家通用制造企业的 ERP、WMS、QMS 和 OA 数据资产。字段、地址、人员、金额与业务编号均为测试数据，用于验证语义建模流程，不得作为生产事实。")
@@ -501,7 +501,7 @@ def build_document():
     )
 
     add_heading(doc, "4. 字段级数据字典", 1)
-    add_body(doc, "以下表格是元域智营 Agent 的主要解析输入。主键、外键、空值和枚举仅代表源系统现状；统一语义模型应保留来源和版本，不覆盖源字段。")
+    add_body(doc, "以下表格是元域智语 Agent 的主要解析输入。主键、外键、空值和枚举仅代表源系统现状；统一语义模型应保留来源和版本，不覆盖源字段。")
     current_system = None
     for entity in ENTITIES:
         if entity["system"] != current_system:
@@ -542,7 +542,7 @@ def build_document():
     )
 
     add_heading(doc, "7. 待人工确认的建模冲突", 1)
-    add_callout(doc, "验收重点", "元域智营 Agent 应先输出模型 Diff 与冲突清单。下列问题在人工确认前不得进入已发布语义版本。", fill="FDECEC", color=RED)
+    add_callout(doc, "验收重点", "元域智语 Agent 应先输出模型 Diff 与冲突清单。下列问题在人工确认前不得进入已发布语义版本。", fill="FDECEC", color=RED)
     add_small_table(doc,
         ["编号", "冲突类型", "现状", "建议治理", "风险"],
         CONFLICTS,
@@ -598,7 +598,7 @@ def build_document():
     p.paragraph_format.space_after = Pt(10)
     set_font(p.add_run(code), name="Consolas", size=8.5, color=NAVY)
 
-    add_heading(doc, "10. 元域智营测试问题", 1)
+    add_heading(doc, "10. 元域智语测试问题", 1)
     questions = [
         ("T-01", "从文档中提取所有候选元对象、业务标识、来源系统和数据分级。", "应得到 10 个核心候选对象。"),
         ("T-02", "识别产品、库存批次、质量检验之间的关系，并说明跨系统关联依据。", "不得按名称猜测产品映射。"),

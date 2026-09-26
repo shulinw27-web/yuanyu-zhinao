@@ -1,7 +1,7 @@
 import { semanticSimulationMessage } from '@healthcare-ai/agent-ui/ontology-scenario';
 
 // 2026-09-25 阶段 2：世界模型映射草稿的三个动作已从管理 Web 移除。
-// 「元模型连接模板 / 映射草稿」的入口迁到元域智营端系统接入视图，
+// 「元模型连接模板 / 映射草稿」的入口迁到元域智语端系统接入视图，
 // 后端端点保留一个版本周期；本页不再持有相关状态，避免出现无人使用的死状态。
 
 export function createGovernanceActions({ api, refs, runAccessGuarded }) {

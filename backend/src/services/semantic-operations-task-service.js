@@ -220,7 +220,7 @@ export function classifySemanticOperationsIntent(text, { hasAttachments = false 
     return noOperation('unsupported_operation', 'unsupported_destructive_operation', '当前对话不会直接执行删除、覆盖、回滚或下线操作。请在“版本与回滚”中选择明确快照，并按治理流程单独确认。');
   }
   if (/^(?:你好|您好|嗨|哈喽|hello|hi|早上好|下午好|晚上好|在吗|有人吗)[!！。.，,\s]*$/i.test(value)) {
-    return noOperation('conversation', 'greeting', '你好，我是元域智营 Agent。我可以协助建设语义模型、检查数据来源、查看草稿状态、运行校验与模拟；涉及写入或发布的操作都会等待你明确确认。');
+    return noOperation('conversation', 'greeting', '你好，我是元域智语 Agent。我可以协助建设语义模型、检查数据来源、查看草稿状态、运行校验与模拟；涉及写入或发布的操作都会等待你明确确认。');
   }
   if (/(?:你是谁|能做什么|有哪些能力|怎么使用|使用说明|帮助|支持什么)/.test(value)) {
     return noOperation('conversation', 'capability_question', '我负责语义层运营，可以根据自然语言或受控材料建设模型、发现来源、检查状态、校验草稿和运行 Semantica 模拟。请告诉我对象范围、来源系统和目标；写操作会先生成计划并等待确认。');
@@ -252,7 +252,7 @@ export function classifySemanticOperationsIntent(text, { hasAttachments = false 
       : noOperation('needs_clarification', 'build_scope_missing', '我识别到建模意图，但还缺少对象范围或结构材料。请说明要建设的业务对象、来源系统，或上传数据字典、OpenAPI、JSON Schema、CSV 示例。');
   }
   if (!value && hasAttachments) return operation('build_model', 'apply_proposal', 'meta_model.draft.save', 'attachment_only_build');
-  return noOperation('needs_clarification', 'operation_not_identified', '我还不能确定你希望执行哪类元域智营任务。请明确是建设模型、检查来源、查看状态、校验草稿、模拟构建还是发布模型，并补充对象或系统范围。');
+  return noOperation('needs_clarification', 'operation_not_identified', '我还不能确定你希望执行哪类元域智语任务。请明确是建设模型、检查来源、查看状态、校验草稿、模拟构建还是发布模型，并补充对象或系统范围。');
 }
 
 const planFor = (intent) => ({
@@ -385,7 +385,7 @@ const inspectStatus = async (identityScope) => {
 
 export async function createSemanticOperationsTask({ body, role, identityScope }) {
   const text = normalize(body?.text);
-  if (!text && !body?.attachments?.length) return { error: '请输入元域智营目标，或上传一份受控材料。', status: 400 };
+  if (!text && !body?.attachments?.length) return { error: '请输入元域智语目标，或上传一份受控材料。', status: 400 };
   const promptSafety = inspectModelPromptSafety(text);
   if (!promptSafety.safe) return { error: '运营指令未通过安全检查，未创建任务。', status: 400 };
   const owner = identityKey(identityScope);
@@ -558,8 +558,8 @@ export async function createSemanticOperationsTask({ body, role, identityScope }
     index[id] = task;
     return { value: index };
   });
-  await traceEvent(trace.id, 'semantic_intent_routed', 'routing', 'completed', '元域智营意图已由服务器规则绑定。', { intent: task.intent, command: task.command, reason: task.routing?.reason, parentTaskId: task.parentTaskId });
-  if (task.planning) await traceEvent(trace.id, 'semantic_plan_created', 'planning', 'completed', '元域智营规划已生成，执行边界仍由服务器控制。', { mode: task.planning.mode, authoritativeIntent: task.planning.authoritativeIntent, stepCount: task.plan?.length || 0 });
+  await traceEvent(trace.id, 'semantic_intent_routed', 'routing', 'completed', '元域智语意图已由服务器规则绑定。', { intent: task.intent, command: task.command, reason: task.routing?.reason, parentTaskId: task.parentTaskId });
+  if (task.planning) await traceEvent(trace.id, 'semantic_plan_created', 'planning', 'completed', '元域智语规划已生成，执行边界仍由服务器控制。', { mode: task.planning.mode, authoritativeIntent: task.planning.authoritativeIntent, stepCount: task.plan?.length || 0 });
   if (task.sourceDiscovery) await traceEvent(trace.id, 'semantic_sources_inspected', 'evidence', 'completed', '已完成受控来源预检，未读取业务明细。', { sourceCount: task.sourceDiscovery.sources?.length || 0, blockers: task.sourceDiscovery.blockers?.length || 0 });
   if (task.proposal) await traceEvent(trace.id, 'semantic_proposal_generated', 'proposal', task.proposal.critic?.status || 'completed', '候选语义模型与映射验证结果已固定到证据链。', { proposalId: task.proposal.id, revision: task.proposal.revision, objectCount: task.proposal.objectTypes?.length || 0, relationshipCount: task.proposal.relationshipTypes?.length || 0, mappingStatus: task.proposal.mappingValidation?.status });
   if (task.intent === 'inspect_status') await traceEvent(trace.id, 'semantic_read_completed', 'read', 'completed', '只读语义状态快照已固定到证据链。', task.result);
@@ -594,7 +594,7 @@ export function getSemanticOperationsTask({ taskId: id, identityScope, accessCon
 export function archiveSemanticOperationsTask({ taskId: id, identityScope }) {
   return mutateTaskIndex((index) => {
     const task = index[id];
-    if (!task || !semanticOperationsOwnerMatches(task.owner, identityScope)) return { commit: false, result: { error: '未找到属于当前身份的元域智营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
+    if (!task || !semanticOperationsOwnerMatches(task.owner, identityScope)) return { commit: false, result: { error: '未找到属于当前身份的元域智语任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
     if (task.status === 'executing') return { commit: false, result: { error: '执行中的任务不能归档。', code: 'SEMANTIC_TASK_ARCHIVE_BLOCKED' } };
     task.archivedAt = now();
     task.updatedAt = task.archivedAt;
@@ -612,7 +612,7 @@ export async function recordSemanticOperationsReportExport({ taskId: id, receipt
   if (!valid) return { error: '报告导出回执无效，未写入审计记录。', code: 'SEMANTIC_REPORT_RECEIPT_INVALID' };
   const result = await mutateTaskIndex((index) => {
     const task = index[id];
-    if (!task || !semanticOperationsOwnerMatches(task.owner, identityScope)) return { commit: false, result: { error: '未找到属于当前身份的元域智营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
+    if (!task || !semanticOperationsOwnerMatches(task.owner, identityScope)) return { commit: false, result: { error: '未找到属于当前身份的元域智语任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
     const time = now();
     task.events.push({ time, type: 'governed_report_exported', detail: `已导出 ${receipt.fileName}（${receipt.bytes} bytes，SHA-256 ${receipt.sha256.slice(0, 12)}…）。` });
     task.updatedAt = time; index[id] = task;
@@ -625,7 +625,7 @@ export async function recordSemanticOperationsReportExport({ taskId: id, receipt
 export function reviseSemanticOperationsTaskProposal({ taskId: id, body, role, identityScope }) {
   const operationResult = mapMaybe(getIndex(), (indexSnapshot) => {
   const task = indexSnapshot[id];
-  if (!task || !semanticOperationsOwnerMatches(task.owner, identityScope)) return { error: '未找到属于当前身份的元域智营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' };
+  if (!task || !semanticOperationsOwnerMatches(task.owner, identityScope)) return { error: '未找到属于当前身份的元域智语任务。', code: 'SEMANTIC_TASK_NOT_FOUND' };
   if (task.status !== 'waiting_confirmation' || task.command !== 'apply_proposal' || !task.proposal?.id) return { error: '当前任务没有可修订的待确认模型提案。', code: 'SEMANTIC_TASK_PROPOSAL_NOT_EDITABLE' };
     return mapMaybe(updateSemanticOperationsProposal({
     proposalId: task.proposal.id,
@@ -722,7 +722,7 @@ export function issueSemanticOperationsTaskConfirmation({ taskId: id, identitySc
   const operationResult = mapMaybe(currentDraftFingerprint(), (draftFingerprint) => mutateTaskIndex((index) => {
     const task = index[id];
     if (!task || !semanticOperationsOwnerMatches(task.owner, identityScope)) {
-      return { commit: false, result: { error: '未找到属于当前身份的元域智营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
+      return { commit: false, result: { error: '未找到属于当前身份的元域智语任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
     }
     if (task.status === 'executing' && task.execution?.leaseExpiresAt && Date.parse(task.execution.leaseExpiresAt) <= Date.now()) {
       task.status = 'retryable';
@@ -757,7 +757,7 @@ export function issueSemanticOperationsTaskConfirmation({ taskId: id, identitySc
 const reserveExecution = ({ id, identityScope, confirmationToken }) => mapMaybe(currentDraftFingerprint(), (draftFingerprint) => mutateTaskIndex((index) => {
   const task = index[id];
   if (!task || !semanticOperationsOwnerMatches(task.owner, identityScope)) {
-    return { commit: false, result: { error: '未找到属于当前身份的元域智营任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
+    return { commit: false, result: { error: '未找到属于当前身份的元域智语任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
   }
   if (!['waiting_confirmation', 'retryable'].includes(task.status)) {
     return { commit: false, result: { error: '该任务已经执行、正在执行或不可重复确认。', code: 'SEMANTIC_TASK_NOT_CONFIRMABLE' } };
@@ -844,7 +844,7 @@ export async function executeSemanticOperationsTask({ taskId: id, role, identity
     result = { error: `执行失败：${error.message}`, retryable: true };
   }
   const finalized = await finalizeExecution({ id, identityScope, result });
-  await traceEvent(task.traceId, result.error ? 'semantic_execution_blocked' : 'semantic_execution_completed', 'execution', result.error ? 'blocked' : 'completed', result.error || '元域智营命令已完成并归档结果。', { command: task.command, retryable: result.retryable === true });
+  await traceEvent(task.traceId, result.error ? 'semantic_execution_blocked' : 'semantic_execution_completed', 'execution', result.error ? 'blocked' : 'completed', result.error || '元域智语命令已完成并归档结果。', { command: task.command, retryable: result.retryable === true });
   await setAgentEvidenceTraceStatus(task.traceId, result.error ? (result.retryable ? 'retryable' : 'blocked') : 'completed', { completed: !result.error });
   return finalized;
 }

@@ -21,7 +21,7 @@ async function loadPlans() {
     if (ticket !== planGeneration) return;
     plans.value = value.plans; model.value = value.model;
     if (plans.value.length === 1) planId.value = plans.value[0].id;
-    if (!value.available || !plans.value.length) planError.value = '当前没有可用的已发布读取方案。请先在元域智营端完成模型发布，并配置元数据与业务对象权限。';
+    if (!value.available || !plans.value.length) planError.value = '当前没有可用的已发布读取方案。请先在元域智语端完成模型发布，并配置元数据与业务对象权限。';
   } catch { if (ticket === planGeneration) planError.value = '读取方案目录不可用；没有读取业务记录。'; }
   finally { if (ticket === planGeneration) planLoading.value = false; }
 }

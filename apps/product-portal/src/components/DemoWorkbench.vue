@@ -11,7 +11,7 @@ const node = computed(() => scenario.objects.find(item => item.id === selected.v
   <div class="demo-workbench" :class="{ 'demo-compact': compact }">
     <div class="demo-chrome"><span class="demo-symbol">元</span><b>元域工作空间</b><span class="demo-environment">合成示意 · 非实时运行</span><span class="chrome-dots" aria-hidden="true">•••</span></div>
     <div class="demo-layout">
-      <aside class="demo-rail"><span class="rail-caption">WORKSPACE</span><button :class="{ selected: mode === 'business' }" :aria-pressed="mode === 'business'" @click="mode = 'business'">◈ <span>智脑工作台</span></button><button :class="{ selected: mode === 'semantic' }" :aria-pressed="mode === 'semantic'" @click="mode = 'semantic'">⌘ <span>元域智营</span></button><div class="rail-divider"/><span class="rail-caption">当前示例</span><p>供应链异常溯源</p><span class="rail-status">● 固定演示数据</span></aside>
+      <aside class="demo-rail"><span class="rail-caption">WORKSPACE</span><button :class="{ selected: mode === 'business' }" :aria-pressed="mode === 'business'" @click="mode = 'business'">◈ <span>智脑工作台</span></button><button :class="{ selected: mode === 'semantic' }" :aria-pressed="mode === 'semantic'" @click="mode = 'semantic'">⌘ <span>元域智语</span></button><div class="rail-divider"/><span class="rail-caption">当前示例</span><p>供应链异常溯源</p><span class="rail-status">● 固定演示数据</span></aside>
       <div class="demo-body">
         <div class="demo-page-title"><div><small>{{ mode === 'business' ? 'BUSINESS AGENT' : 'SEMANTIC OPERATIONS' }}</small><h3>{{ mode === 'business' ? '从问题，找到业务依据' : '让业务关系清晰可见' }}</h3></div><span class="demo-version">DEMO-v1</span></div>
         <p class="demo-question">{{ mode === 'business' ? scenario.question : '根据数据字典，梳理采购到销售的批次关系。' }}</p>

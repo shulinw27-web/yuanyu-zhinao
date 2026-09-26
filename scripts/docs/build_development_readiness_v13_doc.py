@@ -9,7 +9,7 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
 
-OUT = Path(__file__).resolve().parents[2] / "docs" / "reference" / "exports" / "元域智营AI基座-生产开发准备指南-v1.3.docx"
+OUT = Path(__file__).resolve().parents[2] / "docs" / "reference" / "exports" / "元域智脑AI基座-生产开发准备指南-v1.3.docx"
 
 # compact_reference_guide tokens
 INK = "17324D"

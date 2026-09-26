@@ -85,7 +85,7 @@ onMounted(loadSnapshots);
 
 <template>
   <section class="panel semantic-operations-agent">
-    <div class="section-header"><div><span class="eyebrow">SEMANTIC OPERATIONS AGENT</span><h2>元域智营 Agent</h2><p>面向数据与架构运营人员，不属于业务端智脑。用自然语言或受控材料生成可审阅的语义模型草稿。</p></div><b>{{ canModel ? '建模权限已校验' : '当前只读' }}</b></div>
+    <div class="section-header"><div><span class="eyebrow">SEMANTIC OPERATIONS AGENT</span><h2>元域智语 Agent</h2><p>面向数据与架构运营人员，不属于业务端智脑。用自然语言或受控材料生成可审阅的语义模型草稿。</p></div><b>{{ canModel ? '建模权限已校验' : '当前只读' }}</b></div>
     <div class="semantic-agent-boundary"><b>职责边界</b><span>业务端：智脑处理业务咨询与受控任务</span><span>运营端：本 Agent 生成、维护和登记语义模型</span><span>任何结果均先进入草稿，不直接发布或读取企业业务数据</span></div>
     <label class="semantic-agent-input">描述需要建设的语义模型<textarea v-model="input" :disabled="!canModel || busy" placeholder="例如：建立供应商、原料批次、来料检验和生产批次的语义模型；来源分别为 ERP、WMS、LIMS、MES，重点追溯原料到成品的关系。"/></label>
     <div v-if="files.length" class="semantic-agent-files"><span v-for="(file, index) in files" :key="`${file.name}-${index}`">{{ file.mimeType === 'application/pdf' ? 'PDF' : '图片' }} · {{ file.name }}<button :disabled="busy" @click="files.splice(index, 1)">×</button></span></div>

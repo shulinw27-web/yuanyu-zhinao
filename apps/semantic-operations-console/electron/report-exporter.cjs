@@ -4,8 +4,8 @@ const crypto = require('node:crypto');
 
 // 导出根目录必须在导入方（main.cjs 的 semantic-ops:show-report 路径校验）与写出方之间
 // 保持一致，否则校验恒失败。此前两侧各写一份字面量，2026-09-26 的批量改名把其中一份
-// 拼成「元域元域智营报告」而另一份没有 → 这里收敛为唯一常量。
-const REPORT_ROOT_DIR_NAME = '元域智营报告';
+// 拼成「元域元域智语报告」而另一份没有 → 这里收敛为唯一常量。
+const REPORT_ROOT_DIR_NAME = '元域智语报告';
 
 const safeName = (value) => String(value || REPORT_ROOT_DIR_NAME).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/[. ]+$/g, '').slice(0, 80) || REPORT_ROOT_DIR_NAME;
 

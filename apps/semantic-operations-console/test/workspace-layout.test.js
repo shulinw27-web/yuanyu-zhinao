@@ -176,3 +176,31 @@ test('候选对象覆盖面（目录空白 / 未覆盖提及）必须在提案�
   // 组件里写着错的前缀也照样通过，属「看着覆盖了、实际没覆盖」。
   assert.ok(!/selected\.value/.test(templateSource), '模板中存在 selected.value（恒为 undefined，会静默隐藏整块披露）');
 });
+
+// ── 接入生命周期操作面（ADR-023）：新增接入与已接通系统管理必须在界面上可执行 ──
+//
+// 此前系统接入视图只能「看」：状态是种子给的静态值，没有新增接入入口，也没有已接通
+// 系统的管理动作——状态机在后端定义了却从未暴露。本组钉住操作面真实存在。
+test('系统接入：新增接入入口、生命周期操作面板与停用筛选必须可见', async () => {
+  const accessSource = await readFile(new URL('../src/components/SystemAccessWorkspace.vue', import.meta.url), 'utf8');
+  // 注意：根 <template> 内部还有 <template v-if>，必须用 lastIndexOf 取到根闭合标签，
+  // 否则切片会在第一个内层 </template> 处提前结束，后面的断言全部「假失败」。
+  const templateSource = accessSource.slice(accessSource.indexOf('<template>'), accessSource.lastIndexOf('</template>'));
+  // 新增接入入口：一键聚焦未登记系统（平台目录中尚未开始接入的成员）。
+  assert.match(templateSource, /data-testid="start-onboarding"/);
+  assert.match(templateSource, /＋ 新增接入/);
+  assert.match(templateSource, /未登记＝平台目录里尚未开始接入的系统/);
+  // 生命周期操作面板：状态步骤 + 下一步动作 + 必填理由。
+  assert.match(templateSource, /aria-label="接入流程与生命周期"/);
+  assert.match(templateSource, /data-testid="lifecycle-steps"/);
+  assert.match(templateSource, /data-testid="lifecycle-reason"/);
+  assert.match(templateSource, /:data-testid="`lifecycle-\$\{action\.to\}`"/);
+  // 接通门禁必须预判提示：没有 verified 探测时按钮禁用并说明原因，而不是点了才报错。
+  assert.match(accessSource, /接通前必须先完成一次通过验证的连通性测试/);
+  // 已接通系统管理：停用筛选 + 停用计数。
+  assert.match(accessSource, /'suspended', label: '已停用'/);
+  assert.match(templateSource, /overview\.summary\.suspended/);
+  // 操作走服务端状态机，前端不得出现「本地改状态」的旁路。
+  assert.match(accessSource, /client\.transitionSystemConnection\(/);
+  assert.ok(!/lifecycleState\s*=\s*'connected'/.test(templateSource), '模板中不得硬编码生命周期状态');
+});

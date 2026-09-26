@@ -92,7 +92,7 @@ async function loadWorkspace({ preserveMessage = false } = {}) {
     semanticContext.value = contextValue;
     snapshots.value = snapshotValue.snapshots || [];
   } catch (err) {
-    if (generation === loadGeneration) error.value = err.message || '元域智营端加载失败。';
+    if (generation === loadGeneration) error.value = err.message || '元域智语端加载失败。';
   } finally {
     if (generation === loadGeneration) loading.value = false;
   }
@@ -170,11 +170,11 @@ onMounted(async () => {
   <div class="semantic-console">
     <section v-if="!authenticated" class="semantic-auth">
       <form @submit.prevent="login">
-        <span>SEMANTIC OPERATIONS IDENTITY</span><h1>登录元域智营端</h1>
+        <span>SEMANTIC OPERATIONS IDENTITY</span><h1>登录元域智语端</h1>
         <p>运营权限由企业身份和设备会话共同确定，界面不再允许手动切换角色。</p>
         <div class="auth-mode"><button type="button" :class="{ active: authMode === 'local' }" @click="authMode = 'local'">平台账号</button><button type="button" :class="{ active: authMode === 'oa' }" @click="authMode = 'oa'">OA 账号</button></div>
         <label>账号<input v-model="account" autocomplete="username" /></label><label>密码<input v-model="password" type="password" autocomplete="current-password" /></label>
-        <div v-if="error" class="ops-error">{{ error }}</div><button class="auth-submit" :disabled="authenticating">{{ authenticating ? '正在校验身份与设备…' : '进入元域智营工作台' }}</button>
+        <div v-if="error" class="ops-error">{{ error }}</div><button class="auth-submit" :disabled="authenticating">{{ authenticating ? '正在校验身份与设备…' : '进入元域智语工作台' }}</button>
       </form>
     </section>
     <template v-else>
@@ -193,7 +193,7 @@ onMounted(async () => {
     </aside>
 
     <main>
-      <header class="ops-topbar"><div><span>SEMANTIC CONTROL PLANE</span><h1>{{ activeView === 'system-access' ? (accessTab === 'systems' ? '系统接入与生命周期' : '接入材料与场景准备') : activeView === 'knowledge' ? '知识资料与来源校对' : activeView === 'agent' ? '元域智营 Agent 工作台' : activeView === 'model' ? '语义模型人工校对' : '模型版本与恢复' }}</h1></div><div class="ops-top-actions"><div v-if="activeView !== 'system-access'" :class="['ops-live', deploymentDrift]"><i/>Semantica · {{ semanticaStatus }} · {{ deploymentDriftLabel }}</div><button v-if="activeView !== 'system-access'" class="ops-logout" :disabled="refreshingStatus" @click="refreshSemanticStatus">{{ refreshingStatus ? '刷新中…' : '刷新服务状态' }}</button><label>已认证运营身份<strong>{{ currentUser?.name || currentUser?.account }}</strong><small>{{ roles.find(item => item.id === role)?.name || role }} · {{ client.deviceId.slice(-8) }}</small></label><button class="ops-logout" @click="logout">退出</button></div></header>
+      <header class="ops-topbar"><div><span>SEMANTIC CONTROL PLANE</span><h1>{{ activeView === 'system-access' ? (accessTab === 'systems' ? '系统接入与生命周期' : '接入材料与场景准备') : activeView === 'knowledge' ? '知识资料与来源校对' : activeView === 'agent' ? '元域智语 Agent 工作台' : activeView === 'model' ? '语义模型人工校对' : '模型版本与恢复' }}</h1></div><div class="ops-top-actions"><div v-if="activeView !== 'system-access'" :class="['ops-live', deploymentDrift]"><i/>Semantica · {{ semanticaStatus }} · {{ deploymentDriftLabel }}</div><button v-if="activeView !== 'system-access'" class="ops-logout" :disabled="refreshingStatus" @click="refreshSemanticStatus">{{ refreshingStatus ? '刷新中…' : '刷新服务状态' }}</button><label>已认证运营身份<strong>{{ currentUser?.name || currentUser?.account }}</strong><small>{{ roles.find(item => item.id === role)?.name || role }} · {{ client.deviceId.slice(-8) }}</small></label><button class="ops-logout" @click="logout">退出</button></div></header>
 
       <div v-if="error && activeView !== 'system-access'" class="ops-error">{{ error }}<button @click="loadWorkspace">重新加载</button></div>
       <div v-if="message && activeView !== 'system-access'" class="ops-message">{{ message }}</div>

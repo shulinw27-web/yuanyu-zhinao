@@ -161,7 +161,7 @@ ADR-021 的披露只落在服务端字符串与智脑工作台一侧，运营这
 - `npm run lint` / `npm run typecheck` 干净；
 - `docs:check` **184 份 Markdown / 1169 个本地链接**；
 - `npm run quality` 端到端 **EXIT=0**（1m38s，全量 35 个 Node 测试块 **969 / 969 通过**、0 处 `not ok`）；
-- **5 端构建通过**（web 2.04s + 元域智营 2.83s、desktop 2.22s、mobile 2.19s、dingtalk 3.47s，分端调用避开沙箱 `safe-delete` 单次阈值）。
+- **5 端构建通过**（web 2.04s + 元域智语 2.83s、desktop 2.22s、mobile 2.19s、dingtalk 3.47s，分端调用避开沙箱 `safe-delete` 单次阈值）。
 
 ### 顺带完成：模块化审计第 3 项
 

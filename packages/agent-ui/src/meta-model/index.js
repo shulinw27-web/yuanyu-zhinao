@@ -1,4 +1,4 @@
-// 元模型 / 本体面板：元域智营端「模型校对」与智脑端世界模型页共用。
+// 元模型 / 本体面板：元域智语端「模型校对」与智脑端世界模型页共用。
 export { default as CoreMetaObjectLayer } from './CoreMetaObjectLayer.vue';
 export { default as OAMetaModelStudio } from './OAMetaModelStudio.vue';
 export { default as OntologyCaseReplay } from './OntologyCaseReplay.vue';
