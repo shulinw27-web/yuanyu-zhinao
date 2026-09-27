@@ -16,9 +16,16 @@ import {
 const access = (menuIds, pagePermissionIds) => ({ menuIds, pagePermissionIds, buttonPermissionIds: [] });
 
 test('页面必须同时具有菜单和页面权限', () => {
-  assert.equal(canAccessPage('world', access(['world'], ['page.world.view'])), true);
-  assert.equal(canAccessPage('world', access(['world'], [])), false);
-  assert.equal(canAccessPage('world', access([], ['page.world.view'])), false);
+  assert.equal(canAccessPage('risks', access(['risks'], ['page.risks.view'])), true);
+  assert.equal(canAccessPage('risks', access(['risks'], [])), false);
+  assert.equal(canAccessPage('risks', access([], ['page.risks.view'])), false);
+});
+
+test('「元模型」页已移出管理 Web（4.3 决策 A），持有旧权限也不可进入', () => {
+  // page.world.view 权限条目在后端保留一个版本周期（元域智语端语义页面/服务的访问载体），
+  // 但前端不再注册该页面：即使完整持有旧菜单与页面权限也无法导航到 world。
+  assert.equal(canAccessPage('world', access(['world'], ['page.world.view'])), false);
+  assert.equal(canAccessPage('world', access(['dashboard'], ['page.dashboard.view'])), false);
 });
 
 test('采购协同继承智脑页面访问边界', () => {

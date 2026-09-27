@@ -189,6 +189,8 @@ apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/met
 
 ### 4.3 元域智营的 `world`（元模型）菜单如何处置？
 
+> **决策（2026-09-28，阶段 6 第二段）：按 A 执行**（用户委托「继续完成」，按方案建议实施，可回退）。管理 Web 删除「元模型」页与导航入口（页面组件、路由分支、数据分支、前端 API 方法、OA 元模型治理动作与 `world-template.css` 全部移除）；`menu.world` / `page.world.view` 权限条目与角色授权**保留一个版本周期**——`page.world.view` 仍是元域智语端语义页面与后台巡检的访问载体（`access-control-service` 按「菜单 ∩ 权限目录」派生，删条目会让 4 处服务 403），待元域智语端权限语义独立后删除。前端对已移除页面**不注册导航**，持有旧权限也无法进入（测试锁死）。后端 `/api/world-model`、`/api/meta-models` 端点按阶段 2 先例保留。详见下文阶段 6 第二段台账条目。
+
 - **A. 全迁 + 删菜单（我建议）**：模型相关只存在于元域智语端，元域智营不再有模型入口。
 - **B. 全迁 + 保留只读指针页**：元域智营保留「去元域智语端建模」的引导与已发布模型只读摘要。
 - **C. 部分迁**：只迁草稿/精调/版本，保留「核心元对象层 + 语义上下文 + 模型实例风险图」作为业务观察视图。
@@ -1247,3 +1249,15 @@ requestedSystems.length ? requestedSystems : connectorCatalog.filter(item => ite
 **如实披露**：对原持权两角色零变化；映射草稿闸门与接入侧写入同闸后，另三角色（本就持接入侧写入权限）的该入口随之打开——「同一把闸门」的既定语义；动作角色从「executive 回退」变为「持权主角色本人」（`permission-api-hardening` 实测暴露并更新断言）。**不变式**：已发布模型指纹与版本号不变；发布权威未稀释。决策记录见 [ADR-026](adr/ADR-026-permission-equivalence-merge.md)。
 
 **验收（本机实测）**：`test:permissions` **29/29**（含新增语义断言）；`test:access` **13/13**；`test:semantic` **6/6 + 61/61 + 98/98**；`test:events` **17/17**；`test:scope` **12/12**；元域智语端测试 **61/61**；lint 干净。**剩余**：4.3 的 `world` 菜单去留（全迁删页 / 只读指针 / 部分保留）仍待用户决策，属阶段 6 第二段 / 阶段 7 菜单收缩。
+
+---
+
+### 阶段 6 第二段：元域智营「元模型」菜单处置——全迁 + 删菜单（4.3 决策 A）—— **已完成（2026-09-28）**
+
+4.3 的三条路径中，按方案建议 **A（全迁 + 删菜单）** 执行（用户委托「继续完成」，决策已在 4.3 处标注、可回退）。模型相关只存在于元域智语端，管理 Web 不再有模型入口。
+
+**移除面（仅前端，后端零改动）**：`WorldModelPage`（含 `SemanticContextPanel`、无引用的死代码 `SemanticOperationsAgentPanel`，整目录删除）、`App.vue` 的 world 渲染分支与 `world`/`coreMetaObjects`/`metaModels`/`oaMetaSimulation`/`oaMetaDraft`/`oaMetaAuthoringProfile`/`semanticContext`/`metaModelMessage` 状态与重置、`governance-actions` 的 4 个 OA 元模型治理动作（simulate/publish/saveDraft/validateDraft）、`page-data-registry` 的 world 数据分支、`permission-navigation` 的 world 注册与排序、`api/client.js` 的 19 个 world / meta-model / semantic-context 前端方法、`world-template.css`。`api.access` 保留（RiskDrawer 复用）。
+
+**关键取证与边界**：`pagePermissionIds` 由「角色 menuIds ∩ 权限目录」派生（`access-control-service`），而 `page.world.view` 被 4 处元域智语服务复用为访问权限（`mock-onboarding-service`、`mock-onboarding-ontology-adapter`、`knowledge-routes`、`semantic-inspection-schedule-service`，另有 `route-security` 授权解释）。因此 **`menu.world` / `page.world.view` 权限条目与角色授权保留一个版本周期**（与阶段 2 对旧端点的先例一致），仅前端不注册导航——持有旧权限也无法进入（测试锁死）。权限矩阵、后端端点、服务行为均零变化；待元域智语端权限语义独立后（后续增量）再删权限条目与旧端点。
+
+**验收（本机实测）**：`test:permissions` **31/31**（新增 2 个用例：「持有旧权限也不可进入已移除页面」「world 无数据加载路径」）；`test:access` **13/13**；`test:semantic` **6/6 + 61/61 + 98/98**；管理 Web 构建 **1.67s**（JS 194.41 kB，world 页代码移除生效）；lint 干净。

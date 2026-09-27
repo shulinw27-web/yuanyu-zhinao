@@ -3,14 +3,16 @@ export const PAGE_ACCESS_REQUIREMENTS = Object.freeze({
   intelligence: { menuId: 'intelligence', pagePermissionId: 'page.intelligence.view' },
   agent: { menuId: 'agent', pagePermissionId: 'page.agent.view' },
   risks: { menuId: 'risks', pagePermissionId: 'page.risks.view' },
-  world: { menuId: 'world', pagePermissionId: 'page.world.view' },
   channels: { menuId: 'channels', pagePermissionId: 'page.channels.view' },
   config: { menuId: 'config', pagePermissionId: 'page.config.view' },
   permissions: { menuId: 'permissions', pagePermissionId: 'page.permissions.view' },
   procurement: { menuId: 'agent', pagePermissionId: 'page.agent.view' },
 });
 
-const primaryPageOrder = ['dashboard', 'intelligence', 'agent', 'risks', 'world', 'channels', 'config', 'permissions'];
+// 2026-09-28 阶段 6 第二段（4.3 决策 A）：「元模型」页移出管理 Web——
+// 模型相关只存在于元域智语端。page.world.view 权限条目在后端保留一个版本周期
+// （元域智语端语义页面/服务的访问载体），前端不再提供该页入口。
+const primaryPageOrder = ['dashboard', 'intelligence', 'agent', 'risks', 'channels', 'config', 'permissions'];
 
 export function canAccessPage(pageId, effectiveAccess) {
   const requirement = PAGE_ACCESS_REQUIREMENTS[pageId];

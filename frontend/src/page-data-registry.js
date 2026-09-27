@@ -8,13 +8,6 @@ export async function fetchPageData({ pageId, activeRole, api }) {
     const [platformValue, systemsValue, notificationsValue, risksValue] = await Promise.all([api.platformStatus(activeRole), api.systems(activeRole), api.notifications(activeRole), api.risks(activeRole)]);
     return { platformValue, systemsValue, notificationsValue, risksValue };
   }
-  if (pageId === 'world') {
-    const [worldValue, accessValue, semanticContextValue, coreMetaObjectsValue, metaModelsValue, oaMetaSimulationValue, oaMetaDraftValue, oaMetaAuthoringProfileValue] = await Promise.all([
-      api.world(activeRole), api.access(activeRole), api.semanticContext(activeRole), api.coreMetaObjects(activeRole), api.metaModels(activeRole),
-      api.oaMetaModelSimulation(activeRole), api.oaMetaModelDraft(activeRole), api.oaMetaModelAuthoringProfile(activeRole)
-    ]);
-    return { worldValue, accessValue, semanticContextValue, coreMetaObjectsValue, metaModelsValue, oaMetaSimulationValue, oaMetaDraftValue, oaMetaAuthoringProfileValue };
-  }
   if (pageId === 'agent') {
     const [agentRuntimeValue, agentToolsValue, agentRunsValue, agentSkillsValue, agentConnectorsValue, agentOperationsValue, agentWorkItemsValue, agentEvaluationsValue] = await Promise.all([
       api.agentRuntime(activeRole), api.agentTools(activeRole), api.agentRuns(activeRole), api.agentSkills(activeRole),
@@ -47,10 +40,6 @@ export function applyPageData({ pageId, data, state, unwrapPermissionWorkspace }
     set('risks', data.risksValue);
   } else if (pageId === 'intelligence') {
     set('platform', data.platformValue); set('systems', data.systemsValue); set('notifications', data.notificationsValue); set('risks', data.risksValue);
-  } else if (pageId === 'world') {
-    set('world', data.worldValue); set('access', data.accessValue); set('semanticContext', data.semanticContextValue);
-    set('coreMetaObjects', data.coreMetaObjectsValue); set('metaModels', data.metaModelsValue); set('oaMetaSimulation', data.oaMetaSimulationValue);
-    set('oaMetaDraft', data.oaMetaDraftValue); set('oaMetaAuthoringProfile', data.oaMetaAuthoringProfileValue);
   } else if (pageId === 'agent') {
     set('agentRuntime', data.agentRuntimeValue); set('agentTools', data.agentToolsValue); set('agentRuns', data.agentRunsValue); set('agentSkills', data.agentSkillsValue);
     set('agentConnectors', data.agentConnectorsValue); set('agentOperations', data.agentOperationsValue); set('agentWorkItems', data.agentWorkItemsValue); set('agentEvaluations', data.agentEvaluationsValue);

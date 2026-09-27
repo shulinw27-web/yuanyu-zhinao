@@ -9,8 +9,7 @@ function createHarness(overrides = {}) {
     page: ref('risks'), effectiveAccess: ref({ pagePermissionIds: ['page.risks.view'] }), access: ref(null),
     selectedRisk: ref(null), message: ref(''), procurementMessage: ref(''), procurement: ref(null),
     agentRuns: ref([]), agentOperations: ref(null), agentWorkItems: ref([]), assistantMessages: ref([]),
-    agentEvaluations: ref(null), error: ref(''), worldTemplateMessage: ref(''), worldDrafts: ref([]),
-    metaModels: ref([]), oaMetaSimulation: ref(null), metaModelMessage: ref(''), oaMetaDraft: ref(null),
+    agentEvaluations: ref(null), error: ref(''),
     agentModelConfig: ref(null), modelConfigMessage: ref(''), simulation: ref(null), simulationMessage: ref(''),
     keyCenterMessage: ref(''), keyCenter: ref(null), permissionSaving: ref(false), permissionMessage: ref(''),
     alertingSaving: ref(false), alertingMessage: ref(''), alertingWorkspace: ref(null), notifications: ref([])

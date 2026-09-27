@@ -21,6 +21,13 @@ test('配置页结构上不再请求世界模型 / 系统接入接口', async ()
   assert.deepEqual(called.sort(), ['accountCenter', 'agentModelConfig', 'configurations', 'keyCenter', 'permissionCenter', 'simulationOverview'].sort());
 });
 
+test('「元模型」页已移出管理 Web，不存在数据加载路径（4.3 决策 A）', async () => {
+  const api = new Proxy({}, {
+    get: (_, name) => async () => { throw new Error(`不应调用 ${String(name)}`); }
+  });
+  await assert.rejects(fetchPageData({ pageId: 'world', activeRole: 'quality_manager', api }), /未知页面/);
+});
+
 test('配置页数据应用不再写入世界模型相关状态', () => {
   const state = {
     configuration: ref(), agentModelConfig: ref(), simulation: ref(),

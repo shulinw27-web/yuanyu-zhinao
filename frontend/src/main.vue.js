@@ -7,7 +7,6 @@ import './styles/action-center.css';
 import './styles/mobile-assistant.css';
 import './styles/private-agent.css';
 import './styles/model-connection.css';
-import './styles/world-template.css';
 import '@healthcare-ai/agent-ui/styles/meta-model.css';
 import '@healthcare-ai/agent-ui/styles/core-meta-objects.css';
 import './styles/account-permission.css';

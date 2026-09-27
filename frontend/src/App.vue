@@ -5,7 +5,6 @@ import AppShell from './components/AppShell.vue';
 import RiskDrawer from './components/RiskDrawer.vue';
 import DashboardPage from './features/dashboard/DashboardPage.vue';
 import RiskCentrePage from './features/risk/RiskCentrePage.vue';
-import WorldModelPage from './features/world-model/WorldModelPage.vue';
 import ChannelsPage from './features/channels/ChannelsPage.vue';
 import IntelligencePage from './features/intelligence/IntelligencePage.vue';
 import ConfigManagementPage from './features/config/ConfigManagementPage.vue';
@@ -18,21 +17,19 @@ import { createAppActions } from './app-actions.js';
 
 const page = ref('dashboard');
 const role = ref('quality_manager');
-const roles = ref([]); const dashboard = ref(null); const risks = ref([]); const notifications = ref([]); const world = ref(null); const access = ref(null); const systems = ref([]); const platform = ref(null); const configuration = ref(null); const procurement = ref(null); const agentRuntime = ref(null); const agentTools = ref([]); const agentRuns = ref([]); const agentModelConfig = ref(null);
+const roles = ref([]); const dashboard = ref(null); const risks = ref([]); const notifications = ref([]); const access = ref(null); const systems = ref([]); const platform = ref(null); const configuration = ref(null); const procurement = ref(null); const agentRuntime = ref(null); const agentTools = ref([]); const agentRuns = ref([]); const agentModelConfig = ref(null);
 const agentSkills = ref([]); const agentConnectors = ref(null);
 const agentOperations = ref(null); const agentWorkItems = ref([]); const agentEvaluations = ref(null); const modelConfigMessage = ref(''); const simulation = ref(null); const simulationMessage = ref('');
-const coreMetaObjects = ref(null); const metaModels = ref([]); const oaMetaSimulation = ref(null); const oaMetaDraft = ref(null); const oaMetaAuthoringProfile = ref(null); const metaModelMessage = ref('');
-const accountCenter = ref(null); const permissionCenter = ref(null); const keyCenter = ref(null); const keyCenterMessage = ref(''); const semanticContext = ref(null);
+const accountCenter = ref(null); const permissionCenter = ref(null); const keyCenter = ref(null); const keyCenterMessage = ref('');
 const effectiveAccess = ref(null); const permissionWorkspace = ref(null); const permissionMessage = ref(''); const permissionSaving = ref(false);
 const alertingWorkspace = ref(null); const alertingMessage = ref(''); const alertingSaving = ref(false);
 const selectedRisk = ref(null); const message = ref(''); const procurementMessage = ref(''); const error = ref('');
 const pageLoading = ref(true);
 const pageDataState = {
-  dashboard, risks, notifications, world, access, systems, platform, configuration, procurement,
+  dashboard, risks, notifications, access, systems, platform, configuration, procurement,
   agentRuntime, agentTools, agentRuns, agentModelConfig, agentSkills, agentConnectors, agentOperations,
   agentWorkItems, agentEvaluations, simulation,
-  coreMetaObjects, metaModels, oaMetaSimulation, oaMetaDraft, oaMetaAuthoringProfile,
-  accountCenter, permissionCenter, keyCenter, semanticContext, permissionWorkspace, alertingWorkspace
+  accountCenter, permissionCenter, keyCenter, permissionWorkspace, alertingWorkspace
 };
 const initialAssistantMessages = () => [{ role: 'assistant', text: '你好，我是健康运营私有 Agent。可协同生产、市场与内务子 Agent，在受控上下文中生成业务计划。', citations: ['当前授权角色', '世界模型受控上下文'] }];
 const assistantMessages = ref(initialAssistantMessages());
@@ -100,7 +97,6 @@ function resetPageData() {
   dashboard.value = null;
   risks.value = [];
   notifications.value = [];
-  world.value = null;
   access.value = null;
   systems.value = [];
   platform.value = null;
@@ -116,15 +112,9 @@ function resetPageData() {
   agentWorkItems.value = [];
   agentEvaluations.value = null;
   simulation.value = null;
-  coreMetaObjects.value = null;
-  metaModels.value = [];
-  oaMetaSimulation.value = null;
-  oaMetaDraft.value = null;
-  oaMetaAuthoringProfile.value = null;
   accountCenter.value = null;
   permissionCenter.value = null;
   keyCenter.value = null;
-  semanticContext.value = null;
   permissionWorkspace.value = null;
   alertingWorkspace.value = null;
   selectedRisk.value = null;
@@ -135,7 +125,6 @@ function resetRoleMessages() {
   procurementMessage.value = '';
   modelConfigMessage.value = '';
   simulationMessage.value = '';
-  metaModelMessage.value = '';
   keyCenterMessage.value = '';
   permissionMessage.value = '';
   alertingMessage.value = '';
@@ -308,10 +297,6 @@ const {
   act,
   executeProcurement,
   runAgentEvaluations,
-  simulateOAMetaModel,
-  publishOAMetaModel,
-  saveOAMetaDraft,
-  validateOAMetaDraft,
   saveAgentModelConfig,
   runSimulationScenario,
   decideSimulationApproval,
@@ -330,7 +315,6 @@ const {
   refs: {
     page, effectiveAccess, access, selectedRisk, message, procurementMessage, procurement,
     agentRuns, agentOperations, agentWorkItems, assistantMessages, agentEvaluations, error,
-    metaModels, oaMetaSimulation, metaModelMessage, oaMetaDraft,
     agentModelConfig, modelConfigMessage, simulation, simulationMessage, keyCenterMessage, keyCenter,
     permissionSaving, permissionMessage, alertingSaving, alertingMessage, alertingWorkspace, notifications
   },
@@ -384,7 +368,6 @@ watch(effectiveAccess, (accessValue) => {
     <DashboardPage v-else-if="page === 'dashboard'" :dashboard="dashboard" :notifications="notifications" :systems="systems" @select-risk="chooseRisk" @navigate="navigateTo"/>
     <RiskCentrePage v-else-if="page === 'risks'" :risks="risks" @select-risk="chooseRisk"/>
     <IntelligencePage v-else-if="page === 'intelligence'" :platform="platform" :systems="systems" :notifications="notifications" :risks="risks"/>
-    <WorldModelPage v-else-if="page === 'world'" :graph="world" :access="access" :semantic-context="semanticContext" :role="role" :core-meta-objects="coreMetaObjects" :meta-models="metaModels" :oa-meta-simulation="oaMetaSimulation" :oa-meta-draft="oaMetaDraft" :oa-meta-authoring-profile="oaMetaAuthoringProfile" :meta-model-message="metaModelMessage" :button-permission-ids="buttonPermissionIds" @save-oa-meta-draft="saveOAMetaDraft" @validate-oa-meta-draft="validateOAMetaDraft" @simulate-oa-meta-model="simulateOAMetaModel" @publish-oa-meta-model="publishOAMetaModel" @refresh="loadPage('world', { force: true })"/>
     <PrivateAgentPage v-else-if="page === 'agent'" :runtime="agentRuntime" :tools="agentTools" :runs="agentRuns" :skills="agentSkills" :connectors="agentConnectors" :operations="agentOperations" :work-items="agentWorkItems" :evaluations="agentEvaluations" :role="role" :button-permission-ids="buttonPermissionIds" @run-evaluations="runAgentEvaluations"/>
     <ChannelsPage v-else-if="page === 'channels'" :notifications="notifications" :workspace="alertingWorkspace" :button-permission-ids="buttonPermissionIds" :message="alertingMessage" :saving="alertingSaving" @save-configuration="saveAlertingConfiguration" @simulate-alert="simulateAlertRoute" @test-voice="testAlertVoice" @voice-event="recordAlertVoiceEvent"/>
     <ProcurementActionPage v-else-if="page === 'procurement'" :scenario="procurement" :role="role" :action-message="procurementMessage" :button-permission-ids="buttonPermissionIds" @launch="executeProcurement('launch')" @approve="executeProcurement('approve')"/>
