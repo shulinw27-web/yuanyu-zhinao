@@ -120,6 +120,23 @@ test('linked types become candidates only with declaration-backed structure; str
   assert.match(gap.suggestion, /声明|字典/);
 });
 
+test('no_identifier is data-driven: a declaration with fields but no determinable key stays a named gap', () => {
+  // 现有 8 类有声明的类型主键全部可判定，no_identifier 分支没有真实数据能触发——
+  // 经声明透传缝注入一条「有字段、无主键」的声明直达该分支（2026-09-28 补）。
+  const { candidates, gaps } = buildMentionLinkCandidates({
+    links: [
+      { mention: '台账条目', evidence: '台账条目按日登记', objectType: 'LedgerEntry', system: 'WMS', systemName: '仓储管理系统' }
+    ],
+    objects: [{ id: 'LedgerEntry', label: '台账条目', fields: ['day', 'note'], sourceSystems: ['WMS'] }]
+  });
+  assert.equal(candidates.length, 0);
+  const gap = gaps.find((item) => item.objectType === 'LedgerEntry');
+  assert.ok(gap);
+  assert.equal(gap.reason, 'no_identifier');
+  assert.match(gap.detail, /识别不出主键/);
+  assert.match(gap.suggestion, /主键/);
+});
+
 test('injected linking results merge into candidates, suppress catalog fallback, and disclose everything', async () => {
   resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);
   const material = '仓库系统的发运单记录了出库过程，收货单登记来料批次。供应商主数据保持同步。';

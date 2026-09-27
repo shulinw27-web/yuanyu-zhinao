@@ -19,7 +19,6 @@
 //    「世界模型对象」（`data/system-catalog.js` 的 `worldObjectTypes`）求差集，
 //    点名哪些**已被平台治理**的对象在候选目录里没有任何词条。
 //    这一项零启发式：两边都是库里的既有事实，只是此前从没有人把它们对起来看过。
-//
 // 2. `listUncoveredMentions()`  —— **启发式**。材料里以列举分隔符切出的纯中文短短语中，
 //    未被任何词条覆盖的那些。它回答的是「你这次写的这几个词，目录里一个都没有」。
 //    它**不是对象抽取**（见 ADR-022 的边界一节）：会混入非对象词，也会漏掉
@@ -39,6 +38,14 @@ import { systemDefinitions } from '../data/system-catalog.js';
 // 已知词表质量问题（记录在案，本阶段不改，见 ADR-021 边界三）：
 // `PurchaseOrder` 的词条含「订单」，任何含「订单」的材料都会命中「采购订单」，
 // 而在 OMS 语境里「订单」通常是**销售订单**。这是词表过泛，不是披露问题。
+//
+// ── 词表治理第一轮（2026-09-28，用户决策）─────────────────────────────────
+// ADR-022 曾把「补词条」保留为词表治理决策。用户于 2026-09-28 明确指示补齐，
+// 第一轮范围：**有系统字段声明的 8 类缺口对象**（字段与主键逐类取自声明侧目录，
+// 与受控对象链接同源）。无声明的 6 类（Warehouse / OutboundShipment / ProcessStep /
+// Specification / ChangeControl / ReturnOrder）**不补**：词条只能带来词面命中，
+// 带不来结构——补了只会产出过不了草案校验的空壳候选。词条取窄义业务称呼，
+// 不复制既有过泛词（如「订单」「批次」）。
 export const CANDIDATE_CATALOG = Object.freeze([
   { id: 'Material', label: '物料主数据', terms: ['物料主数据', '原料主数据'], source: 'erp.material', key: 'material_id', fields: ['material_id', 'name', 'status'], classification: '供应链受限', coreObject: 'Material' },
   { id: 'ProductSKU', label: '产品主数据', terms: ['产品主数据', 'SKU主数据'], source: 'erp.product', key: 'product_id', fields: ['product_id', 'name', 'status'], classification: '产品受限', coreObject: 'ProductSKU' },
@@ -51,7 +58,16 @@ export const CANDIDATE_CATALOG = Object.freeze([
   { id: 'FinishedGoodsBatch', label: '成品批次', terms: ['成品', '放行'], source: 'qms.finished_goods_batch', key: 'finished_goods_batch_id', fields: ['finished_goods_batch_id', 'product_code', 'release_status', 'status'], classification: '质量受限', coreObject: 'Product' },
   { id: 'Inventory', label: '库存', terms: ['库存', '仓库'], source: 'wms.inventory', key: 'inventory_id', fields: ['inventory_id', 'material_batch_id', 'quantity', 'warehouse_code'], classification: '运营受限', coreObject: 'RawMaterial' },
   { id: 'Store', label: '门店', terms: ['门店', '店铺'], source: 'oms.store', key: 'store_id', fields: ['store_id', 'name', 'region', 'status'], classification: '门店运营受限', coreObject: 'Store' },
-  { id: 'Equipment', label: '设备', terms: ['设备', '产线'], source: 'mes.equipment', key: 'equipment_id', fields: ['equipment_id', 'name', 'line_code', 'status'], classification: '生产受限', coreObject: 'Equipment' }
+  { id: 'Equipment', label: '设备', terms: ['设备', '产线'], source: 'mes.equipment', key: 'equipment_id', fields: ['equipment_id', 'name', 'line_code', 'status'], classification: '生产受限', coreObject: 'Equipment' },
+  // ── 词表治理第一轮（2026-09-28）：以下 8 类的 fields/key 逐类取自系统声明侧目录 ──
+  { id: 'InboundReceipt', label: '收货单', terms: ['收货单', '入库单'], source: 'wms.inbound_receipt', key: 'receipt_id', fields: ['receipt_id', 'purchase_order_id', 'material_batch_id', 'received_qty', 'received_at', 'status'], classification: '运营受限', coreObject: 'RawMaterial' },
+  { id: 'InventoryLot', label: '库存批次', terms: ['库存批次'], source: 'wms.inventory_lot', key: 'inventory_lot_id', fields: ['inventory_lot_id', 'material_batch_id', 'warehouse_code', 'location_code', 'quantity', 'status'], classification: '运营受限', coreObject: 'RawMaterial' },
+  { id: 'Deviation', label: '偏差', terms: ['偏差'], source: 'mes.deviation', key: 'deviation_id', fields: ['deviation_id', 'batch_no', 'severity', 'description'], classification: '质量受限', coreObject: 'RawMaterial' },
+  { id: 'Sample', label: '样品', terms: ['样品'], source: 'lims.sample', key: 'sample_id', fields: ['sample_id', 'material_batch_no', 'collected_at'], classification: '质量受限', coreObject: 'RawMaterial' },
+  { id: 'CAPA', label: 'CAPA', terms: ['CAPA', '纠正预防'], source: 'qms.capa', key: 'capa_id', fields: ['capa_id', 'source_deviation', 'owner', 'due_date', 'status'], classification: '质量受限', coreObject: 'RawMaterial' },
+  { id: 'QualityEvent', label: '质量事件', terms: ['质量事件'], source: 'qms.quality_event', key: 'event_id', fields: ['event_id', 'product', 'category', 'severity', 'status'], classification: '质量受限', coreObject: 'Product' },
+  { id: 'Order', label: '销售订单', terms: ['销售订单', '客户订单'], source: 'oms.order', key: 'order_id', fields: ['order_id', 'store_id', 'channel', 'sku', 'delivery_status'], classification: '门店运营受限', coreObject: 'Store' },
+  { id: 'Fulfillment', label: '履约单', terms: ['履约单', '发货记录'], source: 'oms.fulfillment', key: 'fulfillment_id', fields: ['fulfillment_id', 'order_id', 'carrier', 'status', 'dispatched_at'], classification: '门店运营受限', coreObject: 'Store' }
 ]);
 
 export const CANDIDATE_CATALOG_SIZE = CANDIDATE_CATALOG.length;
@@ -76,9 +92,11 @@ export function matchCandidateCatalog(sourceText) {
  * `worldObjectTypes`（世界模型里被建模的对象）。此前从没有人把它们对起来看过，
  * 于是「兜底路径能命中多少」这件事一直没有数量级。
  *
- * 之所以要披露而不是直接**补齐**：候选目录是关键词兜底的**词表**，
- * 补词条等于扩写受控词汇表，属词表治理决策（谁负责、依据什么、如何失效），
- * 不在本阶段擅自做（决策 6：不放宽任何门槛，也不自动补候选对象）。
+ * 之所以曾经只披露而不补齐：候选目录是关键词兜底的**词表**，补词条等于扩写受控
+ * 词汇表，属词表治理决策（谁负责、依据什么、如何失效）。该决策已于 2026-09-28
+ * 由用户作出并执行第一轮（见 CANDIDATE_CATALOG 头注）：**有系统字段声明**的 8 类
+ * 已补词条；**无声明的 6 类**仍留在差集里——它们是该函数如今的主要产出，
+ * 补救方式仍是「补声明或上传结构化字典」，不是补词条。
  */
 export function listCatalogGaps(definitions = systemDefinitions) {
   const declared = new Set(CANDIDATE_CATALOG.map((item) => item.id));

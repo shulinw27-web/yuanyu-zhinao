@@ -1,5 +1,14 @@
 # 当前项目状态
 
+2026-09-28（第二段）**阶段 4h 收尾：词表治理第一轮 + `no_identifier` 数据驱动用例 + 前端链接披露面板**（用户指示「未完成项全部完成」，均不改变 [ADR-025](../architecture/adr/ADR-025-object-mention-linking.md) 核心契约）：
+
+- **词表治理第一轮**（[ADR-022](../architecture/adr/ADR-022-candidate-coverage-disclosure.md) 复审条件 3 部分触发并处置）：8 类**有系统字段声明**的缺口对象（InboundReceipt、InventoryLot、Deviation、Sample、CAPA、QualityEvent、Order、Fulfillment）补入受控目录词条，`fields`/`key` 逐类取自声明侧目录、与链接同源；词条取窄义称呼（「收货单/入库单」「销售订单」「履约单」等），不复制既有过泛词（「订单」「批次」）。目录 12→20 类，目录缺口 14→6；**无声明的 6 类（Warehouse、OutboundShipment、ProcessStep、Specification、ChangeControl、ReturnOrder）有意不补**——词条带来词面命中带不来结构，空壳候选过不了审阅，仍由披露点名。「词表优先、模型兜底」的链接降级与治理主体/失效机制待后续。
+- **`no_identifier` 数据驱动用例**：`buildMentionLinkCandidates` 加声明透传缝（`objects` 参数，默认空＝行为不变），测试注入「有字段、无主键」声明直达该分支——分支从此有验证，不再等真实证据。
+- **前端披露面板**：元域智语 `SemanticAgentWorkspace.vue` 新增「受控对象链接」块（与 4g 覆盖面并列）：`skipped` 前提、逐条 `structured` 标记、结构缺口三类信息上界面。
+- **验收（本机实测）**：`test:mention` **7/7**（新增 no_identifier 用例）；`test:semantic` **6/6 + 61/61 + 98/98**（既有断言按词表治理同步更新 4 处数字：目录 12→20、缺口 14→6，其余断言零改动）；元域智语端测试 **61/61** + 构建 2.89s；lint 干净。**边界（如实）**：`evaluate:mention-linking` 真实模型评测当日多次尝试均因 WorkBuddy 云服务限流未取得数字，待重跑——**「quality 全绿」不含模型契约**。
+
+---
+
 2026-09-28 **受控对象链接（阶段 4h / [ADR-025](../architecture/adr/ADR-025-object-mention-linking.md)）+ 上一会话未提交增量（[ADR-024](../architecture/adr/ADR-024-custom-system-registration.md) 自定义系统登记）复核入库**：
 
 **① 阶段 4h（今日增量）**：4f/4g 点名了「缺了什么」，但**点名的对象一个都进不了候选**——材料写「采购订单、发运单、出库单、客户投诉」候选只得 1 类，非列举散文写法连启发式都取不到词，这是 4e/4f 共同根因（候选仍来自硬编码 12 类目录 + 关键词命中）。用户在三路径中选定**受控对象链接**：新增 `semantic-object-mention-service.js`，模型只输出 `{ mention, evidence, objectType }`，服务端三重校验（证据逐字来自材料、证据含提称、类型在系统目录 `worldObjectTypes` 登记索引内），任一不满足**整份拒绝**（不局部挽救，与 `validateNaturalSchema` 同严格度）；**模型不给结构、不断言系统**——候选结构只来自系统声明（`buildSystemFieldCatalog` 声明侧目录），主键用 4a 同一套 `inferIdentifier` 判据（实测 14 类目录缺口中 8 类有声明的类型主键全部可判定：`InboundReceipt.receipt_id` 走自身概念、`Order.order_id` 走对象名派生）。链接只在「结构化材料与自然语言抽取都没产出对象」时运行；mock 运行时与显式空范围跳过并带原因（纯函数）。两类「链接了但给不出结构」分开点名（`no_declaration`：如 `OutboundShipment` 类型已登记但系统无字段声明；`no_identifier`）不进候选只披露；候选一律 `mappingStatus: 'pending'`，Critic「字段来源映射」照常拦截未映射就采纳；链接候选生效时目录兜底被抑制；披露落 `candidateCoverage.mentionLinking`（`skipped` 前提位 + 逐条 `structured` 标记 + `structureGaps`）。**对 ADR-022 决策 6「点名不进候选」的收窄推翻已记录在案**（未放宽任何关口），ADR-021 复审条件 1 与 ADR-022 复审条件 2 同步标记部分关闭。

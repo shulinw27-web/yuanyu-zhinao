@@ -582,7 +582,7 @@ test('阶段 4f：受控目录命中与「未做自然语言抽取」的原因�
   assert.ok(catalogNote, `reviewNotes 未披露受控目录命中：${JSON.stringify(proposal.reviewNotes)}`);
   assert.match(catalogNote, /PurchaseOrder ← 采购订单/);
   assert.match(catalogNote, /Supplier ← 供应商/);
-  assert.match(catalogNote, /受控目录共 12 类/);
+  assert.match(catalogNote, /受控目录共 20 类/);
   // 覆盖率与「可能漏了什么」必须一起说：这才说明白它只是词面匹配，不是「材料里的对象都在这了」。
   assert.match(catalogNote, /目录未覆盖的业务对象\*\*不会\*\*出现在候选里/);
 
@@ -630,7 +630,8 @@ test('阶段 4g：目录空白与未覆盖提及都必须可点名，但都不�
   const coverage = proposal.candidateCoverage;
   assert.ok(coverage, '提案上没有 candidateCoverage');
   assert.equal(coverage.catalogSize, CANDIDATE_CATALOG_SIZE);
-  assert.equal(coverage.catalogSize, 12);
+  // 词表治理第一轮（2026-09-28）后目录 12+8=20 类；无声明的 6 类缺口仍在。
+  assert.equal(coverage.catalogSize, 20);
   // 「兜底路径是否生效」是解读整份披露的前提：目录没被用到时，说「命中 0 类」会误导。
   assert.equal(coverage.fallbackApplied, true);
   assert.deepEqual(coverage.matched, [{ id: 'PurchaseOrder', matchedTerms: ['采购订单', '订单'] }]);
@@ -638,7 +639,9 @@ test('阶段 4g：目录空白与未覆盖提及都必须可点名，但都不�
   // ② 目录空白（确定性）：平台已治理、但候选目录没有词条的对象类，必须点名。
   //    「发运单 / 出库单」进不来不是运营没写清——WMS 的世界模型里有 OutboundShipment，
   //    但受控目录里没有任何词条承载它。这一项此前没有任何地方能看出来。
-  assert.equal(coverage.gaps.length, 14);
+  //    词表治理第一轮（2026-09-28）补了 8 类**有声明**对象的词条，缺口 14→6；
+  //    OutboundShipment 无声明，仍在缺口里——词条补不了结构，这是有意保留。
+  assert.equal(coverage.gaps.length, 6);
   assert.ok(coverage.gaps.some((item) => item.objectType === 'OutboundShipment' && item.system === 'WMS'));
   assert.ok(coverage.gaps.every((item) => !CANDIDATE_CATALOG.some((entry) => entry.id === item.objectType)));
 
@@ -653,7 +656,7 @@ test('阶段 4g：目录空白与未覆盖提及都必须可点名，但都不�
 
   // ⑤ 审阅说明：三类披露各自说清，且启发式必须自我标注（不能被当成抽取结果）。
   const notes = proposal.reviewNotes;
-  assert.ok(notes.some((note) => /受控目录共 12 类/.test(note)), notes.join('\n'));
+  assert.ok(notes.some((note) => /受控目录共 20 类/.test(note)), notes.join('\n'));
   const gapNote = notes.find((note) => note.includes('在受控目录里没有任何词条'));
   assert.ok(gapNote, notes.join('\n'));
   assert.match(gapNote, /OutboundShipment（WMS）/);
@@ -687,10 +690,11 @@ test('阶段 4g：覆盖面判据是纯函数，可脱离提案逐条取证', ()
   assert.deepEqual(matchCandidateCatalog('根据 ERP 的采购订单与供应商资料建立候选模型。')
     .map((entry) => `${entry.item.id}←${entry.matchedTerms.join('、')}`), ['Supplier←供应商', 'PurchaseOrder←采购订单、订单']);
 
-  // ② 目录空白：与系统目录的世界模型对象求差集，零启发式。14 类是该数据下的实测值，
+  // ② 目录空白：与系统目录的世界模型对象求差集，零启发式。6 类是该数据下的实测值
+  //    （词表治理第一轮补了 8 类有声明的词条后，14→6），
   //    系统目录里增删世界模型对象时这条会失败——这是有意的（与棘轮同一立场）。
   const gaps = listCatalogGaps();
-  assert.equal(gaps.length, 14);
+  assert.equal(gaps.length, 6);
   assert.deepEqual([...new Set(gaps.map((item) => item.system))].sort(), ['LIMS', 'MES', 'OMS', 'QMS', 'WMS']);
   assert.ok(!gaps.some((item) => item.objectType === 'PurchaseOrder'));
 

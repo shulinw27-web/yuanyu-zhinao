@@ -134,11 +134,17 @@ const snakeCase = (value) => String(value || '').replace(/([a-z\d])([A-Z])/g, '$
  * - `no_identifier`：有声明但标识判据不成立（声明里没有可判定的主键）；建议：补主键声明。
  * 这两类都**不进候选**（无主键对象过不了草案校验，也过不了 Critic），只披露。
  *
+ * `objects` 是声明透传缝：`buildSystemFieldCatalog` 原生吃提案对象声明
+ * （`{ id, fields, sourceSystems }`），默认空数组＝只看系统配置声明。`no_identifier`
+ * 分支此前只有「真实声明恰好判不出主键」一条触发路径，现有 8 类有声明的类型全部
+ * 可判定——没有数据驱动用例，分支等于没验证。测试经此缝注入一条有字段、无主键的
+ * 声明即可直达该分支；非测试调用方不传，行为不变。
+ *
  * @returns {{ candidates: Array<object>, gaps: Array<{mention, objectType, system, reason, suggestion}> }}
  */
-export function buildMentionLinkCandidates({ links = [] } = {}) {
+export function buildMentionLinkCandidates({ links = [], objects = [] } = {}) {
   const systems = [...new Set(links.map((link) => link.system))];
-  const catalog = buildSystemFieldCatalog({ objects: [], systems });
+  const catalog = buildSystemFieldCatalog({ objects, systems });
   const entryOf = (link) => {
     const inSystem = catalog.find((group) => group.code === link.system);
     return inSystem?.objects.find((entry) => entry.objectId === link.objectType) || null;

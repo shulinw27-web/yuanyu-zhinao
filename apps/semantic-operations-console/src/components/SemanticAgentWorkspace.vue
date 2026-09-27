@@ -123,6 +123,9 @@ function setLinkMapping(key, field, value) {
 const identityConflictRulings = ref([]);
 const identityRulingGroupsText = ref({});
 const aliasConflicts = computed(() => (selected.value?.proposal?.identityLinking?.conflicts || []).filter((item) => item.kind === 'alias_divergence'));
+// 阶段 4h（ADR-025）：受控对象链接的披露面。null＝提案没带（模型路径之外）；
+// skipped＝链接没跑（模拟运行时 / 无范围），linked＝模型给出的逐字链接及其结构化标记。
+const mentionLinking = computed(() => selected.value?.proposal?.candidateCoverage?.mentionLinking || null);
 const withdrawnIdentityLinks = computed(() => selected.value?.proposal?.identityLinking?.withdrawnLinks || []);
 const rulingOfConcept = (concept) => (identityConflictRulings.value.find((item) => item.concept === concept) || {}).ruling || null;
 // 用**本地编辑器状态**算未裁定概念（服务端那份要等保存后才更新），否则点完裁定列表不变，
@@ -838,6 +841,27 @@ watch(() => selected.value?.id, () => nextTick(() => {
               <span v-for="mention in selected.proposal.candidateCoverage.uncoveredMentions" :key="mention">{{ mention }}</span>
               <small>启发式清单（{{ selected.proposal.candidateCoverage.uncoveredBasis }}），不是对象抽取结果：可能混入非对象词，也可能漏掉没有用分隔符列出的对象名。这些词不会进入候选，请人工核对。</small>
             </div>
+          </div>
+          <!--
+            阶段 4h（ADR-025）：受控对象链接的披露。与上面的词面兜底并列，但来源不同：
+            模型把材料里的**逐字称呼**对应到系统目录**已登记**的对象类型，服务端逐字校验后
+            才可能成候选。`skipped` 是解读前提（模拟运行时下链接没跑，「linked 为空」不说明
+            材料里没有已登记对象）；每条链接带 structured 标记——给不出结构的留在
+            structureGaps（系统无声明 / 声明里识别不出主键），只披露、不进候选。
+          -->
+          <div v-if="mentionLinking" class="candidate-coverage mention-linking">
+            <b>受控对象链接 · {{ mentionLinking.skipped ? '未运行' : `模型链接 ${mentionLinking.linked.length} 条` }}</b>
+            <template v-if="!mentionLinking.skipped">
+              <span v-for="link in mentionLinking.linked" :key="`${link.system}.${link.objectType}`">{{ link.mention }} → {{ link.objectType }}（{{ link.system }}）· {{ link.structured ? '已成候选（字段映射待确认）' : '无候选结构' }}</span>
+              <small v-if="mentionLinking.truncated">链接共 {{ mentionLinking.total }} 条，仅显示前 {{ mentionLinking.linked.length }} 条；同一对象的多条提及已合并 {{ mentionLinking.mergedDuplicates }} 条。</small>
+              <small v-else-if="mentionLinking.mergedDuplicates">同一对象的多条提及已合并 {{ mentionLinking.mergedDuplicates }} 条（材料里多次提到同一个对象是一个对象，不是多个）。</small>
+              <div v-if="mentionLinking.structureGaps.length" class="scope-findings warning">
+                <b>链接成立但给不出候选结构 · {{ mentionLinking.structureGaps.length }}</b>
+                <span v-for="gap in mentionLinking.structureGaps" :key="`${gap.system}.${gap.objectType}`">{{ gap.mention }}→{{ gap.objectType }}（{{ gap.system }} · {{ gap.reason === 'no_declaration' ? '系统无字段声明' : '声明里识别不出主键' }}）</span>
+                <small>这些对象类型已在系统目录登记、材料里也逐字提到，但该系统没有可用的字段/主键声明，无法形成有结构的候选（空壳候选过不了审阅）。请补系统声明或上传结构化数据字典后重跑。</small>
+              </div>
+            </template>
+            <small v-else>{{ mentionLinking.skipReason }}</small>
           </div>
           <div v-if="selected.proposal.editDiff" class="edit-diff-summary"><b>人工修订 Diff · 第 {{ selected.proposal.revision }} 版</b><span>新增对象 {{ selected.proposal.editDiff.summary.addedObjects }}</span><span>修改对象 {{ selected.proposal.editDiff.summary.updatedObjects }}</span><span>删除对象 {{ selected.proposal.editDiff.summary.removedObjects }}</span><span>新增关系 {{ selected.proposal.editDiff.summary.addedRelationships }}</span><span>删除关系 {{ selected.proposal.editDiff.summary.removedRelationships }}</span></div>
 

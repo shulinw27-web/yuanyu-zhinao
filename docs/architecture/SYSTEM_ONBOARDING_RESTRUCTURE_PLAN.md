@@ -1236,4 +1236,4 @@ requestedSystems.length ? requestedSystems : connectorCatalog.filter(item => ite
 
 **验收（本机实测，确定性用例，未调模型）**：`test:mention` **6/6**（新增，已挂入 `test:all`）；`test:semantic` **6/6 + 61/61 + 98/98**（既有断言零改动——mock 下候选集合与 4g 完全一致）；`test:architecture` **10/10**（登记 2 条与 `semantic-natural-schema-service` 同性质的网关/提示安全边）；lint 干净。**真实模型评测**：2026-09-28 两次尝试均因 WorkBuddy 云服务限流（`WORKBUDDY_CLOUD_QUOTA_RATE_LIMITED`）未取得数字，脚本就绪待配额恢复后重跑——**「quality 全绿」不含模型契约**的口径不变。
 
-**边界**：词表治理仍未做（中文词 ↔ 已登记类型的对应在运行时由模型给出，不是词表资产）；`no_identifier` 分支无数据驱动用例（现有 8 类有声明的类型主键全部可判定）；前端组件未改（披露经既有数据面与审阅说明到达界面）。决策记录见 [ADR-025](adr/ADR-025-object-mention-linking.md)。
+**边界（2026-09-28 第二段更新）**：同日用户指示「未完成项全部完成」后，三项已闭环——① **词表治理第一轮**：8 类**有声明**缺口对象补入受控目录词条（字段/主键取自声明侧目录，12→20 类），无声明的 6 类有意不补（词条带不来结构），缺口 14→6（ADR-022 复审条件 3 部分触发并处置）；② `no_identifier` 数据驱动用例已补（`buildMentionLinkCandidates` 加声明透传缝，默认行为不变）；③ 前端「受控对象链接」披露面板已加（`skipped` 前提、structured 标记、结构缺口上界面）。**仍开放**：真实模型评测因云服务限流未取得数字（待重跑）；「词表优先、模型兜底」的链接降级与词表治理主体/失效机制待后续。决策记录见 [ADR-025](adr/ADR-025-object-mention-linking.md)。
