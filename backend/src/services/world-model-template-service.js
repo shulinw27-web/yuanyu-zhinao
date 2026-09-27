@@ -105,8 +105,6 @@ const WORLD_KEY = 'drafts';
 const initialWorldDrafts = () => [];
 const getDraftState = () => readState(WORLD_NAMESPACE, semanticTenantStateKey(WORLD_KEY), initialWorldDrafts);
 const now = () => new Date().toISOString();
-const canConfigure = (role) => ['executive', 'quality_manager'].includes(role?.id);
-const canPublish = (role) => role?.id === 'executive';
 const templateById = (id) => templates.find((item) => item.id === id);
 
 const buildDraft = (template, target, actor) => ({
@@ -131,7 +129,10 @@ export const getWorldModelDrafts = (roleId) => {
 };
 
 export const createWorldModelDraft = ({ templateId, targetId }, role) => {
-  if (!canConfigure(role)) return { error: '当前角色无权创建世界模型配置草稿。' };
+  // 阶段 6 等价合并（2026-09-28）：此前的硬编码角色白名单（executive/quality_manager，
+  // canConfigure/canPublish）与 IAM 按钮权限重复，且是隐藏的第二道闸门——合并后
+  // **权限系统是唯一权威**：创建/校验由路由闸门 meta_model.draft.save / meta_model.draft.validate
+  // 把守，发布由 meta_model.publish 把守（仅授予 executive）。读侧按角色的数据可见性不受影响。
   const template = templateById(templateId);
   const target = getConnectionTargets().find((item) => item.id === targetId);
   if (!template || !target) return { error: '模板或目标系统不存在。' };
@@ -145,7 +146,6 @@ export const createWorldModelDraft = ({ templateId, targetId }, role) => {
 };
 
 export const validateWorldModelDraft = (id, role) => {
-  if (!canConfigure(role)) return { error: '当前角色无权校验世界模型配置草稿。' };
   return mutateState(WORLD_NAMESPACE, semanticTenantStateKey(WORLD_KEY), initialWorldDrafts, (drafts) => {
   const draft = drafts.find((item) => item.id === id);
   if (!draft) return { commit: false, result: { error: '未找到世界模型草稿。' } };
@@ -164,7 +164,6 @@ export const validateWorldModelDraft = (id, role) => {
 };
 
 export const publishWorldModelDraft = (id, role) => {
-  if (!canPublish(role)) return { error: '仅管理层可发布世界模型配置版本。' };
   return mutateWithDomainEvent({ namespace: WORLD_NAMESPACE, key: semanticTenantStateKey(WORLD_KEY), initialValue: initialWorldDrafts, mutation: (drafts) => {
   const draft = drafts.find((item) => item.id === id);
   if (!draft) return { commit: false, result: { error: '未找到世界模型草稿。' } };

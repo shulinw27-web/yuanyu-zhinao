@@ -109,7 +109,7 @@ test('multi-role helpers expose one effective role set for business authorizatio
     assert.equal(selectEffectiveRole('marketing_manager', ['executive'], market.account)?.id, 'executive');
     assert.equal(selectEffectiveRoleForPermission('marketing_manager', 'meta_model.draft.save', market.account)?.id, 'marketing_manager');
     assert.equal(selectEffectiveRoleForPermission('marketing_manager', 'agent.evaluation.run', market.account)?.id, 'executive');
-    assert.equal(selectEffectiveRoleForPermission('marketing_manager', 'world.draft.create', market.account)?.id, 'executive');
+    assert.equal(selectEffectiveRoleForPermission('marketing_manager', 'meta_model.publish', market.account)?.id, 'executive');
   } finally {
     await updateIAMUser(market.id, market, assigned.user.version);
   }

@@ -54,11 +54,7 @@ export const permissionCatalog = [
   },
   {
     id: 'menu.world', menuId: 'world', name: '元模型', pagePermissionId: 'page.world.view', description: '对象、关系与事实层',
-    buttons: [
-      { id: 'world.draft.create', name: '创建模型草稿', risk: 'medium' },
-      { id: 'world.draft.validate', name: '校验模型草稿', risk: 'medium' },
-      { id: 'world.draft.publish', name: '发布模型版本', risk: 'high' }
-    ]
+    buttons: []
   },
   {
     id: 'menu.channels', menuId: 'channels', name: '通知渠道', pagePermissionId: 'page.channels.view', description: '告警送达与升级策略',
@@ -119,7 +115,7 @@ export const initialRolePolicies = {
   },
   quality_manager: {
     roleId: 'quality_manager', menuIds: ['dashboard', 'intelligence', 'agent', 'risks', 'world', 'channels', 'config'],
-    buttonPermissionIds: ['dashboard.refresh', 'intelligence.drilldown', 'agent.prompt.run', 'agent.command.execute', 'risk.detail.view', 'risk.acknowledge', 'world.draft.create', 'world.draft.validate', 'simulation.approval.decide', 'meta_model.draft.save', 'meta_model.draft.validate', 'meta_model.simulate'],
+    buttonPermissionIds: ['dashboard.refresh', 'intelligence.drilldown', 'agent.prompt.run', 'agent.command.execute', 'risk.detail.view', 'risk.acknowledge', 'simulation.approval.decide', 'meta_model.draft.save', 'meta_model.draft.validate', 'meta_model.simulate'],
     dataScope: { mode: 'selected_orgs', organizationIds: ['org-quality-dept', 'org-market-dept'] }, version: 1
   },
   production_manager: {

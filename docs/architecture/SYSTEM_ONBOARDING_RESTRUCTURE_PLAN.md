@@ -1237,3 +1237,13 @@ requestedSystems.length ? requestedSystems : connectorCatalog.filter(item => ite
 **验收（本机实测，确定性用例，未调模型）**：`test:mention` **6/6**（新增，已挂入 `test:all`）；`test:semantic` **6/6 + 61/61 + 98/98**（既有断言零改动——mock 下候选集合与 4g 完全一致）；`test:architecture` **10/10**（登记 2 条与 `semantic-natural-schema-service` 同性质的网关/提示安全边）；lint 干净。**真实模型评测**：2026-09-28 两次尝试均因 WorkBuddy 云服务限流（`WORKBUDDY_CLOUD_QUOTA_RATE_LIMITED`）未取得数字，脚本就绪待配额恢复后重跑——**「quality 全绿」不含模型契约**的口径不变。
 
 **边界（2026-09-28 第二段更新）**：同日用户指示「未完成项全部完成」后，三项已闭环——① **词表治理第一轮**：8 类**有声明**缺口对象补入受控目录词条（字段/主键取自声明侧目录，12→20 类），无声明的 6 类有意不补（词条带不来结构），缺口 14→6（ADR-022 复审条件 3 部分触发并处置）；② `no_identifier` 数据驱动用例已补（`buildMentionLinkCandidates` 加声明透传缝，默认行为不变）；③ 前端「受控对象链接」披露面板已加（`skipped` 前提、structured 标记、结构缺口上界面）。**仍开放**：真实模型评测因云服务限流未取得数字（待重跑）；「词表优先、模型兜底」的链接降级与词表治理主体/失效机制待后续。决策记录见 [ADR-025](adr/ADR-025-object-mention-linking.md)。
+
+---
+
+### 阶段 6（第一段）：权限等价合并——world.draft.* 并入 meta_model.*（ADR-026）—— **已完成（2026-09-28）**
+
+阶段 6 的核心决策「合并策略」由用户在三策略（等价合并 / 收窄合并 / 模板专用权限）中选定**等价合并**（2026-09-28）。三步落地：① `world.draft.create/validate/publish` 权限条目与全部代码引用删除，语义等价映射到 `meta_model.draft.save / draft.validate / publish`；② **删除服务层隐藏的第二道闸门**（`world-model-template-service.js` 的 `canConfigure`/`canPublish` 硬编码白名单——它此前与 IAM 重复且不可见），权限系统成为唯一权威，发布仍由 `meta_model.publish`（仅 executive）把守；③ 前端闸门换码（`canConfigureMapping` 等），`WorldModelTemplateConfig` 角色白名单保留（持权角色可见性零变化）。
+
+**如实披露**：对原持权两角色零变化；映射草稿闸门与接入侧写入同闸后，另三角色（本就持接入侧写入权限）的该入口随之打开——「同一把闸门」的既定语义；动作角色从「executive 回退」变为「持权主角色本人」（`permission-api-hardening` 实测暴露并更新断言）。**不变式**：已发布模型指纹与版本号不变；发布权威未稀释。决策记录见 [ADR-026](adr/ADR-026-permission-equivalence-merge.md)。
+
+**验收（本机实测）**：`test:permissions` **29/29**（含新增语义断言）；`test:access` **13/13**；`test:semantic` **6/6 + 61/61 + 98/98**；`test:events` **17/17**；`test:scope` **12/12**；元域智语端测试 **61/61**；lint 干净。**剩余**：4.3 的 `world` 菜单去留（全迁删页 / 只读指针 / 部分保留）仍待用户决策，属阶段 6 第二段 / 阶段 7 菜单收缩。

@@ -1,5 +1,7 @@
 # 当前项目状态
 
+2026-09-28（第三段）**阶段 6 第一段：权限等价合并（[ADR-026](../architecture/adr/ADR-026-permission-equivalence-merge.md)）**——用户在三策略中选定**等价合并**：`world.draft.create/validate/publish` 全部删除并语义等价映射到 `meta_model.draft.save / draft.validate / publish`；**删除服务层隐藏的第二道闸门**（`world-model-template-service.js` 硬编码角色白名单，与 IAM 重复且不可见），权限系统成为唯一权威——发布仍由 `meta_model.publish`（仅 executive）把守；前端闸门换码，模板配置角色白名单保留（持权角色可见性零变化）。如实披露：映射草稿闸门与接入侧写入同闸后，另三角色的该入口随「同一把闸门」语义打开；动作角色从 executive 回退变为持权主角色本人。验收：`test:permissions` **29/29**、`test:access` **13/13**、`test:semantic` **6+61+98**、`test:events` **17/17**、`test:scope` **12/12**、元域智语 **61/61**。不变式：已发布模型指纹与版本号不变。剩余：4.3 的 `world` 菜单去留待决策（阶段 6 第二段 / 阶段 7）。
+
 2026-09-28（第二段）**阶段 4h 收尾：词表治理第一轮 + `no_identifier` 数据驱动用例 + 前端链接披露面板**（用户指示「未完成项全部完成」，均不改变 [ADR-025](../architecture/adr/ADR-025-object-mention-linking.md) 核心契约）：
 
 - **词表治理第一轮**（[ADR-022](../architecture/adr/ADR-022-candidate-coverage-disclosure.md) 复审条件 3 部分触发并处置）：8 类**有系统字段声明**的缺口对象（InboundReceipt、InventoryLot、Deviation、Sample、CAPA、QualityEvent、Order、Fulfillment）补入受控目录词条，`fields`/`key` 逐类取自声明侧目录、与链接同源；词条取窄义称呼（「收货单/入库单」「销售订单」「履约单」等），不复制既有过泛词（「订单」「批次」）。目录 12→20 类，目录缺口 14→6；**无声明的 6 类（Warehouse、OutboundShipment、ProcessStep、Specification、ChangeControl、ReturnOrder）有意不补**——词条带来词面命中带不来结构，空壳候选过不了审阅，仍由披露点名。「词表优先、模型兜底」的链接降级与治理主体/失效机制待后续。

@@ -299,7 +299,7 @@ test('路由：接入读取沿用页面权限，接入写入仍需 meta_model.dr
 
   const unknownRoleMapping = await callRoute({ method: 'POST', path: '/api/semantic-operations/systems/LIMS/mapping-drafts', actionRole: null });
   assert.equal(unknownRoleMapping.status, 403);
-  assert.equal(unknownRoleMapping.value.denied, 'world.draft.create');
+  assert.equal(unknownRoleMapping.value.denied, 'meta_model.draft.save');
 
   const detailDenied = await callRoute({ method: 'GET', path: '/api/semantic-operations/systems/ERP', role: 'marketing_manager' });
   assert.equal(detailDenied.status, 200);

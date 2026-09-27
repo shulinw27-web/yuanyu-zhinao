@@ -98,10 +98,12 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
     return true;
   }
   // ── 系统接入（阶段 2：从管理 Web config 页迁出，命名空间统一到元域智语端） ──────
-  // 权限分界（有意的，不是遗漏）：
+  // 权限分界（阶段 6 等价合并后收敛为一把闸门体系）：
   //   * 系统接入自身的写入（连通性探测）走 meta_model.draft.save —— 与建模侧同一把闸门。
-  //   * 「元模型连接模板 / 映射草稿」仍然走 world.draft.*：它们是既有的受治理世界模型
-  //     机制，本阶段只迁移入口，权限合并属阶段 6（否则会在阶段 2 提前改变权限矩阵）。
+  //   * 「元模型连接模板 / 映射草稿」原走 world.draft.*（阶段 6 等价合并，用户决策 2026-09-28）：
+  //     create→meta_model.draft.save、validate→meta_model.draft.validate、publish→meta_model.publish。
+  //     语义等价映射对两处原持权角色零变化；映射草稿闸门与接入侧写入同闸后，
+  //     其余三角色的该入口随之打开——与「接入侧写入同一把闸门」的既有语义一致。
   // 旧端点 /api/world-model/* 本阶段保留一个版本周期，但管理 Web 已无入口。
   //
   // 为什么把 validate / publish 也一并搬过来：管理 Web 上这三个按钮原本都是有处理器的，
@@ -167,8 +169,8 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
       send(res, result.error ? result.status || 400 : 200, result.error ? { message: result.error, code: result.code } : result);
       return true;
     }
-    const actionRole = selectActionRole('world.draft.create');
-    if (!actionRole) { denyButton('world.draft.create'); return true; }
+    const actionRole = selectActionRole('meta_model.draft.save');
+    if (!actionRole) { denyButton('meta_model.draft.save'); return true; }
     const template = templateFor(code);
     if (!template) {
       send(res, 409, { message: `系统 ${code.toUpperCase()} 尚无元模型连接模板，不能生成映射草稿。`, code: 'SYSTEM_MAPPING_TEMPLATE_MISSING' });
@@ -181,7 +183,7 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
   if (systemAccessDraftMatch && req.method === 'POST') {
     const draftId = decodeURIComponent(systemAccessDraftMatch[2]);
     const action = systemAccessDraftMatch[3];
-    const permissionId = action === 'validate' ? 'world.draft.validate' : 'world.draft.publish';
+    const permissionId = action === 'validate' ? 'meta_model.draft.validate' : 'meta_model.publish';
     const actionRole = selectActionRole(permissionId);
     if (!actionRole) { denyButton(permissionId); return true; }
     const result = action === 'validate' ? validateWorldModelDraft(draftId, actionRole) : publishWorldModelDraft(draftId, actionRole);
@@ -395,8 +397,8 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
     return true;
   }
   if (req.method === 'POST' && url.pathname === '/api/world-model/drafts') {
-    const actionRole = selectActionRole('world.draft.create');
-    if (!actionRole) { denyButton('world.draft.create'); return true; }
+    const actionRole = selectActionRole('meta_model.draft.save');
+    if (!actionRole) { denyButton('meta_model.draft.save'); return true; }
     const result = createWorldModelDraft(await readBody(req), actionRole);
     send(res, result.error ? 403 : 200, result);
     return true;
@@ -404,7 +406,7 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
   const draftActionMatch = url.pathname.match(/^\/api\/world-model\/drafts\/([^/]+)\/(validate|publish)$/);
   if (req.method === 'POST' && draftActionMatch) {
     const [, draftId, action] = draftActionMatch;
-    const permissionId = action === 'validate' ? 'world.draft.validate' : 'world.draft.publish';
+    const permissionId = action === 'validate' ? 'meta_model.draft.validate' : 'meta_model.publish';
     const actionRole = selectActionRole(permissionId);
     if (!actionRole) { denyButton(permissionId); return true; }
     const result = action === 'validate' ? validateWorldModelDraft(draftId, actionRole) : publishWorldModelDraft(draftId, actionRole);

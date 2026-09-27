@@ -7,9 +7,11 @@ const selectedTemplateId = ref('');
 const selectedTargetId = ref('');
 const selectedTemplate = computed(() => props.templates.find((item) => item.id === selectedTemplateId.value));
 const selectedDraft = computed(() => props.drafts.find((item) => item.templateId === selectedTemplateId.value && item.targetId === selectedTargetId.value && item.status !== 'published') || props.drafts.find((item) => item.templateId === selectedTemplateId.value && item.targetId === selectedTargetId.value));
-const canCreate = computed(() => ['executive', 'quality_manager'].includes(props.role) && props.buttonPermissionIds.includes('world.draft.create'));
-const canValidate = computed(() => ['executive', 'quality_manager'].includes(props.role) && props.buttonPermissionIds.includes('world.draft.validate'));
-const canPublish = computed(() => props.role === 'executive' && props.buttonPermissionIds.includes('world.draft.publish'));
+// 阶段 6 等价合并（2026-09-28）：world.draft.* 已删，按钮闸门改挂 meta_model.*；
+// 角色白名单保留——对既有持权角色（executive / quality_manager）可见性零变化。
+const canCreate = computed(() => ['executive', 'quality_manager'].includes(props.role) && props.buttonPermissionIds.includes('meta_model.draft.save'));
+const canValidate = computed(() => ['executive', 'quality_manager'].includes(props.role) && props.buttonPermissionIds.includes('meta_model.draft.validate'));
+const canPublish = computed(() => props.role === 'executive' && props.buttonPermissionIds.includes('meta_model.publish'));
 
 watch(() => props.templates, (templates) => { if (!selectedTemplateId.value && templates.length) selectedTemplateId.value = templates[0].id; }, { immediate: true });
 watch(selectedTemplate, (template) => { if (!template) return; const preferred = props.targets.find((target) => template.targets.includes(target.id)) || props.targets[0]; if (preferred) selectedTargetId.value = preferred.id; }, { immediate: true });

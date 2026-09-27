@@ -7,9 +7,9 @@ import { WorldModelTemplateConfig } from '@healthcare-ai/agent-ui/system-access'
 // 定位：元域智语端的「系统接入」取代原「企业接入」的主视角，材料准备降为同页次级标签。
 // 数据来源：/api/semantic-operations/systems*（后端 system-onboarding 域）。
 //
-// 权限分界（与后端一致，不在此处放宽）：
+// 权限分界（与后端一致，不在此处放宽；阶段 6 等价合并后 world.draft.* 已删）：
 //   canProbe          → meta_model.draft.save：连通性探测是接入侧写入
-//   canConfigureMapping → world.draft.create：映射草稿仍是受治理的世界模型机制
+//   canConfigureMapping → meta_model.draft.save：映射草稿与接入侧写入同一把闸门
 //   canReadMapping    → page.world.view：读取连接模板/目标/草稿的页面门槛
 const props = defineProps({
   client: { type: Object, required: true },
@@ -186,7 +186,7 @@ async function createMappingDraft() {
   }
 }
 
-// 校验 / 发布沿用既有世界模型治理链路（world.draft.validate / world.draft.publish）。
+// 校验 / 发布沿用既有世界模型治理链路（阶段 6 等价合并后为 meta_model.draft.validate / meta_model.publish）。
 // 这里不做任何本地「假装通过」：状态与校验结论都由服务端返回后重新拉取草稿列表得到。
 async function governMappingDraft(action, draftId) {
   const code = selectedCode.value;
@@ -558,7 +558,7 @@ onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; detailGenerati
                 <button type="button" class="sa-outline" :disabled="!canConfigureMapping || !selectedTemplate || creatingDraft" @click="createMappingDraft">{{ creatingDraft ? '正在生成…' : selectedDraft ? '查看 / 复用映射草稿' : '生成映射草稿' }}</button>
                 <span v-if="!canReadMapping" class="sa-help">当前身份没有模型页面读取权限，连接模板与草稿不在此展示。</span>
                 <span v-else-if="!selectedTemplate" class="sa-help">该系统尚无元模型连接模板，不能生成映射草稿。</span>
-                <span v-else-if="!canConfigureMapping" class="sa-help">生成映射草稿需要 world.draft.create 权限（本阶段沿用既有世界模型权限，合并属阶段 6）。</span>
+                <span v-else-if="!canConfigureMapping" class="sa-help">生成映射草稿需要 meta_model.draft.save 权限（阶段 6 等价合并后与接入侧写入同一把闸门）。</span>
               </div>
               <p v-if="mappingMessage" class="sa-notice" role="status">{{ mappingMessage }}</p>
               <WorldModelTemplateConfig

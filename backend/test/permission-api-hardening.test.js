@@ -132,7 +132,9 @@ test('HTTP page gates, multi-role business actions, and risk response redaction 
       body: { templateId: templates.payload[0].id, targetId: targets.payload[0].id }
     });
     assert.equal(worldDraft.status, 200);
-    assert.equal(worldDraft.payload.draft.createdBy, '管理层');
+    // 阶段 6 等价合并：创建闸门为 meta_model.draft.save，动作角色是持有该权限的主角色
+    // （marketing_manager）本人，不再回退到持 world.draft.create 的 executive。
+    assert.equal(worldDraft.payload.draft.createdBy, '市场负责人');
 
     const deniedEvaluation = await call('/agent/evaluations/run', 'quality_manager', { method: 'POST', body: {} });
     assert.equal(deniedEvaluation.status, 403);
