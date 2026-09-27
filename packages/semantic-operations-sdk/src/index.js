@@ -111,6 +111,7 @@ export function createSemanticOperationsClient({ baseUrl, platform = 'semantic-w
     // 旧端点 /api/world-model/* 保留一个版本周期，本端不再直接调用。
     systemAccess: () => request('/semantic-operations/systems'),
     systemAccessDetail: (code) => request(`/semantic-operations/systems/${encodeURIComponent(code)}`),
+    registerSystemOnboarding: (payload) => post('/semantic-operations/systems', payload),
     systemAccessMappingTemplates: () => request('/semantic-operations/systems/mapping-templates'),
     systemAccessConnectionTargets: () => request('/semantic-operations/systems/connection-targets'),
     systemAccessMappingDrafts: () => request('/semantic-operations/systems/mapping-drafts'),

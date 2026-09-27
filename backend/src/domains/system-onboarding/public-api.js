@@ -6,14 +6,16 @@
 //   * 系统接入在本次重构中已成为独立关注点：它有独立的事实源（data/system-catalog.js）、
 //     独立的状态机（接入生命周期）与独立的多租户资产（租户级接入实例与探测结果），
 //     与「元模型 / 世界模型」的治理关注点并不重合。
-//   * 对外暴露 5 项契约：边界声明、总览、详情、探测、生命周期操作。元模型连接模板
-//     与映射草稿仍由 governance 域提供，由路由层组合——本域不做「重导出管道」。
-//   * 2026-09-26：第 5 项（生命周期操作）是补齐接入流程的缺口——状态机早已在注册表
-//     定义，却从未暴露为可执行动作，导致界面上的接入状态只能看种子值。见 ADR-023。
+//   * 对外暴露 6 项契约：边界声明、总览、详情、登记自定义系统、探测、生命周期操作。
+//     元模型连接模板与映射草稿仍由 governance 域提供，由路由层组合——本域不做「重导出管道」。
+//   * 2026-09-26：第 5 项（生命周期操作）补齐了 ADR-023 的接入流程缺口；同日第 6 项
+//     （登记自定义系统）落实 ADR-024：接入清单不再预设备待接入/未登记系统，
+//     「新增接入」变成租户提交接入物料、任意命名的登记动作。见 ADR-024。
 export {
   SYSTEM_ACCESS_BOUNDARY,
   getSystemAccessOverview,
   getSystemAccessDetail,
+  registerSystemOnboarding,
   probeSystemConnection,
   transitionTenantSystemConnection
 } from '../../services/system-access-service.js';

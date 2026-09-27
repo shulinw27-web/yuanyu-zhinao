@@ -17,13 +17,25 @@ import {
   getSystemDefinitions, getSystemByCode, getSystemRegistrySnapshot,
   getConnectorSurfaceSystemCodes, getRecordSurfaceSystemIds, detectSystemCodesInText,
   getTenantSystemConnections, getTenantSystemConnection,
-  transitionSystemConnection, canTransitionSystemConnection, SYSTEM_REGISTRY_NAMESPACE
+  registerTenantCustomSystem, transitionSystemConnection, canTransitionSystemConnection, SYSTEM_REGISTRY_NAMESPACE
 } from '../src/services/system-registry-service.js';
 
 if (process.env.NODE_ENV !== 'test' || process.env.RUNTIME_STORE_DRIVER !== 'memory') throw new Error('Use the runtime-test-bootstrap memory store.');
 
 const identity = (tenantId) => ({ tenantId, subjectId: 'registry-tester', deviceId: 'device-1' });
 const within = (tenantId, work) => runWithSemanticTenant(identity(tenantId), work);
+
+// 自定义系统登记物料（ADR-024）：覆盖七个必填项的最小合法样例。
+const registrationMaterials = (overrides = {}) => ({
+  name: '供应商协同中台',
+  domain: '供应链',
+  description: '管理供应商准入、资质、绩效与合同协同的外部平台，覆盖寻源到付款全流程。',
+  keyEntities: ['供应商档案', '绩效评分', '合同'],
+  dataDomains: ['production', 'internal'],
+  accessIntention: '读取供应商资质与绩效数据，支撑采购风险分析与供应商画像。',
+  businessOwner: '采购负责人',
+  ...overrides
+});
 
 test.beforeEach(() => resetRuntimeState([SYSTEM_REGISTRY_NAMESPACE]));
 
@@ -42,8 +54,8 @@ test('唯一事实源：5 处历史系统定义全部由注册表派生', () => 
   assert.deepEqual(getMcpConnectors('executive').connectors.map((item) => item.system), ['OA', 'ERP', 'WMS', 'MES', 'LIMS', 'QMS', 'OMS']);
   // 处 3：文本别名表（12 个系统，顺序即目录声明顺序）
   assert.deepEqual(getSystemDefinitions().map((item) => item.code), ['OA', 'ERP', 'WMS', 'MES', 'LIMS', 'QMS', 'OMS', 'SRM', 'MDM', 'PLM', 'EAM', 'IOT']);
-  // 处 4：世界模型连接目标
-  assert.deepEqual(getWorldModelConnectionTargets().map((item) => item.id), ['lims', 'mes', 'erp', 'wms', 'qms', 'oms', 'srm', 'oa']);
+  // 处 4：世界模型连接目标（2026-09-26 起只派生 6 个已接入演示样例，不再预设备待接入目标）
+  assert.deepEqual(getWorldModelConnectionTargets().map((item) => item.id), ['lims', 'mes', 'erp', 'wms', 'qms', 'oms']);
   // 处 5：模拟接入场景
   assert.deepEqual(mockOnboardingScenarios.map((scenario) => scenario.systems), [['OMS', 'ERP', 'WMS'], ['QMS', 'MES', 'WMS']]);
 });
@@ -94,17 +106,56 @@ test('文本系统识别：显式码优先、别名回退、未登记系统也�
   assert.deepEqual(detectSystemCodesInText('帮我建个模型'), []);
 });
 
-test('多租户：接入生命周期按租户隔离，且只认受信上下文里的租户', () => {
-  const advance = (tenantId, code, to) => within(tenantId, () => transitionSystemConnection({ code, to, actor: { id: 'architect' }, reason: '联调' }));
-  assert.equal(advance('company-a', 'OA', 'authorized').to, 'authorized');
-  assert.equal(within('company-a', () => getTenantSystemConnection('OA').lifecycleState), 'authorized');
-  // 另一租户完全不受影响，OA 仍停在目录默认的 registered
-  assert.equal(within('company-b', () => getTenantSystemConnection('OA').lifecycleState), 'registered');
-  // 租户标识来自受信上下文，不接受请求体注入
-  assert.equal(within('company-a', () => getTenantSystemConnection('OA').tenantId), 'company-a');
-  assert.equal(within('company-b', () => getTenantSystemConnection('OA').tenantId), 'company-b');
-  // 每个租户都能看到完整的 12 个系统类型（类型是平台级共享资产）
-  assert.equal(within('company-b', () => getTenantSystemConnections().length), 12);
+test('多租户：接入清单＝Mock 演示样例＋租户登记，绝不预设备待接入/未登记系统', () => {
+  // 预设成员只有 6 个 Mock 已连通系统；pending_onboarding / not_registered 的目录类型
+  // （OA/SRM/MDM/PLM/EAM/IOT）一律不进租户清单——接入什么系统完全由租户自己登记（ADR-024）。
+  const base = within('company-b', () => getTenantSystemConnections());
+  assert.deepEqual(base.map((item) => item.code), ['ERP', 'WMS', 'MES', 'LIMS', 'QMS', 'OMS']);
+  assert.ok(base.every((item) => item.lifecycleState === 'connected'));
+  for (const code of ['OA', 'SRM', 'MDM', 'PLM', 'EAM', 'IOT']) {
+    assert.equal(within('company-b', () => getTenantSystemConnection(code)), null, `${code} 不得被预设备进租户接入清单`);
+  }
+
+  // 租户 A 登记自定义系统：定义与生命周期都只落在 A 的租户工作区。
+  const registered = within('company-a', () => registerTenantCustomSystem({ materials: registrationMaterials({ code: 'SCMX' }), actor: { id: 'architect' } }));
+  assert.equal(registered.code, 'SCMX');
+  assert.equal(registered.state, 'registered');
+  const connection = within('company-a', () => getTenantSystemConnection('SCMX'));
+  assert.equal(connection.lifecycleState, 'registered');
+  assert.equal(connection.tenantId, 'company-a');
+  assert.equal(connection.origin, 'tenant_custom');
+  assert.equal(within('company-a', () => getTenantSystemConnections().length), 7);
+
+  // 租户 B 完全不受影响：看不到 A 的自定义系统，清单仍是 6 个演示样例。
+  assert.equal(within('company-b', () => getTenantSystemConnection('SCMX')), null);
+  assert.equal(within('company-b', () => getTenantSystemConnections().length), 6);
+});
+
+test('登记：必填物料逐字段点名，系统码防撞与自动生成', () => {
+  within('company-a', () => {
+    // 缺必填物料：每个缺失字段都必须被点名，不能只报一句「校验未通过」。
+    const invalid = registerTenantCustomSystem({ materials: { name: 'x' }, actor: { id: 'a' } });
+    assert.equal(invalid.code, 'SYSTEM_MATERIALS_INVALID');
+    const fields = new Set(invalid.issues.map((issue) => issue.field));
+    for (const key of ['domain', 'description', 'keyEntities', 'dataDomains', 'accessIntention', 'businessOwner']) {
+      assert.ok(fields.has(key), `缺失物料 ${key} 必须被点名`);
+    }
+    // 未知的模拟数据源场景与非法数据域同样显式拒绝
+    const badScenario = registerTenantCustomSystem({ materials: registrationMaterials({ mockScenarioId: 'nope' }), actor: { id: 'a' } });
+    assert.equal(badScenario.code, 'SYSTEM_MATERIALS_INVALID');
+    assert.ok(badScenario.issues.some((issue) => issue.field === 'mockScenarioId'));
+    const badDomain = registerTenantCustomSystem({ materials: registrationMaterials({ dataDomains: ['secret'] }), actor: { id: 'a' } });
+    assert.ok(badDomain.issues.some((issue) => issue.field === 'dataDomains'));
+    // 平台保留码不得占用
+    assert.equal(registerTenantCustomSystem({ materials: registrationMaterials({ code: 'ERP' }), actor: { id: 'a' } }).code, 'SYSTEM_CODE_RESERVED');
+    // 同租户已占用码显式拒绝，不静默改名
+    registerTenantCustomSystem({ materials: registrationMaterials({ code: 'SCMX' }), actor: { id: 'a' } });
+    const taken = registerTenantCustomSystem({ materials: registrationMaterials({ code: 'SCMX', name: '另一个系统' }), actor: { id: 'a' } });
+    assert.equal(taken.code, 'SYSTEM_CODE_TAKEN');
+    // 自动生成：纯中文名取不到 ASCII 段 → SYS 兜底，重名自动加序号
+    assert.equal(registerTenantCustomSystem({ materials: registrationMaterials(), actor: { id: 'a' } }).code, 'SYS');
+    assert.equal(registerTenantCustomSystem({ materials: registrationMaterials(), actor: { id: 'a' } }).code, 'SYS2');
+  });
 });
 
 test('接入状态机：非法跃迁不落库、未知系统与缺失主体一律拒绝', () => {
@@ -114,20 +165,24 @@ test('接入状态机：非法跃迁不落库、未知系统与缺失主体一�
   assert.equal(canTransitionSystemConnection('connected', 'suspended'), true);
 
   within('company-a', () => {
-    const before = getTenantSystemConnection('OA');
+    registerTenantCustomSystem({ materials: registrationMaterials({ code: 'SRMP' }), actor: { id: 'architect' } });
+    const before = getTenantSystemConnection('SRMP');
     // registered → connected 是跨级跃迁，必须拒绝
-    const illegal = transitionSystemConnection({ code: 'OA', to: 'connected', actor: { id: 'architect' } });
+    const illegal = transitionSystemConnection({ code: 'SRMP', to: 'connected', actor: { id: 'architect' } });
     assert.equal(illegal.code, 'SYSTEM_TRANSITION_REJECTED');
     assert.equal(illegal.from, 'registered');
-    const after = getTenantSystemConnection('OA');
+    const after = getTenantSystemConnection('SRMP');
     assert.equal(after.lifecycleState, 'registered');
-    // 被拒绝的跃迁不得写入：updatedAt 不应发生变化（初始为 null）
+    // 被拒绝的跃迁不得写入：updatedAt 不应发生变化
     assert.equal(after.updatedAt, before.updatedAt);
-    assert.equal(after.updatedAt, null);
 
     assert.equal(transitionSystemConnection({ code: 'ZZZ', to: 'registered', actor: { id: 'a' } }).code, 'SYSTEM_NOT_REGISTERED');
-    assert.equal(transitionSystemConnection({ code: 'OA', to: 'bogus', actor: { id: 'a' } }).code, 'SYSTEM_STATE_UNKNOWN');
-    assert.equal(transitionSystemConnection({ code: 'OA', to: 'authorized' }).code, 'SYSTEM_ACTOR_REQUIRED');
+    // 平台保留类型未登记进本租户清单：给出「先登记」的指引，而不是笼统拒绝
+    const reserved = transitionSystemConnection({ code: 'OA', to: 'authorized', actor: { id: 'a' } });
+    assert.equal(reserved.code, 'SYSTEM_ACCESS_MISSING');
+    assert.match(reserved.error, /平台目录保留类型/);
+    assert.equal(transitionSystemConnection({ code: 'SRMP', to: 'bogus', actor: { id: 'a' } }).code, 'SYSTEM_STATE_UNKNOWN');
+    assert.equal(transitionSystemConnection({ code: 'SRMP', to: 'authorized' }).code, 'SYSTEM_ACTOR_REQUIRED');
   });
 });
 

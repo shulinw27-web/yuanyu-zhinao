@@ -2,7 +2,8 @@
 //
 // 与注册表的职责分界（重要）：
 //   * system-registry-service.js —— **事实源与状态机**：系统类型定义、角色可见性策略、
-//     租户级接入生命周期（draft→registered→authorized→connected⇄suspended）。
+//     租户级接入生命周期（draft→registered→authorized→connected⇄suspended）、
+//     以及租户自定义系统的登记与存储（ADR-024）。
 //   * system-access-service.js（本文件）—— **面向运营视图的组装与探测**：把注册表
 //     （含其中的连接器定义）、合成数据字典、接入配置样例拼成「一个系统长什么样」，
 //     并提供真正会发请求的连通性探测。本文件不新增任何系统定义、不复制任何清单。
@@ -14,16 +15,20 @@
 //   * 租户标识只取受信上下文，本文件不接受调用方传入的 tenantId。
 //
 // 边界（不得在界面或文档中弱化）：
+//   * 接入清单的预设成员是 6 个 Mock 演示接入样例（connected）；除此之外不预设备
+//     任何待接入/未登记系统——接入什么系统完全由租户自己登记（ADR-024）。
 //   * 连通性探测读取的是**内置的合成模拟 HTTP 数据源**，不是任何真实企业连接器。
-//   * 「接入配置样例（责任人 / 同步频率 / 字段→对象映射）」当前仍来自 demo 种子，
-//     属已知不洁项：尚未做到租户隔离。返回值以 source='demo_seed' 显式标注，
-//     不伪装成租户自有配置。
+//     自定义系统的探测读取其挂接的模拟场景（整场景作为该系统的模拟数据面）。
+//   * 平台演示系统的「接入配置样例（责任人 / 同步频率 / 字段→对象映射）」仍来自
+//     demo 种子，属已知不洁项：尚未做到租户隔离。返回值以 source='demo_seed' 显式标注，
+//     不伪装成租户自有配置；自定义系统则标注 source='tenant_registration'。
 import { systemConfigurations } from '../data/seed.js';
 import { mockOnboardingScenarios } from '../data/mock-onboarding-catalog.js';
 import { SYSTEM_CONNECTION_STATES, SYSTEM_CONNECTION_TRANSITIONS } from '../data/system-catalog.js';
 import {
-  getSystemByCode, getConnectorSurfaceSystemCodes, getTenantSystemConnections, getTenantSystemConnection, getDemoConnectedSystems,
-  transitionSystemConnection
+  getSystemByCode, getConnectorSurfaceSystemCodes, getRoleDataDomains,
+  getTenantSystemConnections, getTenantSystemConnection, getTenantSystemDefinitions,
+  transitionSystemConnection, registerTenantCustomSystem, getSystemRegistrationSchema
 } from './system-registry-service.js';
 import {
   readMockOnboardingSource, readMockScenarioDictionary, readMockScenarioSystems, mockOnboardingSourceFaults
@@ -35,7 +40,7 @@ const NAMESPACE = 'system_access_runtime';
 const PROBES_KEY = 'probes';
 const MAX_PROBE_HISTORY = 24;
 
-export const SYSTEM_ACCESS_BOUNDARY = '系统接入视图：接入状态与生命周期按租户隔离；连通性探测读取内置合成模拟数据源，不连接任何真实企业系统；接入配置样例与字段映射来自受控种子快照，仍需人工复核后才可用于生产。';
+export const SYSTEM_ACCESS_BOUNDARY = '系统接入视图：接入清单＝6 个 Mock 演示接入样例＋租户自行登记的系统，不预设备待接入/未登记系统；接入状态与生命周期按租户隔离；连通性探测读取内置合成模拟数据源，不连接任何真实企业系统；接入配置样例与字段映射来自受控种子快照，仍需人工复核后才可用于生产。';
 
 const LIFECYCLE_LABELS = Object.freeze({
   draft: '未登记', registered: '已登记', authorized: '已授权', connected: '已连通', suspended: '已停用'
@@ -55,7 +60,6 @@ const sourceIssueMessages = Object.freeze({
 });
 
 const demoConfigBySystemId = new Map(systemConfigurations.map((item) => [item.systemId, item]));
-const demoConnectionById = new Map(getDemoConnectedSystems().map((item) => [item.id, item]));
 
 // ── 本地合成数据集索引（按系统码 → 场景） ────────────────────────────────────
 //
@@ -65,6 +69,7 @@ const demoConnectionById = new Map(getDemoConnectedSystems().map((item) => [item
 // Inspection 记录）。用声明范围判定会把有数据的系统误报为「不可探测」。
 //
 // ESM 动态导入本身有缓存，这里仍做一次性记忆，避免每次渲染总览都重扫两个场景。
+
 let datasetIndexPromise = null;
 
 function resolveDatasetIndex() {
@@ -120,25 +125,56 @@ function detectSchemaDrift(records, declared) {
   return [...new Set(drifted)];
 }
 
-function assembleSystemView(entry, { roleId, authorizedCodes, probes, datasets }) {
-  const definition = getSystemByCode(entry.code);
-  const configuration = demoConfigBySystemId.get(entry.id) || null;
-  const demo = demoConnectionById.get(entry.id) || null;
-  const authorized = authorizedCodes.includes(entry.code);
-  const scenarioId = datasets.recordScenario.get(entry.code) || null;
-  const probe = probes[entry.code] || null;
+/**
+ * 解析系统定义：优先当前租户接入清单（平台演示样例 + 自定义系统）；平台目录里
+ * 存在但未被本租户接入的保留类型返回 inTenant=false，供调用方给出「先登记」指引。
+ */
+function resolveSystemDefinition(code) {
+  const normalized = String(code || '').toUpperCase();
+  const tenantDefinitions = getTenantSystemDefinitions();
+  const definition = tenantDefinitions.find((item) => item.code === normalized);
+  if (definition) return { definition, inTenant: true };
+  const platform = getSystemByCode(normalized);
+  return platform ? { definition: null, inTenant: false, platformKnown: true } : { definition: null, inTenant: false, platformKnown: false };
+}
 
-  const blockedReason = !definition.connector
-    ? '该系统尚未登记受控连接器，仍可被识别为来源系统，但不能据此读取数据或建立来源映射。'
-    : !authorized
-      ? '当前运营身份未获该系统所属数据域授权，接入状态可读，但不可探测、不可建立映射。'
-      : null;
+const PLATFORM_RESERVED_MESSAGE = (code) => `系统 ${code} 是平台目录保留类型，尚未在本租户接入清单中；请在「新增接入」中登记自定义系统后再执行该操作。`;
+
+/** 角色是否对该系统有数据域授权：平台系统看连接器面；自定义系统看其声明的覆盖数据域。 */
+function isAuthorizedForRole(definition, roleId) {
+  if (!definition) return false;
+  if (definition.origin === 'tenant_custom') {
+    const allowed = getRoleDataDomains(roleId);
+    return definition.custom.dataDomains.some((domain) => allowed.includes(domain));
+  }
+  return getConnectorSurfaceSystemCodes(roleId).includes(definition.code);
+}
+
+function assembleSystemView(entry, definition, { roleId, probes, datasets }) {
+  const configuration = definition.origin === 'tenant_custom' ? null : (demoConfigBySystemId.get(definition.id) || null);
+  const authorized = isAuthorizedForRole(definition, roleId);
+  const isCustom = definition.origin === 'tenant_custom';
+  const scenarioId = isCustom ? definition.custom.mockScenarioId : (datasets.recordScenario.get(definition.code) || null);
+  const probe = probes[definition.code] || null;
+  const demo = !isCustom && definition.demoConnection ? definition.demoConnection : null;
+
+  const blockedReason = isCustom
+    ? (!definition.custom.mockScenarioId
+      ? '该自定义系统尚未挂接模拟数据源场景，无法连通性探测；未取得 verified 探测前不能接通。'
+      : (!authorized ? '当前运营身份未获该系统声明数据域的授权，接入状态可读，但不可探测、不可建立映射。' : null))
+    : (!definition.connector
+      ? '该系统尚未登记受控连接器，仍可被识别为来源系统，但不能据此读取数据或建立来源映射。'
+      : (!authorized
+        ? '当前运营身份未获该系统所属数据域授权，接入状态可读，但不可探测、不可建立映射。'
+        : null));
 
   return {
-    code: entry.code,
-    id: entry.id,
-    name: entry.name,
-    domain: entry.domain,
+    code: definition.code,
+    id: definition.id,
+    name: definition.name,
+    domain: definition.domain,
+    origin: definition.origin,
+    custom: definition.custom,
     lifecycleState: entry.lifecycleState,
     lifecycleLabel: LIFECYCLE_LABELS[entry.lifecycleState] || entry.lifecycleState,
     catalogOnboardingStatus: entry.catalogOnboardingStatus,
@@ -147,40 +183,45 @@ function assembleSystemView(entry, { roleId, authorizedCodes, probes, datasets }
     authorized,
     authorizedByRole: roleId || null,
     health: demo ? { status: demo.status, health: demo.health, lastSync: demo.lastSync, mode: demo.mode, color: demo.color || null, alert: demo.alert || null } : null,
-    objects: definition.connector ? [...definition.connector.objects] : [],
+    objects: isCustom ? [...definition.custom.keyEntities] : (definition.connector ? [...definition.connector.objects] : []),
     worldObjectTypes: [...definition.worldObjectTypes],
     mappingCount: configuration?.mapping?.length || 0,
-    owner: configuration?.owner || null,
+    owner: isCustom ? definition.custom.businessOwner : (configuration?.owner || null),
     syncInterval: configuration?.syncInterval || null,
     enabled: configuration?.enabled ?? null,
-    configurationSource: configuration ? 'demo_seed' : null,
-    probe: { supported: Boolean(scenarioId && definition.connector && authorized), scenarioId, last: probe },
+    configurationSource: isCustom ? 'tenant_registration' : (configuration ? 'demo_seed' : null),
+    probe: { supported: Boolean(scenarioId && authorized && (isCustom || definition.connector)), scenarioId, last: probe },
     blockedReason
   };
 }
 
 /**
  * 系统接入总览：每系统一行，覆盖 状态 / 授权 / 健康 / 最后同步 / 对象目录 / 映射数 / 责任人。
- * 系统类型与目录来自注册表（平台级）；生命周期状态与探测结果来自租户工作区。
+ * 系统清单＝平台演示接入样例 + 本租户登记的自定义系统；生命周期状态与探测结果来自租户工作区。
  */
 export async function getSystemAccessOverview({ roleId } = {}) {
   const connections = getTenantSystemConnections();
-  const authorizedCodes = getConnectorSurfaceSystemCodes(roleId);
+  const definitions = new Map(getTenantSystemDefinitions().map((item) => [item.code, item]));
   const probes = readProbes();
   const datasets = await resolveDatasetIndex();
-  const systems = connections.map((entry) => assembleSystemView(entry, { roleId, authorizedCodes, probes, datasets }));
+  const systems = connections.flatMap((entry) => {
+    const definition = definitions.get(entry.code);
+    return definition ? [assembleSystemView(entry, definition, { roleId, probes, datasets })] : [];
+  });
 
   return {
     boundary: SYSTEM_ACCESS_BOUNDARY,
     tenantId: currentSemanticTenant(),
     roleId: roleId || null,
-    policy: '接入生命周期按租户隔离；角色授权按数据域裁剪；连通性探测只读内置合成数据源。',
+    policy: '接入清单不预设备待接入/未登记系统；接入生命周期按租户隔离；角色授权按数据域裁剪；连通性探测只读内置合成数据源。',
+    registration: getSystemRegistrationSchema(),
     summary: {
       total: systems.length,
       connected: systems.filter((item) => item.lifecycleState === 'connected').length,
       suspended: systems.filter((item) => item.lifecycleState === 'suspended').length,
       pending: systems.filter((item) => item.lifecycleState === 'registered' || item.lifecycleState === 'authorized').length,
       notRegistered: systems.filter((item) => item.lifecycleState === 'draft').length,
+      custom: systems.filter((item) => item.origin === 'tenant_custom').length,
       authorized: systems.filter((item) => item.authorized).length,
       probeable: systems.filter((item) => item.probe.supported).length,
       mappedObjects: systems.reduce((total, item) => total + item.mappingCount, 0)
@@ -191,19 +232,28 @@ export async function getSystemAccessOverview({ roleId } = {}) {
 
 /** 单系统详情：连接配置、字段目录、字段→元模型对象映射、最近一次探测结果。 */
 export async function getSystemAccessDetail({ code, roleId } = {}) {
-  const definition = getSystemByCode(code);
-  if (!definition) return { error: `未登记的系统码：${code}`, code: 'SYSTEM_NOT_REGISTERED', status: 404 };
+  const normalized = String(code || '').toUpperCase();
+  const { definition, platformKnown } = resolveSystemDefinition(normalized);
+  if (!definition) {
+    return platformKnown
+      ? { error: PLATFORM_RESERVED_MESSAGE(normalized), code: 'SYSTEM_ACCESS_MISSING', status: 404 }
+      : { error: `未登记的系统码：${code}`, code: 'SYSTEM_NOT_REGISTERED', status: 404 };
+  }
   const overview = await getSystemAccessOverview({ roleId });
   const view = overview.systems.find((item) => item.code === definition.code);
   if (!view) return { error: `系统 ${definition.code} 不在当前租户的接入清单中。`, code: 'SYSTEM_ACCESS_MISSING', status: 404 };
 
+  const isCustom = definition.origin === 'tenant_custom';
   const datasets = await resolveDatasetIndex();
-  const scenarioIds = [...(datasets.dictionaryScenarios.get(definition.code) || [])];
+  const scenarioIds = isCustom
+    ? (definition.custom.mockScenarioId ? [definition.custom.mockScenarioId] : [])
+    : [...(datasets.dictionaryScenarios.get(definition.code) || [])];
   // 字段目录按**对象类型**归并：同一个对象可能同时被多个合成场景声明（实测 WMS 的
   // StockPosition/Warehouse、OMS 的 SalesOrder 都在两个场景里出现）。早期实现直接
   // 逐场景 push，导致「对象目录」计数被重复项撑大（WMS 10→实际 8、OMS 8→实际 7），
   // 且前端以 name 作 :key 会出现重复键。此处改为按 name 归并；若两个场景对同一对象
   // 的字段声明**不一致**，不静默取其一，而是登记进 `conflicts` 由界面显式呈现。
+  // 自定义系统：挂接场景的全部对象都算它的模拟数据面（不做 table.system 过滤）。
   const normalizeFields = (table) => table.fields.map((field) => ({
     name: field.name, type: field.type, required: Boolean(field.required),
     primaryKey: Boolean(field.primaryKey), reference: field.reference || null
@@ -214,7 +264,7 @@ export async function getSystemAccessDetail({ code, roleId } = {}) {
   for (const scenarioId of scenarioIds) {
     const dictionary = await readMockScenarioDictionary(scenarioId);
     for (const table of dictionary.tables) {
-      if (table.system !== definition.code) continue;
+      if (!isCustom && table.system !== definition.code) continue;
       const fields = normalizeFields(table);
       const existing = byObject.get(table.name);
       if (!existing) {
@@ -236,7 +286,7 @@ export async function getSystemAccessDetail({ code, roleId } = {}) {
     }
   }
   const tables = [...byObject.values()];
-  const configuration = demoConfigBySystemId.get(definition.id) || null;
+  const configuration = isCustom ? null : (demoConfigBySystemId.get(definition.id) || null);
   const connection = getTenantSystemConnection(definition.code);
 
   return {
@@ -252,20 +302,20 @@ export async function getSystemAccessDetail({ code, roleId } = {}) {
       transitions: [...(SYSTEM_CONNECTION_TRANSITIONS[connection?.lifecycleState] || [])]
     },
     connectionConfiguration: {
-      source: configuration ? 'demo_seed' : null,
-      owner: configuration?.owner || null,
+      source: isCustom ? 'tenant_registration' : (configuration ? 'demo_seed' : null),
+      owner: isCustom ? definition.custom.businessOwner : (configuration?.owner || null),
       syncInterval: configuration?.syncInterval || null,
       enabled: configuration?.enabled ?? null,
       credentialRef: definition.connector?.credentialRef || null,
-      transport: definition.connector?.transport || null,
+      transport: isCustom ? '演示挂接（模拟数据源场景）' : (definition.connector?.transport || null),
       classification: definition.connector?.classification || null,
-      writeMode: definition.connector?.writeMode || null,
+      writeMode: isCustom ? 'read_only' : (definition.connector?.writeMode || null),
       tools: definition.connector ? [...definition.connector.tools] : []
     },
     fieldCatalog: {
       available: tables.length > 0,
       scenarioIds,
-      readScenarioId: datasets.recordScenario.get(definition.code) || null,
+      readScenarioId: isCustom ? definition.custom.mockScenarioId : (datasets.recordScenario.get(definition.code) || null),
       objectTypes: tables.map((table) => table.name),
       tables: tables.map((table) => ({
         name: table.name, label: table.label, granularity: table.granularity, primaryKey: table.primaryKey,
@@ -273,7 +323,11 @@ export async function getSystemAccessDetail({ code, roleId } = {}) {
         fields: table.fields
       })),
       conflicts: catalogConflicts,
-      unavailableReason: tables.length ? null : '该系统尚无本地合成数据字典，字段目录为空；不以前端占位数据替代。'
+      unavailableReason: tables.length
+        ? null
+        : (isCustom
+          ? '该自定义系统未挂接模拟数据源场景，字段目录为空；不以前端占位数据替代。'
+          : '该系统尚无本地合成数据字典，字段目录为空；不以前端占位数据替代。')
     },
     mappings: configuration?.mapping ? configuration.mapping.map((item) => ({ ...item })) : [],
     lastProbe: view.probe.last,
@@ -294,7 +348,31 @@ function lifecycleView(code) {
 }
 
 /**
- * 接入生命周期操作面（2026-09-26 新增）：把注册表的状态机暴露为可执行的运营动作。
+ * 登记一个自定义接入系统（ADR-024）：物料校验与状态机都在注册表，本函数只做
+ * 操作主体解析与 HTTP 状态码映射。登记成功即生命周期 registered（已登记）。
+ */
+export function registerSystemOnboarding({ materials, identityScope } = {}) {
+  const actor = String(identityScope?.subjectId || identityScope?.tenantId || '').trim();
+  if (!actor) return { error: '缺少操作主体，拒绝登记接入系统。', code: 'SYSTEM_ACTOR_REQUIRED', status: 400 };
+  const outcome = registerTenantCustomSystem({ materials, actor });
+  if (outcome.error) {
+    const statusByCode = {
+      SYSTEM_ACTOR_REQUIRED: 400, SYSTEM_MATERIALS_INVALID: 400, SYSTEM_CODE_RESERVED: 400,
+      SYSTEM_CODE_TAKEN: 409, SYSTEM_MOCK_SCENARIO_UNKNOWN: 400
+    };
+    return { ...outcome, status: statusByCode[outcome.code] || 400 };
+  }
+  return {
+    code: outcome.code,
+    id: outcome.id,
+    name: outcome.name,
+    lifecycle: lifecycleView(outcome.code),
+    registration: { registeredAt: outcome.registeredAt, registeredBy: outcome.registeredBy, materialsSchema: getSystemRegistrationSchema().fields.map((field) => field.key) }
+  };
+}
+
+/**
+ * 接入生命周期操作面（2026-09-26 / ADR-023）：把注册表的状态机暴露为可执行的运营动作。
  *
  * 设计约束：
  *   * 状态机本身仍由 system-registry-service 定义（单一事实源），本函数只做
@@ -305,8 +383,13 @@ function lifecycleView(code) {
  *   * 操作主体只取受信上下文（identityScope），与探测结果同租户记录。
  */
 export function transitionTenantSystemConnection({ code, to, reason, identityScope } = {}) {
-  const definition = getSystemByCode(code);
-  if (!definition) return { error: `未登记的系统码：${code}`, code: 'SYSTEM_NOT_REGISTERED', status: 404 };
+  const normalized = String(code || '').toUpperCase();
+  const { definition, platformKnown } = resolveSystemDefinition(normalized);
+  if (!definition) {
+    return platformKnown
+      ? { error: PLATFORM_RESERVED_MESSAGE(normalized), code: 'SYSTEM_ACCESS_MISSING', status: 404 }
+      : { error: `未登记的系统码：${code}`, code: 'SYSTEM_NOT_REGISTERED', status: 404 };
+  }
   if (typeof to !== 'string' || !SYSTEM_CONNECTION_STATES.includes(to)) {
     return { error: `未知的接入状态：${to}`, code: 'SYSTEM_STATE_UNKNOWN', status: 400 };
   }
@@ -338,16 +421,28 @@ export function transitionTenantSystemConnection({ code, to, reason, identitySco
  * 连通性探测：对内置合成模拟 HTTP 数据源做一次真实的分页读取，并按场景字典校验结构。
  * 这是「真正接上」的行为——它会监听本地端口、发 HTTP 请求、校验响应契约与分页完整性；
  * 但它**不是**企业连接器验收，返回值与界面都必须标注为合成模拟。
+ *
+ * 平台演示系统：读取数据源中属于该系统的记录（按 row.system 过滤）。
+ * 自定义系统：读取挂接的模拟场景**整场景**作为该系统的模拟数据面（simulatedScope 标注）。
  */
 export async function probeSystemConnection({ code, faultMode = 'none', roleId, identityScope } = {}) {
-  const definition = getSystemByCode(code);
-  if (!definition) return { error: `未登记的系统码：${code}`, code: 'SYSTEM_NOT_REGISTERED', status: 404 };
-  if (!definition.connector) return { error: `系统 ${definition.code} 尚未登记受控连接器，不能进行连通性探测。`, code: 'SYSTEM_CONNECTOR_NOT_REGISTERED', status: 409 };
+  const normalized = String(code || '').toUpperCase();
+  const { definition, platformKnown } = resolveSystemDefinition(normalized);
+  if (!definition) {
+    return platformKnown
+      ? { error: PLATFORM_RESERVED_MESSAGE(normalized), code: 'SYSTEM_ACCESS_MISSING', status: 404 }
+      : { error: `未登记的系统码：${code}`, code: 'SYSTEM_NOT_REGISTERED', status: 404 };
+  }
   if (!mockOnboardingSourceFaults.includes(faultMode)) return { error: `不支持的响应模式：${faultMode}`, code: 'SYSTEM_PROBE_FAULT_UNKNOWN', status: 400 };
-  if (!getConnectorSurfaceSystemCodes(roleId).includes(definition.code)) {
+  const isCustom = definition.origin === 'tenant_custom';
+  if (!isCustom && !definition.connector) return { error: `系统 ${definition.code} 尚未登记受控连接器，不能进行连通性探测。`, code: 'SYSTEM_CONNECTOR_NOT_REGISTERED', status: 409 };
+  if (isCustom && !definition.custom.mockScenarioId) {
+    return { error: `自定义系统 ${definition.code} 尚未挂接模拟数据源场景，不能进行连通性探测；未挂接场景的系统无法取得 verified 结果，也就无法接通。`, code: 'SYSTEM_PROBE_DATASET_NOT_ATTACHED', status: 409 };
+  }
+  if (!isAuthorizedForRole(definition, roleId)) {
     return { error: `当前运营身份未获 ${definition.code} 所属数据域授权，拒绝探测。`, code: 'SYSTEM_PROBE_FORBIDDEN', status: 403 };
   }
-  const scenario = (await resolveDatasetIndex()).recordScenario.get(definition.code) || null;
+  const scenario = isCustom ? definition.custom.mockScenarioId : ((await resolveDatasetIndex()).recordScenario.get(definition.code) || null);
   if (!scenario) {
     return {
       code: definition.code, status: 'no_local_dataset', supported: false, faultMode,
@@ -359,12 +454,13 @@ export async function probeSystemConnection({ code, faultMode = 'none', roleId, 
   let outcome;
   try {
     const read = await readMockOnboardingSource({ scenarioId: scenario, tenantId, projectId: `mock-onboarding-probe-${definition.id}`, faultMode });
-    const records = read.records.filter((row) => row.system === definition.code);
+    const records = isCustom ? read.records : read.records.filter((row) => row.system === definition.code);
     const declared = fieldsByObjectType((await readMockScenarioDictionary(scenario)).tables);
     const drift = detectSchemaDrift(records, declared);
     outcome = {
       code: definition.code, status: drift.length ? 'schema_drift' : 'verified', supported: true, faultMode,
       checkedAt: new Date().toISOString(), scenarioId: scenario,
+      ...(isCustom ? { simulatedScope: 'attached_scenario' } : {}),
       sourceKind: read.sourceKind, protocol: read.protocol,
       requests: read.requests, pageCount: read.pageCount,
       recordCount: records.length, readableRecords: read.records.length,
@@ -377,6 +473,7 @@ export async function probeSystemConnection({ code, faultMode = 'none', roleId, 
     const safeCode = typeof error.code === 'string' && Object.hasOwn(sourceIssueMessages, error.code) ? error.code : 'MOCK_SOURCE_TRANSPORT_FAILED';
     outcome = {
       code: definition.code, status: 'failed', supported: true, faultMode,
+      ...(isCustom ? { simulatedScope: 'attached_scenario' } : {}),
       checkedAt: new Date().toISOString(), scenarioId: scenario,
       requests: error.requests || 0, pageCount: error.pageCount || 0,
       recordCount: 0, readableRecords: 0, objectTypes: [],

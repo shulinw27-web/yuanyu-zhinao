@@ -63,6 +63,7 @@ import {
   getSystemAccessOverview,
   getSystemAccessDetail,
   probeSystemConnection,
+  registerSystemOnboarding,
   transitionTenantSystemConnection
 } from '../domains/system-onboarding/public-api.js';
 
@@ -127,6 +128,18 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
     if (req.method === 'GET' && segment) {
       const result = await getSystemAccessDetail({ code: segment, roleId: role });
       send(res, result.error ? result.status || 404 : 200, result.error ? { message: result.error, code: result.code } : result);
+      return true;
+    }
+    // 新增接入（ADR-024）：登记一个任意命名的自定义系统。登记是接入侧写入，
+    // 与生命周期操作 / 连通性探测同一把闸门（meta_model.draft.save）。
+    // 物料校验（必填项、系统码防撞、模拟场景合法性）全部在服务层完成，
+    // 路由只做权限与转发；拒绝时逐字段返回 issues，便于界面点名缺失项。
+    if (req.method === 'POST' && !segment) {
+      const actionRole = selectActionRole('meta_model.draft.save');
+      if (!actionRole) { denyButton('meta_model.draft.save'); return true; }
+      const body = await readBody(req);
+      const result = registerSystemOnboarding({ materials: body, identityScope: agentIdentity });
+      send(res, result.error ? result.status || 400 : 201, result.error ? { message: result.error, code: result.code, issues: result.issues } : result);
       return true;
     }
     send(res, 405, { message: '不支持的接入操作。', code: 'SYSTEM_ACCESS_METHOD_NOT_ALLOWED' });

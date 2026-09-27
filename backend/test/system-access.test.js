@@ -10,12 +10,13 @@ import assert from 'node:assert/strict';
 import { resetRuntimeState } from '../src/repositories/runtime-state-repository.js';
 import { runWithSemanticTenant } from '../src/services/semantic-tenant-context.js';
 import { handleGovernanceRoutes } from '../src/routes/governance-routes.js';
-import { getSystemRegistrySnapshot, transitionSystemConnection, getTenantSystemConnection } from '../src/services/system-registry-service.js';
+import { transitionSystemConnection, getTenantSystemConnection, getTenantSystemConnections } from '../src/services/system-registry-service.js';
 import { getRole } from '../src/services/authorization-service.js';
 import {
   SYSTEM_ACCESS_BOUNDARY,
   getSystemAccessOverview,
   getSystemAccessDetail,
+  registerSystemOnboarding,
   probeSystemConnection,
   transitionTenantSystemConnection,
   getSystemProbeResults
@@ -28,14 +29,27 @@ const executiveRole = getRole('executive');
 const identity = tenantId => ({ tenantId, subjectId: 'same-operator', deviceId: 'same-device' });
 const within = (tenant, work) => runWithSemanticTenant(identity(tenant), work);
 
+// 自定义系统登记物料（ADR-024）：覆盖七个必填项的最小合法样例；
+// mockScenarioId 默认挂接 fulfillment 场景使系统可探测（可接通）。
+const registrationMaterials = (overrides = {}) => ({
+  name: '供应商协同中台',
+  domain: '供应链',
+  description: '管理供应商准入、资质、绩效与合同协同的外部平台，覆盖寻源到付款全流程。',
+  keyEntities: ['供应商档案', '绩效评分', '合同'],
+  dataDomains: ['production', 'internal'],
+  accessIntention: '读取供应商资质与绩效数据，支撑采购风险分析与供应商画像。',
+  businessOwner: '采购负责人',
+  mockScenarioId: 'fulfillment',
+  ...overrides
+});
+
 test.beforeEach(() => resetRuntimeState(NAMESPACES));
 
-// ── 1. 单一事实源 ────────────────────────────────────────────────────────────
+// ── 1. 单一事实源与去预设（ADR-024）───────────────────────────────────────────
 
-test('总览：系统成员与顺序完全由注册表派生，且七项呈现字段齐备', async () => {
-  const registry = getSystemRegistrySnapshot();
+test('总览：接入清单＝6 个 Mock 演示样例，不预设备任何待接入/未登记系统', async () => {
   const overview = await getSystemAccessOverview({ roleId: 'executive' });
-  assert.deepEqual(overview.systems.map((item) => item.code), registry.codes, '总览成员/顺序必须由注册表派生');
+  assert.deepEqual(overview.systems.map((item) => item.code), ['ERP', 'WMS', 'MES', 'LIMS', 'QMS', 'OMS']);
   assert.equal(overview.boundary, SYSTEM_ACCESS_BOUNDARY);
   for (const item of overview.systems) {
     for (const key of ['lifecycleState', 'authorized', 'objects', 'worldObjectTypes', 'mappingCount', 'owner', 'health', 'probe']) {
@@ -45,11 +59,19 @@ test('总览：系统成员与顺序完全由注册表派生，且七项呈现�
     if (item.connector) assert.deepEqual(item.objects, item.connector.objects);
     assert.notStrictEqual(item.objects, item.worldObjectTypes);
   }
-  assert.equal(overview.summary.total, registry.codes.length);
-  assert.equal(overview.summary.connected, registry.onboardingConnected.length);
+  assert.equal(overview.summary.total, 6);
+  assert.equal(overview.summary.connected, 6);
+  assert.equal(overview.summary.pending, 0, '不得预设备待接入系统');
+  assert.equal(overview.summary.notRegistered, 0, '不得预设备未登记系统');
+  assert.equal(overview.summary.custom, 0);
+  // 登记物料 schema 必须随总览下发：七个必填项是让智脑明白「接入的是什么系统」的最小物料
+  const requiredKeys = overview.registration.fields.filter((field) => field.required).map((field) => field.key);
+  assert.deepEqual(requiredKeys, ['name', 'domain', 'description', 'keyEntities', 'dataDomains', 'accessIntention', 'businessOwner']);
+  assert.deepEqual(overview.registration.dataDomains.map((option) => option.id), ['production', 'marketing', 'internal']);
+  assert.ok(overview.registration.mockScenarios.length >= 1);
 });
 
-test('详情：字段目录来自合成数据字典，未建目录的系统显式说明原因而非留空占位', async () => {
+test('详情：字段目录来自合成数据字典，未挂接场景的自定义系统显式说明原因而非留空占位', async () => {
   const erp = await getSystemAccessDetail({ code: 'ERP', roleId: 'executive' });
   assert.equal(erp.fieldCatalog.available, true);
   assert.ok(erp.fieldCatalog.tables.length > 0);
@@ -57,10 +79,19 @@ test('详情：字段目录来自合成数据字典，未建目录的系统显�
     assert.ok(table.primaryKey, `${table.name} 必须显式声明主键`);
     assert.ok(table.fields.some((field) => field.name === table.primaryKey && field.primaryKey));
   }
+  // 平台保留类型（历史待接入的 SRM）不再被预设备进接入清单：给出「先登记」指引
   const srm = await getSystemAccessDetail({ code: 'SRM', roleId: 'executive' });
-  assert.equal(srm.fieldCatalog.available, false);
-  assert.equal(srm.fieldCatalog.tables.length, 0);
-  assert.match(srm.fieldCatalog.unavailableReason, /尚无本地合成数据字典/);
+  assert.equal(srm.status, 404);
+  assert.equal(srm.code, 'SYSTEM_ACCESS_MISSING');
+  assert.match(srm.error, /平台目录保留类型/);
+  // 未挂接模拟场景的自定义系统：字段目录为空但显式说明原因
+  await within('catalog-tenant', () => registerSystemOnboarding({ materials: registrationMaterials({ code: 'SRMB', mockScenarioId: '' }), identityScope: identity('catalog-tenant') }));
+  const bare = await within('catalog-tenant', () => getSystemAccessDetail({ code: 'SRMB', roleId: 'executive' }));
+  assert.equal(bare.fieldCatalog.available, false);
+  assert.equal(bare.fieldCatalog.tables.length, 0);
+  assert.match(bare.fieldCatalog.unavailableReason, /未挂接模拟数据源场景/);
+  assert.equal(bare.connectionConfiguration.source, 'tenant_registration');
+  assert.equal(bare.connectionConfiguration.owner, '采购负责人');
   const missing = await getSystemAccessDetail({ code: 'NOPE', roleId: 'executive' });
   assert.equal(missing.status, 404);
   assert.equal(missing.code, 'SYSTEM_NOT_REGISTERED');
@@ -145,9 +176,10 @@ test('授权：角色按数据域裁剪可见系统，越权与未登记连接�
   assert.equal(denied.status, 403);
   assert.equal(denied.code, 'SYSTEM_PROBE_FORBIDDEN');
 
+  // 平台保留类型不再被预设备进接入清单：探测给出「先登记」指引（SYSTEM_ACCESS_MISSING）
   const unregistered = await probeSystemConnection({ code: 'SRM', roleId: 'executive' });
-  assert.equal(unregistered.status, 409);
-  assert.equal(unregistered.code, 'SYSTEM_CONNECTOR_NOT_REGISTERED');
+  assert.equal(unregistered.status, 404);
+  assert.equal(unregistered.code, 'SYSTEM_ACCESS_MISSING');
 
   const unknownFault = await probeSystemConnection({ code: 'ERP', roleId: 'executive', faultMode: 'not-a-fault' });
   assert.equal(unknownFault.status, 400);
@@ -179,8 +211,12 @@ test('探测：可探测性以数据源实际记录为判据，而非材料场�
   assert.equal(lims.status, 'verified');
   assert.equal(lims.scenarioId, 'quality_incident');
   assert.ok(lims.objectTypes.includes('Inspection'));
-  // 未登记连接器的系统不参与探测
-  for (const code of ['SRM', 'MDM', 'PLM', 'EAM', 'IOT']) assert.equal(probeable.includes(code), false);
+  // 去预设（ADR-024）：历史待接入/未登记的目录类型不得出现在接入清单或可探测集合中
+  const codes = overview.systems.map((item) => item.code);
+  for (const code of ['OA', 'SRM', 'MDM', 'PLM', 'EAM', 'IOT']) {
+    assert.equal(codes.includes(code), false, `${code} 不得被预设备进接入清单`);
+    assert.equal(probeable.includes(code), false);
+  }
 });
 
 test('探测：六种故障模式必须显式失败或被显式标为结构漂移，不得伪装成功', async () => {
@@ -274,21 +310,31 @@ test('路由：接入读取沿用页面权限，接入写入仍需 meta_model.dr
   assert.equal(roleMismatch.status, 200, '读取不应受写入闸门影响');
 });
 
-// ── 6. 接入生命周期操作面（2026-09-26 新增：ADR-023） ───────────────────────
+// ── 6. 接入生命周期操作面（2026-09-26 新增：ADR-023 / ADR-024） ──────────────
 // 此前状态机早已在注册表定义，却从未暴露为可执行动作——界面上的接入状态只能看
 // 种子值，没有「新增接入」也没有「已接通系统的管理」。这一节锁死操作面的行为。
+// 2026-09-26 起全链路改由「登记自定义系统」起步（OA 等目录保留类型不再预设进清单）。
 
 test('生命周期：登记→授权→（无 verified 探测拒绝接通）→探测→接通→停用→重新接通全链路可执行', async () => {
   const tenant = 'lifecycle-tenant';
   const call = (args) => callRoute({ tenant, ...args });
 
-  // 种子起点：OA 是 pending_onboarding → 生命周期 registered
-  const before = await call({ method: 'GET', path: '/api/semantic-operations/systems/OA' });
-  assert.equal(before.value.lifecycle.state, 'registered');
-  assert.deepEqual(before.value.lifecycle.transitions, ['authorized', 'draft']);
+  // 新增接入：登记一个任意命名的自定义系统（挂接模拟场景，可探测）。创建即「已登记」。
+  const created = await call({ method: 'POST', path: '/api/semantic-operations/systems', body: registrationMaterials({ code: 'SRMX' }) });
+  assert.equal(created.status, 201);
+  assert.equal(created.value.code, 'SRMX');
+  assert.equal(created.value.name, '供应商协同中台');
+  assert.equal(created.value.lifecycle.state, 'registered');
+  assert.deepEqual(created.value.lifecycle.transitions, ['authorized', 'draft']);
+
+  // 登记后清单：6 个演示样例 + 1 个自定义系统
+  const overviewAfter = await call({ method: 'GET', path: '/api/semantic-operations/systems' });
+  assert.equal(overviewAfter.value.summary.total, 7);
+  assert.equal(overviewAfter.value.summary.custom, 1);
+  assert.ok(overviewAfter.value.systems.some((item) => item.code === 'SRMX' && item.origin === 'tenant_custom'));
 
   // 登记流程的服务端动作：确认数据域授权（registered → authorized）
-  const authorized = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', body: { to: 'authorized', reason: '已完成连接信息登记与数据域授权确认' } });
+  const authorized = await call({ method: 'POST', path: '/api/semantic-operations/systems/SRMX/lifecycle', body: { to: 'authorized', reason: '已完成连接信息登记与数据域授权确认' } });
   assert.equal(authorized.status, 200);
   assert.equal(authorized.value.from, 'registered');
   assert.equal(authorized.value.to, 'authorized');
@@ -296,41 +342,87 @@ test('生命周期：登记→授权→（无 verified 探测拒绝接通）→�
   assert.equal(authorized.value.lifecycle.updatedBy, 'same-operator');
 
   // 接通门禁：该租户尚无 verified 探测，authorized → connected 必须被拒绝
-  const blocked = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', body: { to: 'connected', reason: '想直接接通' } });
+  const blocked = await call({ method: 'POST', path: '/api/semantic-operations/systems/SRMX/lifecycle', body: { to: 'connected', reason: '想直接接通' } });
   assert.equal(blocked.status, 409);
   assert.equal(blocked.value.code, 'SYSTEM_CONNECT_PROBE_REQUIRED');
 
-  // 通过连通性测试后，接通才被放行
-  const probe = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/probe', body: { faultMode: 'none' } });
+  // 通过连通性测试后，接通才被放行（自定义系统读取挂接场景整场景作为模拟数据面）
+  const probe = await call({ method: 'POST', path: '/api/semantic-operations/systems/SRMX/probe', body: { faultMode: 'none' } });
   assert.equal(probe.value.status, 'verified');
-  const connected = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', body: { to: 'connected', reason: '连通性测试通过，正式接通' } });
+  assert.equal(probe.value.simulatedScope, 'attached_scenario');
+  assert.ok(probe.value.recordCount > 0);
+  const connected = await call({ method: 'POST', path: '/api/semantic-operations/systems/SRMX/lifecycle', body: { to: 'connected', reason: '连通性测试通过，正式接通' } });
   assert.equal(connected.status, 200);
   assert.equal(connected.value.lifecycle.state, 'connected');
 
   // 已接通系统的管理：停用（保留登记与授权）→ 重新接通
-  const suspended = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', body: { to: 'suspended', reason: '系统侧维护，暂停接入' } });
+  const suspended = await call({ method: 'POST', path: '/api/semantic-operations/systems/SRMX/lifecycle', body: { to: 'suspended', reason: '系统侧维护，暂停接入' } });
   assert.equal(suspended.status, 200);
   const overview = await call({ method: 'GET', path: '/api/semantic-operations/systems' });
   assert.ok(overview.value.summary.suspended >= 1, '总览必须暴露停用计数');
-  const resumed = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', body: { to: 'connected', reason: '维护完成，恢复接入' } });
+  const resumed = await call({ method: 'POST', path: '/api/semantic-operations/systems/SRMX/lifecycle', body: { to: 'connected', reason: '维护完成，恢复接入' } });
   assert.equal(resumed.status, 200);
   assert.equal(resumed.value.lifecycle.state, 'connected');
 
   // 非法跃迁与未知状态：connected → registered 不在状态机里，必须显式拒绝
-  const illegal = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', body: { to: 'registered', reason: '非法跃迁' } });
+  const illegal = await call({ method: 'POST', path: '/api/semantic-operations/systems/SRMX/lifecycle', body: { to: 'registered', reason: '非法跃迁' } });
   assert.equal(illegal.status, 409);
   assert.equal(illegal.value.code, 'SYSTEM_TRANSITION_REJECTED');
+});
+
+test('登记：必填物料、系统码防撞、越权与未挂接场景探测各自显式失败', async () => {
+  const call = (args) => callRoute({ tenant: 'registration-guards', ...args });
+
+  // 缺必填物料：逐字段点名（七个必填项缺六个）
+  const missing = await call({ method: 'POST', path: '/api/semantic-operations/systems', body: { name: 'x' } });
+  assert.equal(missing.status, 400);
+  assert.equal(missing.value.code, 'SYSTEM_MATERIALS_INVALID');
+  const fields = new Set((missing.value.issues || []).map((issue) => issue.field));
+  for (const key of ['domain', 'description', 'keyEntities', 'dataDomains', 'accessIntention', 'businessOwner']) {
+    assert.ok(fields.has(key), `缺失物料 ${key} 必须被点名`);
+  }
+
+  // 平台保留码与同租户占用码
+  const reserved = await call({ method: 'POST', path: '/api/semantic-operations/systems', body: registrationMaterials({ code: 'ERP' }) });
+  assert.equal(reserved.status, 400);
+  assert.equal(reserved.value.code, 'SYSTEM_CODE_RESERVED');
+  const created = await call({ method: 'POST', path: '/api/semantic-operations/systems', body: registrationMaterials({ code: 'SRMX' }) });
+  assert.equal(created.status, 201);
+  const taken = await call({ method: 'POST', path: '/api/semantic-operations/systems', body: registrationMaterials({ code: 'SRMX', name: '另一个系统' }) });
+  assert.equal(taken.status, 409);
+  assert.equal(taken.value.code, 'SYSTEM_CODE_TAKEN');
+
+  // 登记是接入侧写入：没有 meta_model.draft.save 一律拒绝
+  const denied = await call({ method: 'POST', path: '/api/semantic-operations/systems', body: registrationMaterials({ code: 'SRMY' }), actionRole: null });
+  assert.equal(denied.status, 403);
+  assert.equal(denied.value.denied, 'meta_model.draft.save');
+
+  // 未挂接模拟场景的自定义系统：可登记，但探测被显式拒绝（也就到不了 connected）
+  await call({ method: 'POST', path: '/api/semantic-operations/systems', body: registrationMaterials({ code: 'SRMB', mockScenarioId: '' }) });
+  const noDataset = await call({ method: 'POST', path: '/api/semantic-operations/systems/SRMB/probe', body: { faultMode: 'none' } });
+  assert.equal(noDataset.status, 409);
+  assert.equal(noDataset.value.code, 'SYSTEM_PROBE_DATASET_NOT_ATTACHED');
+
+  // 自定义系统的授权按其声明的数据域裁剪：marketing 域系统对市场角色可探测、对生产角色拒绝
+  await call({ method: 'POST', path: '/api/semantic-operations/systems', body: registrationMaterials({ code: 'MKT1', dataDomains: ['marketing'] }) });
+  const allowed = await within('registration-guards', () => probeSystemConnection({ code: 'MKT1', roleId: 'marketing_manager', identityScope: identity('registration-guards') }));
+  assert.equal(allowed.status, 'verified');
+  const deniedProbe = await within('registration-guards', () => probeSystemConnection({ code: 'MKT1', roleId: 'production_manager', identityScope: identity('registration-guards') }));
+  assert.equal(deniedProbe.status, 403);
+  assert.equal(deniedProbe.code, 'SYSTEM_PROBE_FORBIDDEN');
 });
 
 test('生命周期：理由必填、未知状态、未知系统、越权与租户隔离各自显式失败', async () => {
   const tenant = 'lifecycle-guards';
   const call = (args) => callRoute({ tenant, ...args });
+  const created = await call({ method: 'POST', path: '/api/semantic-operations/systems', body: registrationMaterials({ code: 'SRMX' }) });
+  assert.equal(created.status, 201);
 
-  const noReason = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', body: { to: 'authorized' } });
+  const noReason = await call({ method: 'POST', path: '/api/semantic-operations/systems/SRMX/lifecycle', body: { to: 'authorized' } });
   assert.equal(noReason.status, 400);
   assert.equal(noReason.value.code, 'SYSTEM_TRANSITION_REASON_REQUIRED');
 
-  const unknownState = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', body: { to: 'enabled', reason: '未知状态' } });
+  const unknownState = await call({ method: 'POST', path: '/api/semantic-operations/systems/SRMX/lifecycle', body: { to: 'enabled', reason: '未知状态' } });
   assert.equal(unknownState.status, 400);
   assert.equal(unknownState.value.code, 'SYSTEM_STATE_UNKNOWN');
 
@@ -338,26 +430,41 @@ test('生命周期：理由必填、未知状态、未知系统、越权与租�
   assert.equal(unknownSystem.status, 404);
   assert.equal(unknownSystem.value.code, 'SYSTEM_NOT_REGISTERED');
 
-  const denied = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', actionRole: null, body: { to: 'authorized', reason: '没有写入权限' } });
+  // 平台保留类型未登记进本租户清单：生命周期操作给出「先登记」指引
+  const reserved = await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', body: { to: 'authorized', reason: '平台保留类型' } });
+  assert.equal(reserved.status, 404);
+  assert.equal(reserved.value.code, 'SYSTEM_ACCESS_MISSING');
+  assert.match(reserved.value.message, /平台目录保留类型/);
+
+  const denied = await call({ method: 'POST', path: '/api/semantic-operations/systems/SRMX/lifecycle', actionRole: null, body: { to: 'authorized', reason: '没有写入权限' } });
   assert.equal(denied.status, 403);
   assert.equal(denied.value.denied, 'meta_model.draft.save');
 
-  // 租户隔离：guards 租户推进 OA 不影响 demo-enterprise 的种子状态
-  await call({ method: 'POST', path: '/api/semantic-operations/systems/OA/lifecycle', body: { to: 'authorized', reason: 'guards 租户内推进' } });
-  const other = await within('demo-enterprise', () => getTenantSystemConnection('OA'));
-  assert.equal(other.lifecycleState, 'registered', '其他租户不得继承本租户的接入生命周期推进');
+  // 租户隔离：guards 租户推进 SRMX 不影响其他租户；自定义系统不跨租户可见
+  await call({ method: 'POST', path: '/api/semantic-operations/systems/SRMX/lifecycle', body: { to: 'authorized', reason: 'guards 租户内推进' } });
+  const other = await within('demo-enterprise', () => getTenantSystemConnection('SRMX'));
+  assert.equal(other, null, '其他租户不得看到本租户登记的自定义系统');
+  const demoList = await within('demo-enterprise', () => getTenantSystemConnections());
+  assert.deepEqual(demoList.map((item) => item.code), ['ERP', 'WMS', 'MES', 'LIMS', 'QMS', 'OMS'], '其他租户的接入清单不得被本租户的登记改变');
 });
 
 test('生命周期：服务层直调与路由层行为一致（含接通门禁与审计字段）', async () => {
+  const registered = await within('lifecycle-direct', () => registerSystemOnboarding({
+    materials: registrationMaterials({ code: 'SRMX' }), identityScope: identity('lifecycle-direct')
+  }));
+  assert.equal(registered.code, 'SRMX');
+  assert.equal(registered.lifecycle.state, 'registered');
+  assert.equal(registered.lifecycle.updatedBy, 'same-operator');
+
   const result = await within('lifecycle-direct', () => transitionTenantSystemConnection({
-    code: 'OA', to: 'authorized', reason: '服务层直调', identityScope: identity('lifecycle-direct')
+    code: 'SRMX', to: 'authorized', reason: '服务层直调', identityScope: identity('lifecycle-direct')
   }));
   assert.equal(result.to, 'authorized');
   assert.equal(result.lifecycle.updatedBy, 'same-operator');
   assert.match(result.lifecycle.reason, /服务层直调/);
 
   const blocked = await within('lifecycle-direct', () => transitionTenantSystemConnection({
-    code: 'OA', to: 'connected', reason: '未探测就接通', identityScope: identity('lifecycle-direct')
+    code: 'SRMX', to: 'connected', reason: '未探测就接通', identityScope: identity('lifecycle-direct')
   }));
   assert.equal(blocked.status, 409);
   assert.equal(blocked.code, 'SYSTEM_CONNECT_PROBE_REQUIRED');

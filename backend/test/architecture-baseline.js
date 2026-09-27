@@ -24,7 +24,10 @@ export const DOMAIN_EXPORT_CEILING = {
   // 2026-09-26 抬到 5（ADR-023）：补第 5 项契约「生命周期操作」——状态机早已在注册表
   // 定义却从未暴露为可执行动作，界面接入状态只能看种子值。这是补齐接入流程缺口的
   // 最小契约面，仍不预留增长空间；下一次抬高必须先说明为什么现有 5 项不够。
-  'system-onboarding': 5
+  // 2026-09-26 抬到 6（ADR-024）：补第 6 项契约「登记自定义系统」——接入清单不再
+  // 预设备待接入/未登记系统，「新增接入」必须是租户可执行的登记动作；没有这项契约，
+  // 去预设后的接入流程没有入口。仍不预留增长空间。
+  'system-onboarding': 6
 };
 
 // 领域目录中不作为业务边界、不要求 public-api 的基础设施目录。
@@ -221,6 +224,10 @@ export const CROSS_DOMAIN_EDGE_BASELINE = new Set([
   'semantic-mapping-validation-service.js -> mock-scenario-service.js',
   'semantic-natural-schema-service.js -> local-model-gateway.js',
   'semantic-natural-schema-service.js -> prompt-security-service.js',
+  // 阶段 4h（ADR-025）：受控对象链接与自然语言抽取同性质——调用模型网关 + 提示安全检查，
+  // 且语义纪律相同（模型只给逐字证据、判定在服务端）。两条边与上一行同源，非新性质。
+  'semantic-object-mention-service.js -> local-model-gateway.js',
+  'semantic-object-mention-service.js -> prompt-security-service.js',
   'semantic-operations-agent-service.js -> local-model-gateway.js',
   'semantic-operations-agent-service.js -> meta-model-service.js',
   'semantic-operations-agent-service.js -> mock-onboarding-basis.js',

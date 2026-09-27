@@ -95,8 +95,9 @@ const templates = [
   }
 ];
 
-// 连接目标清单已收敛到系统注册表；此处的 6 个已接入 + SRM/OA 待接入由目录派生，
-// 不再自行维护第二份系统清单。
+// 连接目标清单已收敛到系统注册表：自 2026-09-26（ADR-024）起只派生 6 个已接入的
+// 演示样例系统，不再预设备 SRM/OA 待接入目标——接入清单完全由租户自行登记。
+// 上方的 SRM / OA 连接模板保留为平台资产，但需先有租户登记的对应目标才可用。
 export const getWorldModelConnectionTargets = () => getConnectionTargets();
 
 const WORLD_NAMESPACE = 'world_model_runtime';

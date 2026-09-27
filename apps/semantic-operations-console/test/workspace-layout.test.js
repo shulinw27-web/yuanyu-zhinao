@@ -177,19 +177,31 @@ test('候选对象覆盖面（目录空白 / 未覆盖提及）必须在提案�
   assert.ok(!/selected\.value/.test(templateSource), '模板中存在 selected.value（恒为 undefined，会静默隐藏整块披露）');
 });
 
-// ── 接入生命周期操作面（ADR-023）：新增接入与已接通系统管理必须在界面上可执行 ──
+// ── 接入生命周期操作面（ADR-023 / ADR-024）：新增接入登记与已接通系统管理必须在界面上可执行 ──
 //
 // 此前系统接入视图只能「看」：状态是种子给的静态值，没有新增接入入口，也没有已接通
-// 系统的管理动作——状态机在后端定义了却从未暴露。本组钉住操作面真实存在。
-test('系统接入：新增接入入口、生命周期操作面板与停用筛选必须可见', async () => {
+// 系统的管理动作——状态机在后端定义了却从未暴露。ADR-023 补齐生命周期操作面；
+// ADR-024 进一步把「新增接入」改成租户提交接入物料、任意命名的登记动作，
+// 必填项 schema 由服务端下发（前端不得复制第二份字段规则）。本组钉住操作面真实存在。
+test('系统接入：新增接入登记表单、生命周期操作面板与停用筛选必须可见', async () => {
   const accessSource = await readFile(new URL('../src/components/SystemAccessWorkspace.vue', import.meta.url), 'utf8');
   // 注意：根 <template> 内部还有 <template v-if>，必须用 lastIndexOf 取到根闭合标签，
   // 否则切片会在第一个内层 </template> 处提前结束，后面的断言全部「假失败」。
   const templateSource = accessSource.slice(accessSource.indexOf('<template>'), accessSource.lastIndexOf('</template>'));
-  // 新增接入入口：一键聚焦未登记系统（平台目录中尚未开始接入的成员）。
+  // 新增接入入口：打开登记表单（不再只是切换筛选）。
   assert.match(templateSource, /data-testid="start-onboarding"/);
   assert.match(templateSource, /＋ 新增接入/);
-  assert.match(templateSource, /未登记＝平台目录里尚未开始接入的系统/);
+  assert.match(accessSource, /function openRegistration\(\)/);
+  assert.match(templateSource, /data-testid="register-system-form"/);
+  // 登记表单必须按服务端下发的 schema 渲染（必填项单一事实源在后端），
+  // 数据域与模拟场景选项同样来自服务端，前端不本地硬编码。
+  assert.match(templateSource, /v-for="field in registrationFields"/);
+  assert.match(accessSource, /const registrationFields = computed\(\(\) => registrationSchema\.value\?\.fields \|\| \[\]\)/);
+  assert.match(templateSource, /v-for="option in registrationDataDomains"/);
+  assert.match(templateSource, /v-for="scenario in registrationScenarios"/);
+  assert.match(templateSource, /data-testid="register-submit"/);
+  // 提交走服务端登记（201 进入「已登记」），前端不落任何本地状态旁路。
+  assert.match(accessSource, /client\.registerSystemOnboarding\(/);
   // 生命周期操作面板：状态步骤 + 下一步动作 + 必填理由。
   assert.match(templateSource, /aria-label="接入流程与生命周期"/);
   assert.match(templateSource, /data-testid="lifecycle-steps"/);
@@ -203,4 +215,6 @@ test('系统接入：新增接入入口、生命周期操作面板与停用筛�
   // 操作走服务端状态机，前端不得出现「本地改状态」的旁路。
   assert.match(accessSource, /client\.transitionSystemConnection\(/);
   assert.ok(!/lifecycleState\s*=\s*'connected'/.test(templateSource), '模板中不得硬编码生命周期状态');
+  // 去预设（ADR-024）：界面上不得再出现「平台目录里尚未开始接入的系统」这类预设表述。
+  assert.ok(!/平台目录里尚未开始接入/.test(accessSource), '不得残留预设待接入系统的表述');
 });

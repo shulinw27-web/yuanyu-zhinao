@@ -198,10 +198,36 @@ export const systemDefinitions = Object.freeze(SYSTEM_DEFINITION_LIST);
 // 现显式声明，避免有人调整目录条目顺序时静默改变接口返回顺序与界面顺序。
 export const DEMO_CONNECTION_ORDER = Object.freeze(['lims', 'mes', 'erp', 'wms', 'qms', 'oms']);
 
-// 待接入系统的展示顺序。同样显式声明：此前的顺序由 world-model-template-service
-// 的字面量决定（SRM 在前、OA 在后），而目录里 OA 排在 SRM 之前。若直接按目录顺序
-// 派生会静默改变前端列表顺序，故单独钉住。
-export const PENDING_ONBOARDING_ORDER = Object.freeze(['srm', 'oa']);
+// ── 自定义系统登记物料（2026-09-26 / ADR-024）────────────────────────────────
+//
+// 背景：接入清单不再预设备待接入/未登记系统（见 registry 的租户接入清单），「新增接入」
+// 变成租户自行登记任意命名的系统。登记必须提交一组**必填物料**，目标是让智脑
+// 不靠猜就能明白接入的是什么系统：
+//   * name / domain / description ——「这是什么系统」：称呼、业务归类、管什么流程；
+//   * keyEntities ——「里面有什么数据」：核心业务对象（同时作为世界建模对象面）；
+//   * dataDomains ——「授权边界在哪」：接入后按数据域参与角色裁剪；
+//   * accessIntention ——「为什么要接」：智脑被期望用它做什么；
+//   * businessOwner ——「出了问题找谁」。
+// 系统码与模拟数据源场景为可选：系统码缺省由注册表按名称生成并防撞；不挂接模拟
+// 场景的自定义系统可以被识别与授权，但不能连通性探测，也就永远到不了 connected。
+export const DATA_DOMAIN_OPTIONS = Object.freeze([
+  { id: 'production', label: '生产质量', description: '批次、检验、偏差、放行与追溯' },
+  { id: 'marketing', label: '市场运营', description: '订单、渠道、投诉与需求洞察' },
+  { id: 'internal', label: '内务协同', description: '供应商、合同、预算与内部流程' }
+]);
+
+export const SYSTEM_REGISTRATION_FIELDS = Object.freeze([
+  { key: 'name', label: '系统名称', required: true, format: 'text', help: '你们怎么称呼这个系统（2–40 字）', constraints: { minLength: 2, maxLength: 40 } },
+  { key: 'domain', label: '业务域', required: true, format: 'text', help: '业务归类，例如「供应链」「研发与工程」（2–20 字）', constraints: { minLength: 2, maxLength: 20 } },
+  { key: 'description', label: '系统定位说明', required: true, format: 'text', help: '这个系统是干什么的、覆盖哪些业务流程（不少于 10 字）', constraints: { minLength: 10, maxLength: 400 } },
+  { key: 'keyEntities', label: '核心业务对象', required: true, format: 'list', help: '该系统管理的主要数据对象，用顿号或逗号分隔（至少 1 个）', constraints: { minItems: 1, maxItems: 12 } },
+  { key: 'dataDomains', label: '覆盖数据域', required: true, format: 'dataDomains', help: '接入后按数据域参与角色授权裁剪（至少勾选 1 个）', constraints: { minItems: 1 } },
+  { key: 'accessIntention', label: '接入目的', required: true, format: 'text', help: '智脑要用这个系统做什么：读什么数据、支撑什么业务（不少于 10 字）', constraints: { minLength: 10, maxLength: 400 } },
+  { key: 'businessOwner', label: '业务责任人', required: true, format: 'text', help: '该系统接入后的业务第一责任人（2–30 字）', constraints: { minLength: 2, maxLength: 30 } },
+  { key: 'code', label: '系统码', required: false, format: 'code', help: '留空则按名称自动生成；不可占用平台目录保留码', constraints: { pattern: '^[A-Z][A-Z0-9_]{1,15}$' } },
+  { key: 'vendor', label: '厂商 / 供应商', required: false, format: 'text', help: '系统供应方，便于后续连接器对接（不超过 40 字）', constraints: { maxLength: 40 } },
+  { key: 'mockScenarioId', label: '模拟数据源场景', required: false, format: 'mockScenario', help: '演示环境的连通性探测数据面；不挂接则无法探测，也就不能接通', constraints: {} }
+]);
 
 // ── 角色可见性策略：两套并列声明 ────────────────────────────────────────────
 //
@@ -281,14 +307,11 @@ export function getDemoConnectedSystems() {
   });
 }
 
-/** 连接目标视图：已接入 + 待接入，保持历史结构与顺序。 */
+/**
+ * 连接目标视图：已接入的演示样例系统。2026-09-26（ADR-024）起不再派生「待接入」目标——
+ * 接入清单完全由租户自行登记，平台不预设备任何待接入/未登记系统；SRM/OA 的历史
+ * 待接入目标随之移除，相关元模型连接模板保留但需先有租户登记的对应目标才可用。
+ */
 export function getConnectionTargets() {
-  const connected = getDemoConnectedSystems().map((item) => ({ id: item.id, name: item.name, code: item.code, status: '已接入', domain: item.domain }));
-  const pending = PENDING_ONBOARDING_ORDER.flatMap((id) => {
-    const item = catalogById.get(id);
-    return item && item.onboardingStatus === 'pending_onboarding'
-      ? [{ id: item.id, name: item.name, code: item.code, status: '待接入', domain: item.domain }]
-      : [];
-  });
-  return [...connected, ...pending];
+  return getDemoConnectedSystems().map((item) => ({ id: item.id, name: item.name, code: item.code, status: '已接入', domain: item.domain }));
 }

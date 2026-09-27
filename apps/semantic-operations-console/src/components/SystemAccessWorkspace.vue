@@ -271,6 +271,92 @@ async function runTransition(to) {
   }
 }
 
+// ── 新增接入：登记自定义系统（ADR-024）────────────────────────────────────
+// 接入清单不再预设备待接入/未登记系统，「新增接入」是租户提交接入物料、任意命名的
+// 登记动作。必填项的定义（名称/业务域/定位说明/核心对象/数据域/接入目的/责任人）
+// 由服务端总览的 registration schema 下发，前端只按 schema 渲染与预检，
+// 不在本地复制第二份字段规则；系统码缺省由服务端生成并防撞。
+const registrationOpen = ref(false);
+const registrationForm = ref(null);
+const registrationIssues = ref([]);
+const registrationMessage = ref('');
+const registering = ref(false);
+
+const registrationSchema = computed(() => overview.value?.registration || null);
+const registrationFields = computed(() => registrationSchema.value?.fields || []);
+const registrationDataDomains = computed(() => registrationSchema.value?.dataDomains || []);
+const registrationScenarios = computed(() => registrationSchema.value?.mockScenarios || []);
+const isLongText = (key) => key === 'description' || key === 'accessIntention';
+
+function openRegistration() {
+  registrationForm.value = { name: '', domain: '', description: '', keyEntities: '', dataDomains: [], accessIntention: '', businessOwner: '', code: '', vendor: '', mockScenarioId: '' };
+  registrationIssues.value = [];
+  registrationMessage.value = '';
+  registrationOpen.value = true;
+}
+
+function toggleRegistrationDomain(domainId) {
+  const list = registrationForm.value?.dataDomains || [];
+  const index = list.indexOf(domainId);
+  if (index >= 0) list.splice(index, 1); else list.push(domainId);
+}
+
+function precheckRegistration() {
+  const issues = [];
+  const form = registrationForm.value || {};
+  for (const field of registrationFields.value) {
+    if (!field.required) continue;
+    const value = form[field.key];
+    const missing = field.format === 'dataDomains' || field.format === 'list'
+      ? !(Array.isArray(value) ? value : String(value || '').split(/[、,，;；]/u)).some((item) => String(item || '').trim())
+      : !String(value ?? '').trim();
+    if (missing) issues.push({ field: field.key, message: `${field.label}为必填项：${field.help}` });
+  }
+  return issues;
+}
+
+async function submitRegistration() {
+  if (registering.value) return;
+  if (!props.canProbe) {
+    registrationMessage.value = '当前营运身份没有 meta_model.draft.save 权限，登记接入被拒绝。';
+    return;
+  }
+  const localIssues = precheckRegistration();
+  if (localIssues.length) { registrationIssues.value = localIssues; return; }
+  const form = registrationForm.value;
+  const generation = overviewGeneration;
+  registering.value = true;
+  registrationIssues.value = [];
+  registrationMessage.value = '';
+  try {
+    const payload = {
+      name: form.name.trim(),
+      domain: form.domain.trim(),
+      description: form.description.trim(),
+      keyEntities: String(form.keyEntities || '').split(/[、,，;；\n]/u).map((item) => item.trim()).filter(Boolean),
+      dataDomains: [...form.dataDomains],
+      accessIntention: form.accessIntention.trim(),
+      businessOwner: form.businessOwner.trim(),
+      ...(form.code.trim() ? { code: form.code.trim().toUpperCase() } : {}),
+      ...(form.vendor.trim() ? { vendor: form.vendor.trim() } : {}),
+      ...(form.mockScenarioId ? { mockScenarioId: form.mockScenarioId } : {})
+    };
+    const result = await props.client.registerSystemOnboarding(payload);
+    if (disposed || generation !== overviewGeneration) return;
+    registrationOpen.value = false;
+    lifecycleMessage.value = `已登记接入系统 ${result.code}（${result.name}），生命周期进入「${result.lifecycle.label}」；下一步：确认数据域授权，并执行连通性测试后接通。`;
+    await loadOverview();
+    await selectSystem(result.code);
+  } catch (err) {
+    if (!disposed) {
+      registrationIssues.value = Array.isArray(err?.body?.issues) ? err.body.issues : [];
+      registrationMessage.value = errorMessage(err, '登记接入失败。');
+    }
+  } finally {
+    if (!disposed) registering.value = false;
+  }
+}
+
 onMounted(async () => { await Promise.all([loadOverview(), loadMappingSurface()]); });
 onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; detailGeneration += 1; });
 </script>
@@ -278,7 +364,7 @@ onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; detailGenerati
 <template>
   <section class="system-access" aria-label="系统接入">
     <div class="sa-heading">
-      <div><span class="eyebrow">SYSTEM ONBOARDING · TENANT SCOPED</span><h2>以系统为基石管理接入</h2><p>系统类型来自平台目录，接入生命周期与探测结果按当前租户隔离；每个系统都可单独查看连接配置、字段目录与映射。</p></div>
+      <div><span class="eyebrow">SYSTEM ONBOARDING · TENANT SCOPED</span><h2>以系统为基石管理接入</h2><p>接入清单＝6 个 Mock 演示接入样例＋本租户自行登记的系统，不预设备待接入/未登记系统；接入生命周期与探测结果按租户隔离，每个系统都可单独查看连接配置、字段目录与映射。</p></div>
       <span class="sa-badge">合成模拟环境</span>
     </div>
     <p class="sa-boundary">{{ overview?.boundary || '系统接入视图：接入状态按租户隔离；连通性探测读取内置合成模拟数据源，不连接任何真实企业系统。' }}</p>
@@ -301,12 +387,46 @@ onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; detailGenerati
       <div class="sa-filters" role="tablist" aria-label="系统筛选">
         <button v-for="item in filters" :key="item.id" type="button" role="tab" :aria-selected="filter === item.id" :class="{ active: filter === item.id }" @click="filter = item.id">{{ item.label }}</button>
         <button type="button" class="sa-refresh" :disabled="loading" @click="loadOverview">刷新</button>
-        <button type="button" class="sa-new" data-testid="start-onboarding" @click="filter = 'unregistered'">＋ 新增接入</button>
+        <button type="button" class="sa-new" data-testid="start-onboarding" @click="openRegistration">＋ 新增接入</button>
       </div>
+
+      <section v-if="registrationOpen" class="sa-panel sa-register" aria-label="新增接入登记" data-testid="register-system-form">
+        <div class="sa-panel-head"><div><span class="eyebrow">SYSTEM REGISTRATION</span><h4>新增接入：登记一个系统</h4></div><button type="button" class="sa-outline" @click="registrationOpen = false">收起</button></div>
+        <p class="sa-help">{{ registrationSchema?.policy }}</p>
+        <div class="sa-register-grid">
+          <template v-for="field in registrationFields" :key="field.key">
+            <label v-if="['text', 'list', 'code'].includes(field.format)" :class="{ wide: isLongText(field.key) }">
+              {{ field.label }}<em v-if="field.required"> *必填</em>
+              <textarea v-if="isLongText(field.key)" v-model="registrationForm[field.key]" rows="2" :data-testid="`register-field-${field.key}`" :placeholder="field.help" :maxlength="400" />
+              <input v-else v-model="registrationForm[field.key]" :data-testid="`register-field-${field.key}`" :placeholder="field.help" :maxlength="40" />
+            </label>
+            <fieldset v-else-if="field.format === 'dataDomains'" class="wide">
+              <legend>{{ field.label }}<em> *必填</em></legend>
+              <label v-for="option in registrationDataDomains" :key="option.id" class="sa-domain-option">
+                <input type="checkbox" :value="option.id" :data-testid="`register-domain-${option.id}`" :checked="registrationForm.dataDomains.includes(option.id)" @change="toggleRegistrationDomain(option.id)" />
+                <span>{{ option.label }}<small>{{ option.description }}</small></span>
+              </label>
+            </fieldset>
+            <label v-else-if="field.format === 'mockScenario'">
+              {{ field.label }}
+              <select v-model="registrationForm.mockScenarioId" data-testid="register-field-mockScenarioId">
+                <option value="">不挂接（无法连通性探测，不能接通）</option>
+                <option v-for="scenario in registrationScenarios" :key="scenario.id" :value="scenario.id">{{ scenario.label }} — {{ scenario.description }}</option>
+              </select>
+            </label>
+          </template>
+        </div>
+        <p v-for="issue in registrationIssues" :key="`${issue.field}-${issue.message}`" class="sa-help sa-blocked-inline">{{ issue.message }}</p>
+        <p v-if="registrationMessage" class="sa-notice" role="status" data-testid="registration-message">{{ registrationMessage }}</p>
+        <div class="sa-lifecycle-actions">
+          <button type="button" class="sa-primary" data-testid="register-submit" :disabled="registering" @click="submitRegistration">{{ registering ? '正在登记…' : '提交登记（进入「已登记」）' }}</button>
+          <span class="sa-help">提交后生命周期为「已登记」；接通仍需通过连通性测试（verified），门禁在服务端强制。</span>
+        </div>
+      </section>
 
       <div class="sa-layout">
         <aside class="sa-list" aria-label="系统清单">
-          <p v-if="filter === 'unregistered'" class="sa-empty">未登记＝平台目录里尚未开始接入的系统。选择一个系统，在右侧「接入流程与生命周期」面板执行「登记接入」。</p>
+          <p v-if="filter === 'unregistered'" class="sa-empty">未登记＝生命周期处于 draft 的系统（通常是登记被退回后待重新登记）。接入清单不预设备待接入系统；要接入新系统，请点右上「＋ 新增接入」自行登记。</p>
           <p v-if="!visibleSystems.length" class="sa-empty">当前筛选下没有系统。</p>
           <button v-for="item in visibleSystems" :key="item.code" type="button" class="sa-card" :class="{ selected: selectedCode === item.code }" :aria-pressed="selectedCode === item.code" @click="selectSystem(item.code)">
             <div class="sa-card-top"><i :style="{ background: item.health?.color || (item.connector ? '#2f7fd3' : '#4a5b6b') }">{{ item.code }}</i><span :class="item.lifecycleState">{{ item.lifecycleLabel }}</span></div>
@@ -332,9 +452,22 @@ onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; detailGenerati
             </div>
             <p v-if="detail.system.blockedReason" class="sa-blocked">{{ detail.system.blockedReason }}</p>
 
+            <section v-if="detail.system.custom" class="sa-panel" aria-label="登记物料">
+              <div class="sa-panel-head"><div><span class="eyebrow">REGISTRATION MATERIALS</span><h4>登记物料</h4></div><span class="sa-src">登记于 {{ displayTime(detail.system.custom.registeredAt) }} · {{ detail.system.custom.registeredBy }}</span></div>
+              <div class="sa-grid">
+                <div><span>系统定位说明</span><b>{{ detail.system.custom.description }}</b></div>
+                <div><span>接入目的</span><b>{{ detail.system.custom.accessIntention }}</b></div>
+                <div><span>核心业务对象</span><b>{{ detail.system.custom.keyEntities.join('、') }}</b></div>
+                <div><span>覆盖数据域</span><b>{{ detail.system.custom.dataDomains.join('、') }}</b></div>
+                <div><span>业务责任人</span><b>{{ detail.system.custom.businessOwner }}</b></div>
+                <div v-if="detail.system.custom.vendor"><span>厂商 / 供应商</span><b>{{ detail.system.custom.vendor }}</b></div>
+                <div><span>模拟数据源</span><b>{{ detail.system.custom.mockScenarioId || '未挂接（无法连通性探测）' }}</b></div>
+              </div>
+            </section>
+
             <section class="sa-panel" aria-label="接入流程与生命周期">
               <div class="sa-panel-head"><div><span class="eyebrow">ONBOARDING LIFECYCLE</span><h4>接入流程与生命周期</h4></div><span class="sa-src" :class="detail.lifecycle.state">{{ detail.lifecycle.label }}<template v-if="detail.lifecycle.reason"> · {{ detail.lifecycle.reason }}</template></span></div>
-              <p class="sa-help">接入流程：登记接入（补充连接信息）→ 确认数据域授权 → 连通性测试通过（verified）→ 接通系统。已接通系统可停用（保留登记与授权）；停用后可重新接通或下线登记。每次推进都会记录操作人、时间与理由。</p>
+              <p class="sa-help">接入流程：登记接入（提交接入物料，见「＋ 新增接入」）→ 确认数据域授权 → 连通性测试通过（verified）→ 接通系统。已接通系统可停用（保留登记与授权）；停用后可重新接通或下线登记。每次推进都会记录操作人、时间与理由。</p>
               <div class="sa-lifecycle-steps" data-testid="lifecycle-steps">
                 <span v-for="(step, index) in LIFECYCLE_STEPS" :key="step.id" :class="{ done: lifecycleStepIndex(detail.lifecycle.state) >= index && detail.lifecycle.state !== 'suspended', active: detail.lifecycle.state === step.id }"><i>{{ index + 1 }}</i>{{ step.label }}</span>
                 <span v-if="detail.lifecycle.state === 'suspended'" class="suspended-badge">已停用（登记与授权保留，可重新接通或下线）</span>
@@ -352,7 +485,7 @@ onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; detailGenerati
             </section>
 
             <section class="sa-panel">
-              <div class="sa-panel-head"><div><span class="eyebrow">CONNECTION</span><h4>连接配置</h4></div><span class="sa-src" :class="{ demo: detail.connectionConfiguration.source === 'demo_seed' }">{{ detail.connectionConfiguration.source === 'demo_seed' ? '来源：demo 种子样例' : '无配置' }}</span></div>
+              <div class="sa-panel-head"><div><span class="eyebrow">CONNECTION</span><h4>连接配置</h4></div><span class="sa-src" :class="{ demo: detail.connectionConfiguration.source === 'demo_seed' }">{{ detail.connectionConfiguration.source === 'demo_seed' ? '来源：demo 种子样例' : detail.connectionConfiguration.source === 'tenant_registration' ? '来源：租户登记物料' : '无配置' }}</span></div>
               <div class="sa-grid">
                 <div><span>配置责任人</span><b>{{ detail.connectionConfiguration.owner || '未指定' }}</b></div>
                 <div><span>同步频率</span><b>{{ detail.connectionConfiguration.syncInterval || '—' }}</b></div>
@@ -485,6 +618,21 @@ onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; detailGenerati
 .sa-lifecycle-steps span i { font-style: normal; font-size: 10px; font-weight: 700; }
 .sa-lifecycle-steps .suspended-badge { border-color: #8a7333; background: #322c18; color: #e6d08d; }
 .sa-lifecycle-actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; margin-bottom: 10px; }
+.sa-register { border-color: #3d6a58; }
+.sa-register-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(240px,100%),1fr)); gap: 12px; margin-bottom: 10px; }
+.sa-register-grid label { display: block; border: 1px solid #243c4d; border-radius: 7px; background: #0d2534; padding: 9px 11px; font-size: 12px; }
+.sa-register-grid label em { font-style: normal; color: #e0a588; margin-left: 5px; font-size: 10px; }
+.sa-register-grid label.wide { grid-column: 1 / -1; }
+.sa-register-grid .wide { grid-column: 1 / -1; }
+.sa-register-grid input, .sa-register-grid textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 8px 10px; border: 1px solid #345268; border-radius: 7px; background: #081927; color: #e2eef5; font: inherit; }
+.sa-register-grid input:focus-visible, .sa-register-grid textarea:focus-visible, .sa-register-grid select:focus-visible { outline: 2px solid #7cddda; outline-offset: 2px; }
+.sa-register-grid fieldset { border: 1px solid #243c4d; border-radius: 7px; background: #0d2534; padding: 9px 11px; margin: 0; }
+.sa-register-grid fieldset legend { color: #b6ccda; font-size: 12px; padding: 0 4px; }
+.sa-register-grid fieldset legend em { font-style: normal; color: #e0a588; margin-left: 5px; font-size: 10px; }
+.sa-domain-option { display: inline-flex; align-items: flex-start; gap: 8px; margin: 7px 12px 0 0; border: none !important; background: none !important; padding: 0 !important; cursor: pointer; }
+.sa-domain-option input { width: auto !important; margin-top: 3px !important; }
+.sa-domain-option span { color: #cfe2ec; font-size: 12px; }
+.sa-domain-option small { display: block; color: #8ea9ba; font-size: 10px; }
 .sa-lifecycle-reason { display: block; margin-bottom: 10px; }
 .sa-lifecycle-reason input { display: block; width: 100%; box-sizing: border-box; margin-top: 5px; padding: 8px 10px; border: 1px solid #345268; border-radius: 7px; background: #081927; color: #e2eef5; font: inherit; }
 .sa-lifecycle-reason input:focus-visible { outline: 2px solid #7cddda; outline-offset: 3px; }

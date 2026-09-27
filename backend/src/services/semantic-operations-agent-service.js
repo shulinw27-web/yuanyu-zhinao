@@ -5,6 +5,7 @@ import { inspectMultimodalInput, extractMultimodalEvidence } from './multimodal-
 import { inspectModelPromptSafety } from './local-model-gateway.js';
 import { discoverSchemasFromAttachments } from './semantic-schema-discovery-service.js';
 import { discoverNaturalSchema } from './semantic-natural-schema-service.js';
+import { discoverObjectMentionLinks } from './semantic-object-mention-service.js';
 import { validateSemanticMappingContract } from './semantic-mapping-validation-service.js';
 import { semanticFingerprint } from './semantic-model-fingerprint.js';
 import { inferObjectGranularity } from './ontology-contract-service.js';
@@ -353,7 +354,7 @@ function partitionRelationshipsByScope(relationshipTypes, keptIds, excludedIds =
   return { relationshipTypes: kept, excludedRelationships };
 }
 
-export function createSemanticOperationsProposal({ input, multimodalContent, attachments = [], schemaDiscovery = null, naturalSchemaSkip = null, identityScope, requirements = '', sampleRefs = [], roleId, adoptionMode = 'merge', prepareOnly = false, scopeSystems = null }) {
+export function createSemanticOperationsProposal({ input, multimodalContent, attachments = [], schemaDiscovery = null, naturalSchemaSkip = null, mentionLinking = null, identityScope, requirements = '', sampleRefs = [], roleId, adoptionMode = 'merge', prepareOnly = false, scopeSystems = null }) {
   assertSemanticTenant(identityScope);
   if (!['merge', 'replace'].includes(adoptionMode)) return { error: '请选择合并或替换当前草稿。', code: 'SEMANTIC_ADOPTION_MODE_INVALID' };
   const sourceText = `${normalize(input)}\n${normalize(multimodalContent?.modelContext)}`.slice(0, 24_000);
@@ -362,8 +363,14 @@ export function createSemanticOperationsProposal({ input, multimodalContent, att
   // 自然语言抽取**都没产出对象**时才兜底使用。兜底时必须披露命中词与覆盖率：
   // 否则「材料里写了、但目录没有这个词」的对象会静默消失，
   // 运营只看到「候选里没有发运单」，分不清是自己没写清、还是目录压根不含这个词。
+  // 阶段 4h（ADR-025）：受控对象链接产出的候选。链接只在「材料逐字提及 ↔ 已登记对象类型」
+  // 两侧都被服务端校验过时成立；结构（字段/主键）来自该系统的既有声明，模型不给结构。
+  const mentionCandidates = mentionLinking?.candidates || [];
+  const mentionStructureGaps = mentionLinking?.gaps || [];
   const catalogHits = matchCandidateCatalog(sourceText);
-  const catalogSelection = schemaDiscovery?.objectTypes?.length ? [] : catalogHits.map((entry) => entry.item);
+  // 兜底条件收窄：受控对象链接**产出了候选**时，目录兜底同样不生效——
+  // 链接候选来自已登记类型与系统声明，是比词面命中更强的事实来源。
+  const catalogSelection = (schemaDiscovery?.objectTypes?.length || mentionCandidates.length) ? [] : catalogHits.map((entry) => entry.item);
   // 阶段 4g（ADR-022）：兜底路径生效时，把「目录覆盖面」本身一并披露——
   //   ① 目录空白（确定性）：平台已治理、但候选目录没有词条的对象类；
   //   ② 未覆盖提及（启发式）：材料列举项里没有被任何词条覆盖的那些。
@@ -385,7 +392,24 @@ export function createSemanticOperationsProposal({ input, multimodalContent, att
     uncoveredTruncated: uncovered.truncated,
     // 提及清单的**取得方式**必须随清单一起走。把它写成字段而不是一句注释，
     // 是因为下游（界面 / 报告 / 复算）需要能判断「这份清单该不该被当真」。
-    uncoveredBasis: uncovered.basis
+    uncoveredBasis: uncovered.basis,
+    // 阶段 4h（ADR-025）：受控对象链接的披露。`skipped` 是解读前提（同 `fallbackApplied`
+    // 的理由）：模拟运行时下链接根本没跑，「linked 为空」不说明材料里没有已登记对象。
+    // `linked[].structured` 说清每条链接有没有落成候选；给不出结构的留在 `structureGaps`。
+    mentionLinking: mentionLinking ? {
+      skipped: mentionLinking.skipped || null,
+      skipReason: mentionLinking.skipped ? mentionLinking.reason : null,
+      basis: mentionLinking.skipped ? null : (mentionLinking.basis || null),
+      linked: (mentionLinking.links || []).map((link) => ({
+        mention: link.mention, objectType: link.objectType, system: link.system,
+        evidence: link.evidence,
+        structured: !mentionStructureGaps.some((gap) => gap.objectType === link.objectType)
+      })),
+      total: mentionLinking.total || 0,
+      truncated: Boolean(mentionLinking.truncated),
+      mergedDuplicates: mentionLinking.mergedDuplicates || 0,
+      structureGaps: mentionStructureGaps
+    } : null
   };
   const catalogCandidates = catalogSelection.map((item) => ({
     id: item.id, label: item.label, source: item.source, key: item.key, fields: item.fields, classification: item.classification,
@@ -394,7 +418,7 @@ export function createSemanticOperationsProposal({ input, multimodalContent, att
     fieldDefinitions: item.fields.map((name) => ({ name, type: 'string', required: name === item.key, primaryKey: name === item.key, sourceField: sourceFieldName(name), mappingStatus: 'mapped', reference: null, description: null })),
     description: `由元域智语 Agent 根据${attachments.length ? '已通过内容扫描的材料与' : ''}自然语言描述生成的待审阅对象。`
   }));
-  const extractedObjectTypes = [...new Map([...(schemaDiscovery?.objectTypes || []), ...catalogCandidates].map((item) => [item.id, item])).values()];
+  const extractedObjectTypes = [...new Map([...(schemaDiscovery?.objectTypes || []), ...mentionCandidates, ...catalogCandidates].map((item) => [item.id, item])).values()];
   if (!extractedObjectTypes.length) return {
     error: '没有从当前诉求或受控材料中识别到可追溯的候选对象。请补充业务对象、来源系统和字段范围，或上传结构化数据字典。',
     code: 'SEMANTIC_PROPOSAL_NO_GROUNDED_OBJECTS',
@@ -481,6 +505,11 @@ export function createSemanticOperationsProposal({ input, multimodalContent, att
       // 一条是确定性的（目录与平台已治理对象的差集），一条是启发式的（材料列举项）。
       ...(catalogGaps.length ? [`受控目录 ${CANDIDATE_CATALOG_SIZE} 类之外，系统目录里还登记了 ${catalogGaps.length} 类**世界模型对象**（${catalogGaps.map((item) => `${item.objectType}（${item.system}）`).join('、')}），它们**在受控目录里没有任何词条**：材料里若只提到这些对象，关键词兜底一定命中不到。要建它们，请上传结构化数据字典，或先在系统目录里为该对象补词条后重跑。`] : []),
       ...(uncovered.total ? [`材料里另有 ${uncovered.total} 处列举项没有被任何受控词条覆盖（${uncovered.mentions.join('、')}${uncovered.truncated ? ' 等' : ''}），因此**不会**出现在候选里。这份清单由「列举分隔符 + 纯中文短短语」**启发式**取得（见 candidateCoverage.uncoveredBasis），**不是对象抽取结果**：可能混入非对象词，也可能漏掉没有用分隔符列出的对象名。请人工核对；若其中有要建模的对象，请补充材料或用受控目录的用词重写。`] : []),
+      // 阶段 4h（ADR-025）：受控对象链接把「已登记类型」的点名升级为候选——这是对
+      // 4g 决策 6「点名不进候选」的收窄推翻：只有两侧都被服务端校验的链接才进，
+      // 且结构来自系统声明、字段映射仍未确认，Critic 会拦住未映射就采纳的尝试。
+      ...(mentionCandidates.length ? [`${mentionCandidates.length} 类候选来自**受控对象链接**（${mentionCandidates.map((item) => `${item.label} ← ${item.sourceSystems.join('/')}`).join('、')}）：材料逐字提及了这些对象，且对象类型已在系统目录登记；字段与主键来自该系统的既有声明，**字段映射尚未确认**，采纳前须补齐映射。`] : []),
+      ...(mentionStructureGaps.length ? [`另有 ${mentionStructureGaps.length} 处材料提及链接到了已登记对象类型、但给不出候选结构：${mentionStructureGaps.map((gap) => `${gap.mention}→${gap.objectType}（${gap.reason === 'no_declaration' ? '系统无字段声明' : '声明中识别不出主键'}）`).join('、')}。${mentionStructureGaps[0]?.suggestion || ''}`] : []),
       ...(naturalSchemaSkip ? [`未从非结构化材料做自然语言抽取——${naturalSchemaSkip.reason}`] : []),
       ...(identityLinking?.summary.links ? [`范围内系统的声明给出了 ${identityLinking.summary.links} 条跨系统标识引用（其中 ${identityLinking.summary.requiresMapping} 条是代理键与业务键之间的引用，不能按值直接对齐，确认时必须给出**结构化映射定义**${identityLinking.summary.shapeUnknown ? `；另有 ${identityLinking.summary.shapeUnknown} 条有一端键形状未判定（裸名），必须先判定形状才能确认` : ''}）。这些是**假设**，未自动并入草稿关系，需人工确认后再建模。`] : []),
       ...(identityLinking?.conflicts.length ? [`标识冲突 ${identityLinking.conflicts.length} 项（${[...new Set(identityLinking.conflicts.map((item) => item.kind))].join('、')}）已单独上报，未做静默合并。`] : []),
@@ -860,6 +889,9 @@ export async function createSemanticOperationsProposalFromRequest({ body, role, 
   // 阶段 4f：自然语言抽取被跳过时的原因。`null` 表示「没跳过」，与「跳过但没说」是两种状态，
   // 后者正是本阶段要消除的——静默跳过会让「为什么没有候选对象」变成谜。
   let naturalSchemaSkip = null;
+  // 阶段 4h：受控对象链接的结果。`null` 表示本轮没有进入链接环节
+  // （结构化材料或自然语言抽取已产出对象）——与「链接跑了但没产出」是两种状态。
+  let mentionLinking = null;
   if (!schemaDiscovery.objectTypes.length) {
     const naturalMaterial = `${String(body?.sourceMaterial || input)}\n${(workspaceDocuments || content.documents || []).map(document => document.text).join('\n') || content.modelContext || ''}`;
     if (naturalMaterial.length > 20000) return { error: '非结构化材料超过单次可核对范围，请拆分业务范围或提供结构化字典；完整材料已保留，不从截断摘录猜测模型。', code: 'SEMANTIC_PROPOSAL_NO_GROUNDED_OBJECTS', status: 422 };
@@ -869,6 +901,13 @@ export async function createSemanticOperationsProposalFromRequest({ body, role, 
     // 「候选对象里没有它」，审阅人无法判断该改材料还是该换 provider。
     naturalSchemaSkip = natural?.skipped ? natural : null;
     if (natural && !natural.skipped) schemaDiscovery = natural;
+    else {
+      // 阶段 4h（ADR-025）：抽取跳过（模拟运行时 / 材料无字典线索）后，受控对象链接
+      // 仍有机会把材料里**逐字提及**的已登记对象带进候选——这是「写四个对象只得 1 类」
+      // 根因的处置点。mock 下链接同样跳过并带原因，行为与 4g 之前完全一致。
+      mentionLinking = await discoverObjectMentionLinks({ material: naturalMaterial, systems: scopeSystems });
+      if (mentionLinking?.error) return { ...mentionLinking, code: 'SEMANTIC_PROPOSAL_NO_GROUNDED_OBJECTS', status: 422 };
+    }
   }
   const requirements = [...(workspaceDocuments || content.documents || []).filter(document => document.kind === 'request' || !/json|csv|yaml/.test(document.mimeType)).map(document => document.text), body.sourceMaterial || input].join('\n');
   const sampleDocuments = (workspaceDocuments || content.documents || []).filter(document => {
@@ -877,7 +916,7 @@ export async function createSemanticOperationsProposalFromRequest({ body, role, 
   });
   const sampleWorkspace = await extendSemanticMaterials({ content: { documents: sampleDocuments }, roleId: role.id, identityScope });
   if (sampleWorkspace.error) return sampleWorkspace;
-  return createSemanticOperationsProposal({ input, multimodalContent: content, attachments: multimodal.attachments, schemaDiscovery, naturalSchemaSkip, identityScope, requirements, sampleRefs: sampleWorkspace.refs, roleId: role.id, adoptionMode: body.adoptionMode || 'merge', scopeSystems });
+  return createSemanticOperationsProposal({ input, multimodalContent: content, attachments: multimodal.attachments, schemaDiscovery, naturalSchemaSkip, mentionLinking, identityScope, requirements, sampleRefs: sampleWorkspace.refs, roleId: role.id, adoptionMode: body.adoptionMode || 'merge', scopeSystems });
 }
 
 export function listSemanticOperationsSnapshots({ identityScope }) {

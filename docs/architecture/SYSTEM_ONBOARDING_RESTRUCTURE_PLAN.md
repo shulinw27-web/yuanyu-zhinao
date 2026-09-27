@@ -1225,3 +1225,15 @@ requestedSystems.length ? requestedSystems : connectorCatalog.filter(item => ite
 本段补齐：域契约 4 → 5（`transitionTenantSystemConnection`，`DOMAIN_EXPORT_CEILING` 显式抬棘轮）；路由 `POST /api/semantic-operations/systems/{code}/lifecycle`（权限沿用 `meta_model.draft.save`）；**接通门禁**——任何 `→ connected` 要求该租户最近一次探测 `verified`（409 `SYSTEM_CONNECT_PROBE_REQUIRED`），「先验证再接通」成为流程强制而非口头约定；理由必填（≤200 字）+ 操作人取受信上下文审计；前端新增「接入流程与生命周期」面板（渲染服务端 `lifecycle.transitions`，不本地硬编码）、「＋ 新增接入」入口（聚焦未登记系统）与「已停用」维度。**边界**：`draft→registered` 只推进状态不落连接配置（连接配置样例仍来自 demo 种子）；系统类型仍只能来自平台目录。
 
 **验收（本机实测，确定性用例，未调模型）**：`backend/test/system-access.test.js` **12 项（9 → 12）**；`workspace-layout` **9 项（8 → 9）**；`test:architecture` **10/10**（棘轮显式变更，未增跨域边）；`test:registry` 7/7；`test:access` 12/12；`test:semantic` 全链 EXIT=0。决策记录见 [ADR-023](adr/ADR-023-lifecycle-operation-surface.md)。
+
+---
+
+### 阶段 4h：受控对象链接——材料逐字提及进入候选（ADR-025）—— **已完成（2026-09-28）**
+
+4f/4g 把「候选从哪来、缺了什么」变成可读、可点名，但共同根因原封不动：**材料里写到、但受控目录未覆盖的对象一个都进不了候选**（「写四个对象只得 1 类」）。本段把 4g 决策 6「点名不进候选」收窄推翻——仅「已登记类型 + 双侧逐字校验 + 人工审阅」的链接进候选，用户在三条路径中选定本方案（2026-09-28）。
+
+**做法**：新增 `semantic-object-mention-service.js`——模型只输出 `{ mention, evidence, objectType }`，服务端三重校验（证据逐字来自材料、证据含提称、类型在 `worldObjectTypes` 登记索引内），任一不满足**整份拒绝**（不局部挽救）；模型不给结构、不断言系统（结构只来自系统声明，主键用 4a 同一套 `inferIdentifier` 判据）。链接只在「结构化材料与自然语言抽取都没产出对象」时运行；mock 运行时与显式空范围跳过并带原因（纯函数，与 ADR-021 决策 4 同理由）。两类「链接了但给不出结构」分开点名（`no_declaration` / `no_identifier`），不进候选只披露。候选一律 `mappingStatus: 'pending'`——Critic「字段来源映射」照常拦住未映射就采纳。披露落 `candidateCoverage.mentionLinking`（结构化，`linked[].structured` 逐条标记）；链接候选生效时目录兜底被抑制。`registeredWorldObjectIndex` 按范围过滤（`null`=全部、`[]`=显式为空不放宽）。真实模型评测 `npm run evaluate:mention-linking`（散文材料 × 3 轮 + 1 次端到端，不进 quality）。
+
+**验收（本机实测，确定性用例，未调模型）**：`test:mention` **6/6**（新增，已挂入 `test:all`）；`test:semantic` **6/6 + 61/61 + 98/98**（既有断言零改动——mock 下候选集合与 4g 完全一致）；`test:architecture` **10/10**（登记 2 条与 `semantic-natural-schema-service` 同性质的网关/提示安全边）；lint 干净。**真实模型评测**：2026-09-28 两次尝试均因 WorkBuddy 云服务限流（`WORKBUDDY_CLOUD_QUOTA_RATE_LIMITED`）未取得数字，脚本就绪待配额恢复后重跑——**「quality 全绿」不含模型契约**的口径不变。
+
+**边界**：词表治理仍未做（中文词 ↔ 已登记类型的对应在运行时由模型给出，不是词表资产）；`no_identifier` 分支无数据驱动用例（现有 8 类有声明的类型主键全部可判定）；前端组件未改（披露经既有数据面与审阅说明到达界面）。决策记录见 [ADR-025](adr/ADR-025-object-mention-linking.md)。
