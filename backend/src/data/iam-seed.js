@@ -53,7 +53,7 @@ export const permissionCatalog = [
     ]
   },
   {
-    id: 'menu.world', menuId: 'world', name: '元模型', pagePermissionId: 'page.world.view', description: '对象、关系与事实层',
+    id: 'menu.world', menuId: 'world', name: '元模型', pagePermissionId: 'page.world.view', description: '已迁出元域智营（2026-09-28 阶段 6 / 4.3 决策 A，模型相关只在元域智语端）；权限条目保留一个版本周期——page.world.view 是元域智语端语义页面与巡检服务的访问载体',
     buttons: []
   },
   {

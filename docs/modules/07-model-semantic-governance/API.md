@@ -57,11 +57,11 @@
 | GET | `/api/meta-models/oa-governance/simulation` | 最近模拟构建结果或待构建状态 |
 | POST | `/api/meta-models/oa-governance/simulate-build` | `meta_model.simulate` |
 | POST | `/api/meta-models/oa-governance/publish` | `meta_model.publish` |
-| GET | `/api/world-model` | 世界图投影 |
-| GET | `/api/world-model/templates`、`/:id` | 模板 |
-| GET | `/api/world-model/connection-targets` | 允许连接目标 |
-| GET/POST | `/api/world-model/drafts` | 草稿；写需 `world.draft.create` |
-| POST | `/api/world-model/drafts/:id/validate|publish` | 对应按钮权限 |
+| GET | `/api/world-model` | 世界图投影（2026-09-28 阶段 6 起：管理 Web 无入口，端点保留一个版本周期） |
+| GET | `/api/world-model/templates`、`/:id` | 模板（同上，保留一个版本周期） |
+| GET | `/api/world-model/connection-targets` | 允许连接目标（同上） |
+| GET/POST | `/api/world-model/drafts` | 草稿；写需 `meta_model.draft.save`（原 `world.draft.*` 已按 [ADR-026](../../architecture/adr/ADR-026-permission-equivalence-merge.md) 等价并入，条目删除） |
+| POST | `/api/world-model/drafts/:id/validate|publish` | 分别需 `meta_model.draft.validate` / `meta_model.publish` |
 | GET | `/api/semantic-context` | 语义概览 |
 | GET | `/api/semantic-operations/tasks` | 当前身份的元域智语任务窗口与审计时间线 |
 | GET | `/api/semantic-operations/sources?query=` | 按角色和自然语言范围返回来源目录、连接就绪度、已有映射和接入物料；不查询业务明细 |

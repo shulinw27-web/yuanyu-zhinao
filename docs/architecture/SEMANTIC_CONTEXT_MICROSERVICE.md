@@ -36,7 +36,7 @@ OA / ERP / MES / LIMS / QMS / OMS
 
 ## 当前 Demo 实现
 
-- Node 业务 API 暴露 `GET /api/semantic-context`，向 PC 元模型页提供角色过滤的语义投影。
+- Node 业务 API 暴露 `GET /api/semantic-context`，提供角色过滤的语义投影（2026-09-28 阶段 6 起：管理 Web「元模型」页已移除、前端方法删除，端点按阶段 2 先例保留一个版本周期）。
 - `backend/src/services/semantic-context-service.js` 提供事实、关系与决策溯源的 Demo 契约实现。
 - `services/semantic-context/app.py` 是独立 Python 服务，安装 `semantica==0.6.5` 后优先使用 `semantica.context.ContextGraph`；缺少依赖时以 `projection-fallback` 运行，并明确报告运行模式。
 - 启动模拟场景时，`semantica-demo-bridge-service.js` 只从服务端提取该运行的合成 Mock 事实，发送至本机 `POST /demo/ingest` 建图并校验；OA 审批完成后会再次同步，验证 CAPA 等模拟写回是否进入同一上下文。

@@ -320,7 +320,7 @@ Agent 运行时不把“角色相同”视为“用户相同”。run 创建与 
 
 ### 6.3 IAM 权限中心
 
-PC Web 已将权限管理从“配置与治理”摘要中拆成独立页面。页面使用后端权限工作区展示组织树、人员归属/多角色、角色页面与按钮矩阵、数据范围和审计记录。前端要求 `effectiveAccess.menuIds` 与 `pagePermissionIds` 同时满足才允许导航，并只为有效页面懒加载数据；权限撤销后会清空旧页面数据并回落到首个可访问页。`buttonPermissionIds` 已接入风险详情/确认/批准、采购发起/审批、权限审计、Agent 安全评测、模型连接配置、模拟场景/审批/故障/重置、Key 策略轮换/租约吊销、OA 元模型保存/校验/模拟/发布，以及世界模型草稿创建/校验/发布。前端仍只是交互控制：后端对纳入页面策略映射的 GET 资源再次校验页面读取权限，并对对应写 API 再次校验按钮权限；`GET /api/account-center` 必须先认证并具备 `page.config.view`，`GET /api/permission-management` 必须具备 `page.permissions.view`，`GET /api/risk-cases/{id}` 还必须具备 `risk.detail.view`。`permission.audit.view` 独立控制服务端审计数组和 Web 审计页签，管理页访问权不自动包含审计查看权。
+PC Web 已将权限管理从“配置与治理”摘要中拆成独立页面。页面使用后端权限工作区展示组织树、人员归属/多角色、角色页面与按钮矩阵、数据范围和审计记录。前端要求 `effectiveAccess.menuIds` 与 `pagePermissionIds` 同时满足才允许导航，并只为有效页面懒加载数据；权限撤销后会清空旧页面数据并回落到首个可访问页。`buttonPermissionIds` 已接入风险详情/确认/批准、采购发起/审批、权限审计、Agent 安全评测、模型连接配置、模拟场景/审批/故障/重置、Key 策略轮换/租约吊销。（2026-09-28 阶段 6：OA 元模型与世界模型草稿的按钮权限随「元模型」页移出管理 Web——模型相关只存在于元域智语端，`world.draft.*` 权限按 [ADR-026](adr/ADR-026-permission-equivalence-merge.md) 等价并入 `meta_model.*`，后端端点保留一个版本周期。）前端仍只是交互控制：后端对纳入页面策略映射的 GET 资源再次校验页面读取权限，并对对应写 API 再次校验按钮权限；`GET /api/account-center` 必须先认证并具备 `page.config.view`，`GET /api/permission-management` 必须具备 `page.permissions.view`，`GET /api/risk-cases/{id}` 还必须具备 `risk.detail.view`。`permission.audit.view` 独立控制服务端审计数组和 Web 审计页签，管理页访问权不自动包含审计查看权。
 
 人员可包含多个 `roleIds`。`access-control-service.js` 在每次请求中将有效角色的页面、按钮和组织 ID 取并集；关键写操作再从中选择实际授予目标按钮的具体角色交给下游业务门禁，不能只把 `primaryRoleId` 当作执行角色。Agent execute 还要求该角色与原 run 的授权角色一致，并保持原 `tenant + subject + session + device`、原命令和一次性 Token 绑定。`primaryRoleId` 仅用于兼容现有单角色 Demo 展示和旧契约。组织数据范围包含：
 
