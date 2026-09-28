@@ -371,7 +371,7 @@ apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/met
 - 全量文档同步：`PROJECT_STATUS.md` / `workbuddy_work.md` / `DEVELOPMENT_ROADMAP.md`（六阶段路线需与本次重构对齐）/ `MOCK_ENTERPRISE_ONBOARDING.md` / `SEMANTIC_MODEL_AUTHORING.md` / `ARCHITECTURE.md` / `docs/modules/*`
 - `docs:check` 通过
 
-**边界**：路线图改写属**决策变更**，需你确认后才能动，我不单方面重写。
+**边界**：路线图改写属**决策变更**，需你确认后才能动，我不单方面重写。实施结果见文末台账「阶段 7」。
 
 ---
 
@@ -394,7 +394,7 @@ apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/met
 
 | 文档 | 需要的变更 | 时机 |
 | --- | --- | --- |
-| `DEVELOPMENT_ROADMAP.md` | 六阶段路线的阶段 1「模拟企业与接入」口径需改为「系统接入」 | 阶段 7（用户已于 2026-09-25 确认整体方案，含此处口径变更，但仍在阶段 7 统一执行以避免中途口径不一致） |
+| `DEVELOPMENT_ROADMAP.md` | 六阶段路线的阶段 1「模拟企业与接入」口径需改为「系统接入」 | **已执行（2026-09-28 阶段 7 第二段；口径变更确认记录 2026-09-25，见阶段 7 台账）** |
 | `MOCK_ENTERPRISE_ONBOARDING.md` | 改名 + 内容重写（系统为中心） | 阶段 2 |
 | `SEMANTIC_MODEL_AUTHORING.md` | 补充「选系统为必选项」与新建模链 | 阶段 3-4 |
 | `ARCHITECTURE.md` | 三层目标模型（接入 / 建模 / 治理） | 阶段 0 |
@@ -1261,3 +1261,15 @@ requestedSystems.length ? requestedSystems : connectorCatalog.filter(item => ite
 **关键取证与边界**：`pagePermissionIds` 由「角色 menuIds ∩ 权限目录」派生（`access-control-service`），而 `page.world.view` 被 4 处元域智语服务复用为访问权限（`mock-onboarding-service`、`mock-onboarding-ontology-adapter`、`knowledge-routes`、`semantic-inspection-schedule-service`，另有 `route-security` 授权解释）。因此 **`menu.world` / `page.world.view` 权限条目与角色授权保留一个版本周期**（与阶段 2 对旧端点的先例一致），仅前端不注册导航——持有旧权限也无法进入（测试锁死）。权限矩阵、后端端点、服务行为均零变化；待元域智语端权限语义独立后（后续增量）再删权限条目与旧端点。
 
 **验收（本机实测）**：`test:permissions` **31/31**（新增 2 个用例：「持有旧权限也不可进入已移除页面」「world 无数据加载路径」）；`test:access` **13/13**；`test:semantic` **6/6 + 61/61 + 98/98**；管理 Web 构建 **1.67s**（JS 194.41 kB，world 页代码移除生效）；lint 干净。
+
+---
+
+### 阶段 7：元域智营收口与文档同步—— **已完成（2026-09-28，两段）**
+
+**第一段（提交 `649146f`）——菜单描述重构与全量事实性文档同步**：`iam-seed` 的 `menu.world` 描述标注迁出状态与权限条目保留原因（4.3 决策 A）；`docs/modules/07` world-model 端点权限列按 [ADR-026](adr/ADR-026-permission-equivalence-merge.md) 更新为 `meta_model.*` 并标注保留一个版本周期；`ARCHITECTURE` 的 `buttonPermissionIds` 清单移除已删的 OA 元模型/世界模型草稿按钮；`SEMANTIC_CONTEXT_MICROSERVICE` 不再把 `/api/semantic-context` 表述为「PC 元模型页」专用；`workbuddy_work` 阶段边界汇总与模型链路段更新为真实状态。**`DEVELOPMENT_ROADMAP.md` 按本节边界（决策变更需确认）留待第二段**。验收：`test:permissions` 31/31；`npm run quality` 全绿；`docs:check` **188 份 Markdown / 1207 个本地链接**；lint 干净。
+
+**第二段（2026-09-28）——路线图口径对齐**：阶段 1 口径「模拟企业与接入」→「系统接入」的变更，用户已于 2026-09-25 随整体方案确认（见第 8 节同步表），用户「继续执行任务」视为执行授权。`DEVELOPMENT_ROADMAP.md`：更新日期至 2026-09-28 并新增口径对齐段（接入以系统为中心：登记系统 [ADR-024](adr/ADR-024-custom-system-registration.md) → 材料接入 → 受控对象链接 [ADR-025](adr/ADR-025-object-mention-linking.md) → 生命周期门禁 [ADR-023](adr/ADR-023-lifecycle-operation-surface.md) → 建模发布；权限面并入 `meta_model.*` [ADR-026](adr/ADR-026-permission-equivalence-merge.md)）；阶段表第 1 行改名「系统接入」并在开发重点/模拟输入/验收标准三处补登记物料与生命周期门禁；目标描述改为「登记一家新企业的系统」口径；**带日期的历史增量记录保留当时口径，不回溯改写**（第 8 节同步表随本条更新）。验收：`docs:check` 通过（数字见下）。
+
+**验收（本机实测）**：`npm run docs:check` **188 份 Markdown / 1223 个本地链接**（第一段 1207 → 本段 +16，含路线图口径对齐段、本台账与状态文档的新增链接）；纯文档增量，不涉代码与测试。
+
+**至此本方案阶段 0 ~ 4h、6、7 全部完成；阶段 5 被视觉模型硬前置卡死，保持未完成。**
