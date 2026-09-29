@@ -1,6 +1,6 @@
 # WorkBuddy 协作工作记录
 
-更新：2026-09-26（覆盖至交付复核与推送）。本页按时间线维护 WorkBuddy 接手「元域智脑」（demo-platform）以来完成的工作，供交接与回溯使用。当前整体状态以 [当前状态](PROJECT_STATUS.md) 为准，此处只记录协作过程中的增量、根因与边界，不重复验收结论。
+更新：2026-09-29（覆盖至系统接入重构阶段 7 收官）。本页按时间线维护 WorkBuddy 接手「元域智脑」（demo-platform）以来完成的工作，供交接与回溯使用。当前整体状态以 [当前状态](PROJECT_STATUS.md) 为准，此处只记录协作过程中的增量、根因与边界，不重复验收结论。
 
 ## 时间线总览
 
@@ -45,6 +45,11 @@
 | 37 | 交付复核与推送 | 提交前复核**发现改名回归**：「元域语义运营报告」被批量替换拼成「元域**元域**智营报告」（4 处遗留），Electron 窗口标题与文档目录名都带重复前缀，且**测试断言跟着一起错**所以测试全绿；根因是同一常量被抄成两份，收敛为唯一常量 `REPORT_ROOT_DIR_NAME` 并加反向锁死；`npm run quality` **970 / 970**、新增 ADR-009~022 与全部文档同步入库，推送 `origin/main` |
 | 38 | 端命名调整 | 语义运营端定名**元域智语**（代码 + 184 份文档 322 处 + 6 个文件改名），管理 Web 定名**元域智营**（原「保健品 AI 运营平台 Demo」遗留名）；三份把「元域智营 AI 基座」当平台名用的文档脚本改为「元域智脑 AI 基座」（历史误用）；三段式替换防误伤，`docs:check` 185 份 / 1177 链接全通 |
 | 39 | 接入生命周期操作面 | [ADR-023](../architecture/adr/ADR-023-lifecycle-operation-surface.md)：状态机早已定义却从未暴露——路由无端点、前端无入口，接入状态只能看种子值。补齐 `POST /systems/{code}/lifecycle`（域契约 4→5 显式抬棘轮）+ 接通门禁（须先探测 verified）+ 理由必填 + 前端操作面板与「新增接入」入口 + 已停用维度；`system-access.test.js` **12（9→12）**、`workspace-layout` **9（8→9）**、architecture 10/10 |
+| 40 | 自定义系统登记 | [ADR-024](../architecture/adr/ADR-024-custom-system-registration.md)：接入清单**去预设**（预设成员只剩 6 个 Mock 演示样例，保留码操作 404 指引「新增接入」）+ 登记物料契约 `SYSTEM_REGISTRATION_FIELDS`（7 必填 + 3 可选，让智脑不靠猜就知道接入的是什么系统）；自定义系统为**租户资产**、创建即 `registered`；域契约 5→6、`POST /api/semantic-operations/systems`；`test:registry` 7→**8**、`test:access` **13/13** |
+| 41 | 阶段 4h·受控对象链接 + 收尾三项 | [ADR-025](../architecture/adr/ADR-025-object-mention-linking.md)：材料**逐字提及** ↔ 已登记 `worldObjectTypes` 受控链接进候选——模型只输出 `{mention, evidence, objectType}`、服务端三重校验、任一违规**整份拒绝**；结构只来自系统声明 + 4a 同一套判据；两类结构缺口（`no_declaration`/`no_identifier`）只披露不进候选；对 ADR-022 决策 6 的收窄推翻已记录。收尾：词表治理第一轮（目录 **12→20 类**、缺口 14→6）+ `no_identifier` 数据驱动用例（`test:mention` **7/7**）+ 元域智语「受控对象链接」披露面板 |
+| 42 | 阶段 6 第一段·权限等价合并 | [ADR-026](../architecture/adr/ADR-026-permission-equivalence-merge.md)：`world.draft.create/validate/publish` 删除并语义等价映射到 `meta_model.draft.save/validate/publish`；**删除服务层隐藏的第二道闸门**（`world-model-template-service.js` 硬编码角色白名单，与 IAM 重复且不可见），权限系统成为唯一权威；`test:permissions` **29/29**、`test:access` 13/13 |
+| 43 | 阶段 6 第二段·元域智营「元模型」菜单全迁删除 | 方案 4.3 决策 A：删 world 页全部前端链路（页面组件目录、状态/动作/数据分支/导航注册/19 个 API 方法/样式）；**关键取证**——`page.world.view` 被 4 处元域智语服务复用为访问权限，权限条目按阶段 2 先例**保留一个版本周期**，权限矩阵与后端零变化；`test:permissions` **31/31**（新增「持旧权限不可进入已移除页面」等 2 用例）、`test:access` **13/13**、管理 Web 构建 1.67s |
+| 44 | 阶段 7·文档同步与路线图口径对齐 | 第一段：`iam-seed` 菜单描述重构 + 全量事实性文档同步（`docs/modules/07` 权限列按 ADR-026、`ARCHITECTURE` 按钮清单、`SEMANTIC_CONTEXT_MICROSERVICE` 表述）。第二段：[开发路线](../development/DEVELOPMENT_ROADMAP.md) 口径对齐（用户 2026-09-25 已确认）——阶段 1「模拟企业与接入项目」→「**系统接入**」、新增口径对齐段；带日期历史增量保留原口径不回溯改写。`docs:check` **188 md / 1223 链接**。**至此系统接入重构阶段 0~4h、6、7 全部完成；阶段 5 被视觉模型硬前置卡死** |
 
 ## 1. 项目理解与基线梳理
 
@@ -1056,9 +1061,49 @@ const selectedCodes = requestedSystems.length
 
 **如实标注的边界**：`draft → registered` 只推进状态与审计记录，**不落连接配置**（连接配置样例仍来自 demo 种子，真实的连接信息登记表单属后续增量）；「接通」仍指演示租户的生命周期状态，连通性验证读内置合成数据源；生命周期操作不改变角色数据域授权（生命周期 `authorized` 与角色已授权是两个概念）。
 
+## 41. 自定义系统登记：去预设接入清单与登记物料契约（ADR-024）
+
+开工时发现工作区存有**上一会话已完成但未提交**的完整增量，本轮复核后与阶段 4h 一并入库（实施过程中一次批量替换曾误伤该增量在 `architecture-baseline.js` 的注释归属，已按 `git diff` 核对恢复——教训：批量 sed 前先查编号既有引用）。背景与决策详见 [ADR-024](../architecture/adr/ADR-024-custom-system-registration.md)：ADR-023 补齐了生命周期操作面，但「新增接入」仍只能从 12 个预设目录类型里选——「待接入 / 未登记」不是任何人的动作结果而是演示种子，真实企业系统名目各异，预设目录不可能覆盖。
+
+**核心动作**：① 接入清单**去预设**——预设成员只剩 6 个 Mock 演示接入样例（connected），OA/SRM/MDM/PLM/EAM/IOT 转为保留码（操作返回 404 `SYSTEM_ACCESS_MISSING` 并指引「新增接入」）；② 登记物料契约 `SYSTEM_REGISTRATION_FIELDS`——`name` / `domain` / `description` / `keyEntities` / `dataDomains` / `accessIntention` / `businessOwner` 七项必填 + `code` / `vendor` / `mockScenarioId` 可选，目标是**让智脑不靠猜就知道接入的是什么系统**；schema 单一定义在 `data/system-catalog.js`、经接入总览下发、前端按 schema 渲染不复制第二份；③ 自定义系统是**租户资产**（`system_registry_runtime.custom_systems` 按租户隔离、事务原子写入），登记成功即 `registered`（物料本身就是登记动作的输入）；④ 域契约 5→6（`registerSystemOnboarding` 显式抬棘轮）、`POST /api/semantic-operations/systems`；⑤ 接通门禁不变——不挂模拟场景则不可探测、永远到不了 `connected`；授权按声明数据域推导（`ROLE_DATA_DOMAINS × materials.dataDomains`），不是默认全员可见。
+
+**验收（本机实测）**：`test:registry` **8/8**（7→8）、`test:access` **13/13**。
+
+## 42. 阶段 4h：受控对象链接（ADR-025）+ 收尾三项
+
+**触发点**：4f/4g 点名了「缺了什么」，但**点名的对象一个都进不了候选**——材料写「采购订单、发运单、出库单、客户投诉」候选只得 1 类，非列举散文写法连启发式都取不到词。根因是候选仍来自硬编码 12 类目录 + 关键词命中。用户在三路径中选定**受控对象链接**（[ADR-025](../architecture/adr/ADR-025-object-mention-linking.md)）：对 ADR-022 决策 6「点名不进候选」的收窄推翻已记录在案（未放宽任何关口）。
+
+**核心契约**：新增 `semantic-object-mention-service.js`，模型只输出 `{ mention, evidence, objectType }`，服务端三重校验（证据**逐字**来自材料、证据含提称、类型在系统目录 `worldObjectTypes` 登记索引内），任一不满足**整份拒绝**（不局部挽救，与 `validateNaturalSchema` 同严格度）；**模型不给结构、不断言系统**——候选结构只来自系统声明，主键用 4a 同一套 `inferIdentifier`（实测 14 类目录缺口中 8 类有声明的类型主键全部可判定）。链接只在「结构化材料与自然语言抽取都没产出对象」时运行；两类「链接了但给不出结构」分开点名（`no_declaration` / `no_identifier`）不进候选只披露；候选一律 `mappingStatus: 'pending'`，Critic 照常拦截未映射就采纳；链接候选生效时目录兜底被抑制；披露落 `candidateCoverage.mentionLinking`。ADR-021 复审条件 1 与 ADR-022 复审条件 2 同步标记部分关闭。
+
+**收尾三项**（用户指示「未完成项全部完成」，均不改核心契约）：① **词表治理第一轮**——8 类**有系统字段声明**的缺口对象（InboundReceipt、InventoryLot、Deviation、Sample、CAPA、QualityEvent、Order、Fulfillment）补入受控目录，`fields`/`key` 逐类取自声明侧目录；**无声明的 6 类有意不补**（词条带来词面命中带不来结构，空壳候选过不了审阅），目录 12→20 类、缺口 14→6；② **`no_identifier` 数据驱动用例**——`buildMentionLinkCandidates` 加声明透传缝（`objects` 参数默认空＝行为不变），分支从此有验证；③ **前端披露面板**——元域智语 `SemanticAgentWorkspace.vue` 新增「受控对象链接」块，结构缺口上界面。
+
+**验收（本机实测）**：`test:mention` **6/6 → 7/7**（新增并挂入 `test:all`）；`test:semantic` **6/6 + 61/61 + 98/98**；`test:architecture` **10/10**（登记 2 条网关/提示安全同性质跨域边）；元域智语 **61/61** + 构建 2.89s；`docs:check` 187 md / 1192 链接。**边界（如实）**：真实模型评测 `evaluate:mention-linking`（脚本就绪）多次尝试均因 WorkBuddy 云服务限流（`WORKBUDDY_CLOUD_QUOTA_RATE_LIMITED`）未取得数字，待重跑——**「quality 全绿」不含模型契约**。
+
+## 43. 阶段 6 第一段：权限等价合并（ADR-026）
+
+`world.draft.*` 三个权限与 `meta_model.draft.save / draft.validate / publish` 语义完全重叠，用户在三策略中选定**等价合并**（[ADR-026](../architecture/adr/ADR-026-permission-equivalence-merge.md)）：全部删除并等价映射，`governance-routes.js` 4 处闸门换码，前端同步；发布仍由 `meta_model.publish`（仅 executive）把守。**本段最有价值的发现**：排查中发现**服务层隐藏的第二道闸门**——`world-model-template-service.js` 硬编码 `canConfigure` / `canPublish` 角色白名单，与 IAM 重复且界面上不可见（教训：权限合并要排查服务层隐藏白名单；此后排查权限问题先查服务层），已删除，**权限系统成为唯一权威**。如实披露：映射草稿闸门与接入侧写入同闸后，另一角色的该入口随「同一把闸门」语义打开；动作角色从 executive 回退变为持权主角色本人（`permission-api-hardening.test.js` 断言同步修正）。不变式：已发布模型指纹与版本号不变。
+
+**验收（本机实测）**：`test:permissions` **29/29**、`test:access` **13/13**、`test:semantic` **6+61+98**、`test:events` **17/17**、`test:scope` **12/12**、元域智语 **61/61**。
+
+## 44. 阶段 6 第二段：元域智营「元模型」菜单全迁删除（方案 4.3 决策 A）
+
+用户委托「继续完成」，按方案建议 A 实施（已在 4.3 标注、可回退）。删除 world 页全部前端链路：`frontend/src/features/world-model/` 整目录（含无引用死代码 `SemanticOperationsAgentPanel`）、`App.vue` 的 world 分支与 8 个相关状态、`governance-actions` 的 4 个 OA 元模型治理动作、`page-data-registry` 的 world 数据分支、`permission-navigation` 的 world 注册、`api/client.js` 的 19 个 world / meta-model / semantic-context 方法、`world-template.css`。
+
+**关键取证（删菜单前必须查的事）**：`page.world.view` 被 4 处元域智语服务（onboarding / ontology / knowledge / 巡检）复用为**访问权限**，且 `pagePermissionIds` 由「角色 menuIds ∩ 权限目录」派生——直接删 `menu.world` 会让四处服务全 403。故权限条目与角色授权**保留一个版本周期**（阶段 2 先例），`iam-seed` 的 `menu.world` 描述标注迁出状态；待元域智语端权限语义独立后再删。权限矩阵、后端端点、服务行为零变化。
+
+**验收（本机实测）**：`test:permissions` **31/31**（新增 2 用例：「持有旧权限也不可进入已移除页面」「world 无数据加载路径」）、`test:access` **13/13**、`test:semantic` **6+61+98**、管理 Web 构建 **1.67s**（world 页代码移除生效）。**至此阶段 6 全部完成**。
+
+## 45. 阶段 7：文档同步与路线图口径对齐（系统接入重构收官）
+
+**第一段**：`iam-seed` 菜单描述重构与全量事实性文档同步——`docs/modules/07-model-semantic-governance/API.md` 端点权限列按 ADR-026 更新、`ARCHITECTURE.md` 按钮清单移除已删草稿按钮、`SEMANTIC_CONTEXT_MICROSERVICE.md` 表述修正；验收 `test:permissions` 31/31、`npm run quality` 全绿、`docs:check` 188 md / 1207 链接。
+
+**第二段**：[开发路线](../development/DEVELOPMENT_ROADMAP.md) 口径对齐——该口径变更用户已于 2026-09-25 随整体方案确认（方案第 8 节有记录），阶段 1「模拟企业与接入项目」→「**系统接入**」，目标描述改系统为中心口径，新增口径对齐段（登记系统 ADR-024 → 材料接入 → 受控对象链接 ADR-025 → 生命周期门禁 ADR-023 → 建模发布；权限面并入 `meta_model.*`）；**带日期的历史增量记录保留原口径、不回溯改写**。补齐台账缺口：方案文末新增「阶段 7（两段）」条目（第一段此前漏记台账）。
+
+**验收（本机实测）**：`docs:check` **188 md / 1223 链接**（增量 +16 均为新增链接）；纯文档增量。**至此系统接入重构阶段 0~4h、6、7 全部完成；阶段 5 仍被视觉模型硬前置卡死**（云通道仅文本、视觉能力是硬前置）。挂起项：`evaluate:mention-linking` 真实模型评测待云配额恢复后补跑。
+
 ## 质量与边界
 
-- 每批改动均运行对应专项与 ESLint；文档检查（docs:check）通过（交付复核实测 **184 份 Markdown、1169 个本地链接**；阶段 4g 184 / 1166——本次交付复核新增 3 条链接；4f 183 / 1125；4e 182 / 1104；4d 181 / 1068；4c 第三段 180 / 1042；4c 第二段 179 / 1018；4c 第一段 178 / 995）。
+- 每批改动均运行对应专项与 ESLint；文档检查（docs:check）通过（阶段 7 收官复核实测 **188 份 Markdown、1223 个本地链接**；阶段 7 第一段 188 / 1207；阶段 4h 187 / 1192；交付复核 **184 份 Markdown、1169 个本地链接**；阶段 4g 184 / 1166——交付复核新增 3 条链接；4f 183 / 1125；4e 182 / 1104；4d 181 / 1068；4c 第三段 180 / 1042；4c 第二段 179 / 1018；4c 第一段 178 / 995）。
 - **本批（2026-09-26 交付复核：改名回归收口 + 提交推送）回归口径**：修掉第 18 节补记的「元域元域智语」缺陷后复跑，`npm run quality` 端到端 **EXIT=0**（**1m40s，全量 35 个 Node 测试块 970 / 970 通过、0 处 `not ok`**，比 4g 口径多 1 项即新增的目录名反向锁死用例）；`npm run docs:check` 通过（**184 份 Markdown、1169 个本地链接**，比 4g 多 3 条）；控制台测试 **61/61**。**5 端构建本轮全部实测通过**（web **2.02s** + 元域智语 **2.86s**、desktop **2.66s**、mobile **1.15s**、dingtalk **2.29s**）——**其中 mobile / dingtalk 是重跑后取得的数字**：第一次把 4 端写在同一次调用里，被沙箱 `SAFE_DELETE_BULK_CONFIRM_REQUIRED`（`scope: turn`）拦下（计数按「整轮」累计），按「每轮一端」重跑即过。
 - **本批（阶段 4g + 模块化审计第 3/5 项）回归口径**：`npm run quality` 端到端 **EXIT=0**（**1m38s，全量 35 个 Node 测试块 969 / 969 通过、0 处 `not ok`**）；`test:semantic` **6/6 + 60/60 + 96/96**（`semantic-operations-agent.test.js` 31 → **33**）；控制台 `workspace-layout` **8/8**（7 → 8，含 `selected.value` 反向锁死）；`test:architecture` **10/10**（**未增跨域边**）；`test:events` **17/17**（`domains/events` 迁移后的回归）；lint / typecheck 干净；**5 端构建通过**（web 2.04s + 元域智语 2.83s、desktop 2.22s、mobile 2.19s、dingtalk 3.47s，分端调用避开沙箱 `safe-delete` 单次阈值）。
 - **本批（阶段 4f）回归口径**：`npm run quality` 端到端 **EXIT=0**（1m39s，全量 35 个 Node 测试块 `fail=0`、0 处 `not ok`）（35 个测试块中 `test:semantic` 第三组 92 → 94、`test:identity` 21/21）；`test:semantic` **6/6 + 60/60 + 94/94**（`semantic-operations-agent.test.js` 29 → **31**）；`npm run lint` 干净；**5 端构建通过**（web 2.90s + 元域智语 2.62s、desktop 3.33s、mobile 3.10s、dingtalk 5.01s，分端调用避开沙箱 `safe-delete` 单次阈值）。
