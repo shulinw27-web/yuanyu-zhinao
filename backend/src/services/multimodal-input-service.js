@@ -362,7 +362,7 @@ export async function extractMultimodalEvidence(attachments = []) {
           continue;
         }
         evidence.push(documentEvidence({ attachment, page: 1, text: normalizeExtractedText(text), assessment }));
-        reports.push({ attachmentId: attachment.id, status: 'content_scanned', modelContentEligible: true, pageCount: 1, officeDocument: true, securityScan: securityScan.status, dlpSignals: dlp.signals, truncated: parsed.truncated, warnings: parsed.warnings });
+        reports.push({ attachmentId: attachment.id, status: 'content_scanned', modelContentEligible: true, pageCount: 1, officeDocument: true, structuredSchemaCandidate: !parsed.truncated, securityScan: securityScan.status, dlpSignals: dlp.signals, truncated: parsed.truncated, warnings: parsed.warnings });
       } catch {
         reports.push({ attachmentId: attachment.id, status: 'parse_failed', modelContentEligible: false, reason: 'Office 文档无法在受控解析器中安全读取。' });
       }
@@ -413,7 +413,12 @@ export async function extractMultimodalEvidence(attachments = []) {
     const original = items.map(item => `[${item.title}]\n${item.statement}`).join('\n');
     const included = original.slice(0, budget);
     if (!documents.some(item => item.attachmentId === attachment.id) && report.modelContentEligible && !report.partial && !report.truncated) documents.push({ attachmentId: attachment.id, name: attachment.name, mimeType: attachment.mimeType, text: original });
-    Object.assign(report, { name: attachment.name, extractedCharacters: original.length, includedCharacters: included.length, extractionComplete: Boolean(report.modelContentEligible && !report.partial && !report.truncated), contextTruncated: original.length > included.length, truncated: Boolean(report.truncated || original.length > included.length), rawImageEligible: false });
+    // Parser-level truncation (PDF >20 pages, worksheet row/column caps) must stay
+    // distinguishable from the model-context budget below: the registration
+    // channel persists complete server-side text and only fails on real
+    // extraction limits, not on presentation budgets.
+    const parserTruncated = Boolean(report.truncated);
+    Object.assign(report, { name: attachment.name, parserTruncated, extractedCharacters: original.length, includedCharacters: included.length, extractionComplete: Boolean(report.modelContentEligible && !report.partial && !report.truncated), contextTruncated: original.length > included.length, truncated: Boolean(report.truncated || original.length > included.length), rawImageEligible: false });
     if (report.missingPages?.length) report.partial = true;
     const limited = report.truncated || report.partial || !report.modelContentEligible;
     const notice = `${limited ? '【未完整读取】' : '【可引用摘录】'} ${report.reason || ''}${report.truncated ? '内容达到处理上限，后续未展示内容不能推断；请拆分或指定范围。' : ''}${report.missingPages?.length ? `未识别页面视觉内容：${report.missingPages.join(', ')}。` : ''}${(report.warnings || []).join(' ')}`;

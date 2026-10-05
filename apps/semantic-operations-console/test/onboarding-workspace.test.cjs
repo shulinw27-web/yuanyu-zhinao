@@ -177,7 +177,7 @@ test('local files are staged without submitting and enforce type and server byte
   const ui = await mount(t, { onboarding: async () => ({ ...overview([project()]), limits: { materialBytes: 80 } }) });
   const read = file => ui.find('material-file').props.onChange({ target: { files: [file], value: file.name } });
   await read({ name: 'unexpected.exe', size: 2, text: async () => 'bad' }); await flush();
-  assert.match(content(ui.find('form-error')), /json 或 .txt/);
+  assert.match(content(ui.find('form-error')), /json \/ \.txt/);
   await read({ name: 'large.txt', size: 81, text: async () => 'bad' }); await flush();
   assert.match(content(ui.find('form-error')), /超过材料大小限制/);
   await read({ name: 'rules.txt', size: 12, text: async () => '合成资料' }); await flush();
@@ -185,6 +185,47 @@ test('local files are staged without submitting and enforce type and server byte
   assert.deepEqual(ui.calls, []);
   await ui.submit('material-form');
   assert.deepEqual(ui.calls[0], ['save', 'p1', { expectedRevision: 1, kind: 'requirements', name: 'rules.txt', text: '合成资料' }]);
+});
+
+test('document attachments stage without text, save through the document channel, and disclose forensics', async t => {
+  const calls = [];
+  const registered = project('p1', 2, {
+    materials: [{ kind: 'requirements', name: '需求说明.pdf', bytes: 128, digest: 'd', issues: [], source: { form: 'document', mimeType: 'application/pdf', pageCount: 2, totalPages: 2, securityScan: 'development_basic_scan', dlpSignals: [], attachmentBytes: 2048, extractedCharacters: 128 } }]
+  });
+  const ui = await mount(t, { saveOnboardingMaterial: async (id, payload) => { calls.push(payload); return { project: registered }; } });
+  const read = file => ui.find('material-file').props.onChange({ target: { files: [file], value: file.name } });
+  // 字典类别不接受文档形态：必须先在客户端拦下，不发起请求。
+  await ui.input('material-kind', 'dictionary'); await read({ name: '字典.pdf', size: 2048, arrayBuffer: async () => new ArrayBuffer(8) }); await flush();
+  assert.match(content(ui.find('form-error')), /仅接受 JSON 文本/);
+  assert.deepEqual(calls, []);
+  await ui.input('material-kind', 'requirements');
+  await read({ name: '需求说明.pdf', size: 2048, arrayBuffer: async () => new ArrayBuffer(8) }); await flush();
+  assert.ok(ui.find('attachment-panel'), 'attachment disclosure panel renders');
+  assert.match(content(ui.find('attachment-panel')), /原文件仅用于本次提取/);
+  assert.match(content(ui.find('notice')), /原文件不会保存/);
+  assert.equal(flatten(ui.root).some(item => item.props['data-testid'] === 'material-text'), false, 'text editor hidden while a document is staged');
+  await ui.input('material-name', '需求说明.pdf');
+  await ui.submit('material-form'); await flush();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].kind, 'requirements');
+  assert.equal(calls[0].attachment.mimeType, 'application/pdf');
+  assert.match(calls[0].attachment.dataUrl, /^data:application\/pdf;base64,/);
+  assert.equal(Object.hasOwn(calls[0], 'text'), false, 'document path never sends text');
+  assert.match(ui.text(), /文档登记 · application\/pdf · 2 页 · 原文件未保存/);
+  assert.equal(flatten(ui.root).some(item => item.props['data-testid'] === 'attachment-panel'), false, 'editor resets after a clean registration');
+});
+
+test('oversized documents and staged attachments can be withdrawn back to text mode', async t => {
+  const ui = await mount(t, {});
+  const read = file => ui.find('material-file').props.onChange({ target: { files: [file], value: file.name } });
+  await read({ name: '超限.docx', size: 5 * 1024 * 1024, arrayBuffer: async () => new ArrayBuffer(8) }); await flush();
+  assert.match(content(ui.find('form-error')), /4MB/);
+  await read({ name: '需求.docx', size: 512, arrayBuffer: async () => new ArrayBuffer(8) }); await flush();
+  assert.ok(ui.find('attachment-panel'));
+  ui.click('remove-attachment'); await flush();
+  assert.equal(flatten(ui.root).some(item => item.props['data-testid'] === 'attachment-panel'), false);
+  assert.ok(ui.find('material-text'), 'text editor returns after withdrawing the document');
+  assert.deepEqual(ui.calls, []);
 });
 
 test('late overview after unmount cannot start a project request', async t => {

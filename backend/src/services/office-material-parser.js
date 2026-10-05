@@ -114,3 +114,45 @@ export async function parseOfficeMaterial(bytes, mimeType) {
   warnings.push('公式仅引用文件缓存，未重新计算；图表、图片和透视表的视觉含义未读取。');
   return { text: parts.join('\n'), warnings, kind: 'xlsx', truncated };
 }
+
+// ── 序列化行文本的确定性反序列化（阶段 5a-2）────────────────────────────────
+// parseOfficeMaterial 把工作表/表格序列化为「工作表 "x" / 行 N: A1="v" /
+// 表 T 行 N: A="v"」行文本。登记通道与工作台只持久化该文本（原文件不落地），
+// schema 发现需要从这里还原行列矩阵，与 CSV 字典走同一条候选路径。
+const OFFICE_CELL_PATTERN = /([A-Z]{1,3})(?:\d+)?="((?:[^"\\]|\\.)*)"/gu;
+const parseJsonString = (raw) => { try { return JSON.parse(raw); } catch { return String(raw).replace(/\\(.)?/gu, '$1'); } };
+const columnLettersToIndex = (letters) => [...letters].reduce((sum, letter) => sum * 26 + letter.charCodeAt(0) - 64, 0) - 1;
+
+export function parseOfficeTableRows(text) {
+  const tables = [];
+  const docxTables = new Map();
+  let sheet = null;
+  for (const line of String(text || '').split('\n')) {
+    const sheetMatch = /^工作表 ("(?:[^"\\]|\\.)*")/u.exec(line);
+    if (sheetMatch) { sheet = { name: parseJsonString(sheetMatch[1]), rows: [] }; tables.push(sheet); continue; }
+    const docxMatch = /^表 (\d+) 行 \d+: /u.exec(line);
+    const xlsxMatch = /^行 \d+(?:（隐藏行）)?: /u.exec(line);
+    if (!docxMatch && !xlsxMatch) continue;
+    // 单元格值是 JSON.stringify 过的字符串；转义引号在值内成对出现，
+    // 不会把一个单元格错切成两个。XLSX 用单元格坐标对齐列，DOCX 按顺序。
+    const row = [];
+    let position = 0;
+    let match;
+    OFFICE_CELL_PATTERN.lastIndex = 0;
+    while ((match = OFFICE_CELL_PATTERN.exec(line))) {
+      const value = parseJsonString(`"${match[2]}"`);
+      if (docxMatch) row[position] = value;
+      else row[columnLettersToIndex(match[1])] = value;
+      position += 1;
+    }
+    if (docxMatch) {
+      const index = Number(docxMatch[1]);
+      if (!docxTables.has(index)) { const table = { name: `表 ${index}`, rows: [] }; docxTables.set(index, table); tables.push(table); }
+      docxTables.get(index).rows.push(row);
+    } else {
+      if (!sheet) { sheet = { name: '工作表', rows: [] }; tables.push(sheet); }
+      sheet.rows.push(row);
+    }
+  }
+  return tables.filter((table) => table.rows.some((row) => row.some((cell) => String(cell ?? '').trim())));
+}

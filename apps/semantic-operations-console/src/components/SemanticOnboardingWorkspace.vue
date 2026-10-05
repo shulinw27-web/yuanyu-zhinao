@@ -6,12 +6,18 @@ import SemanticOnboardingCalculation from './SemanticOnboardingCalculation.vue';
 const props = defineProps({ client: { type: Object, required: true }, canWrite: { type: Boolean, default: false } });
 const emit = defineEmits(['open-agent', 'open-model']);
 const materialKinds = [
-  { kind: 'requirements', label: '业务需求', hint: '至少 24 个非空白字符，说明业务目标、涉及部门、需要回答的问题与验收口径。' },
-  { kind: 'api', label: '接口说明', hint: '至少 24 个非空白字符，描述来源系统、接口路径、只读方法、响应字段与授权方式。仅登记文档，本步骤不调用接口。' },
-  { kind: 'dictionary', label: '数据字典', hint: '提交 JSON：tables 数组中每张表包含 name、system、primaryKey，以及 fields 数组（name、type，可选 required、reference、referenceField）。type 支持 string / number / integer / boolean。' },
+  { kind: 'requirements', label: '业务需求', hint: '至少 24 个非空白字符，说明业务目标、涉及部门、需要回答的问题与验收口径。也可上传 PDF / Word / Excel 文档，登记的是服务端受控提取文本，原文件不保存。', document: true },
+  { kind: 'api', label: '接口说明', hint: '至少 24 个非空白字符，描述来源系统、接口路径、只读方法、响应字段与授权方式。也可上传 PDF / Word / Excel 接口或数据字典文档，登记的是服务端受控提取文本，原文件不保存。仅登记文档，本步骤不调用接口。', document: true },
+  { kind: 'dictionary', label: '数据字典', hint: '提交 JSON：tables 数组中每张表包含 name、system、primaryKey，以及 fields 数组（name、type，可选 required、reference、referenceField）。type 支持 string / number / integer / boolean。文档形态字典请到 Agent 对话面上传，仅进入候选路径。' },
   { kind: 'samples', label: '合成样本', hint: '提交 JSON：records 数组中每条记录包含 objectType 和 payload。objectType 与数据字典表名一致，payload 填合成字段值，主键、必填、字段类型与外键应匹配字典。' },
-  { kind: 'rules', label: '业务规则', hint: '至少 24 个非空白字符，说明状态口径、异常判定、跨系统关联依据与需要人工处理的情况。' }
+  { kind: 'rules', label: '业务规则', hint: '至少 24 个非空白字符，说明状态口径、异常判定、跨系统关联依据与需要人工处理的情况。也可上传 PDF / Word / Excel 文档，登记的是服务端受控提取文本，原文件不保存。', document: true }
 ];
+const documentExtensionMime = Object.freeze({
+  pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+});
+const maxAttachmentBytes = 4 * 1024 * 1024;
 const scenarios = ref([]);
 const projects = ref([]);
 const limits = ref({});
@@ -22,6 +28,8 @@ const project = ref(null);
 const materialKind = ref('requirements');
 const materialName = ref('');
 const materialText = ref('');
+const materialAttachment = ref(null);
+const documentMimeTypes = ref([]);
 const loading = ref(false);
 const loadingProject = ref(false);
 const creating = ref(false);
@@ -75,8 +83,16 @@ const currentKind = computed(() => materialKinds.find(item => item.kind === mate
 const byteLimit = computed(() => Number(limits.value.materialBytes || limits.value.maxMaterialBytes || limits.value.maxTextBytes) || 65536);
 const textBytes = computed(() => new TextEncoder().encode(materialText.value).byteLength);
 const existingMaterial = computed(() => project.value?.materials?.find(item => item.kind === materialKind.value));
+const acceptsDocument = computed(() => Boolean(currentKind.value?.document));
+const acceptsMimeTypes = computed(() => {
+  const serverList = Array.isArray(documentMimeTypes.value) && documentMimeTypes.value.length ? documentMimeTypes.value : Object.values(documentExtensionMime);
+  return acceptsDocument.value ? serverList : [];
+});
+const fileAccept = computed(() => ['.json,.txt,application/json,text/plain', ...acceptsMimeTypes.value.map(mime => `.${Object.keys(documentExtensionMime).find(key => documentExtensionMime[key] === mime) || ''}`)]
+  .filter(item => item !== '.').join(','));
+const attachmentKilobytes = computed(() => Math.max(1, Math.round((materialAttachment.value?.dataUrl?.length || 0) * 3 / 4 / 1024)));
 const canSave = computed(() => writable.value && project.value && !busy.value && !loadingProject.value && !conflict.value
-  && materialName.value.trim() && materialText.value.trim() && textBytes.value <= byteLimit.value);
+  && materialName.value.trim() && (materialAttachment.value || (materialText.value.trim() && textBytes.value <= byteLimit.value)));
 const completed = computed(() => Number(project.value?.readiness?.completed) || 0);
 const total = computed(() => Number(project.value?.readiness?.total) || materialKinds.length);
 const progress = computed(() => Math.min(100, Math.max(0, Math.round(completed.value / total.value * 100))));
@@ -112,6 +128,7 @@ function resetEditor() {
   readingFile.value = false;
   materialName.value = '';
   materialText.value = '';
+  materialAttachment.value = null;
   formError.value = '';
 }
 watch(materialKind, resetEditor, { flush: 'sync' });
@@ -194,6 +211,7 @@ async function loadOverview() {
     scenarios.value = Array.isArray(result.scenarios) ? result.scenarios : [];
     projects.value = Array.isArray(result.projects) ? result.projects : [];
     limits.value = result.limits || {};
+    documentMimeTypes.value = Array.isArray(result.documentMimeTypes) ? result.documentMimeTypes : [];
     if (!scenarios.value.some(item => item.id === scenarioId.value)) scenarioId.value = scenarios.value[0]?.id || '';
     const id = projects.value.some(item => item.id === selectedId.value) ? selectedId.value : projects.value[0]?.id;
     if (id) await selectProject(id, id === selectedId.value);
@@ -241,7 +259,34 @@ async function readMaterialFile(event) {
   if (event.target) event.target.value = '';
   if (!file || !writable.value || busy.value || !project.value || loadingProject.value) return;
   formError.value = '';
-  if (!/\.(json|txt)$/iu.test(file.name)) { formError.value = '请选择 UTF-8 编码的 .json 或 .txt 文件。'; return; }
+  const extension = /\.([a-z0-9]+)$/iu.exec(file.name)?.[1]?.toLowerCase() || '';
+  const documentMimeType = documentExtensionMime[extension] || (acceptsMimeTypes.value.includes(file.type) ? file.type : null);
+  if (documentMimeType) {
+    // 文档形态：前端只读原文件为附件（不超过 4MB），文本提取在服务端受控完成。
+    if (!acceptsDocument.value) { formError.value = '当前材料类别仅接受 JSON 文本；文档附件仅支持业务需求、接口说明与业务规则。'; return; }
+    if (file.size > maxAttachmentBytes) { formError.value = '文档附件必须小于 4MB；请拆分后上传。'; return; }
+    const generation = ++fileGeneration;
+    const selection = projectGeneration;
+    readingFile.value = true;
+    try {
+      const buffer = await file.arrayBuffer();
+      if (disposed || generation !== fileGeneration || selection !== projectGeneration) return;
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+      const base64 = btoa(binary);
+      materialAttachment.value = { mimeType: documentMimeType, dataUrl: `data:${documentMimeType};base64,${base64}` };
+      materialText.value = '';
+      materialName.value = materialName.value.trim() || file.name.slice(0, 160);
+      notice.value = '文档已就绪：服务端将登记受控提取文本与解析取证，原文件不会保存。点击保存后提交。';
+    } catch (error) {
+      if (!disposed && generation === fileGeneration) formError.value = errorMessage(error, '本地文档读取失败。');
+    } finally {
+      if (!disposed && generation === fileGeneration) readingFile.value = false;
+    }
+    return;
+  }
+  if (!/\.(json|txt)$/iu.test(file.name)) { formError.value = '请选择 UTF-8 编码的 .json / .txt 文件，或当前类别支持的 .pdf / .docx / .xlsx 文档。'; return; }
   if (file.size > byteLimit.value) { formError.value = '文件超过材料大小限制，请缩减内容。'; return; }
   const generation = ++fileGeneration;
   const selection = projectGeneration;
@@ -252,6 +297,7 @@ async function readMaterialFile(event) {
     if (new TextEncoder().encode(text).byteLength > byteLimit.value) throw new Error('文件内容超过材料大小限制。');
     materialName.value = file.name.slice(0, 160);
     materialText.value = text;
+    materialAttachment.value = null;
     notice.value = '文件已读入编辑区；点击保存后才会提交材料。';
   } catch (error) {
     if (!disposed && generation === fileGeneration) formError.value = errorMessage(error, '本地文件读取失败。');
@@ -260,13 +306,21 @@ async function readMaterialFile(event) {
   }
 }
 
+function removeAttachment() {
+  materialAttachment.value = null;
+  formError.value = '';
+  notice.value = '';
+}
+
 async function saveMaterial() {
   if (!canSave.value) return;
   const id = project.value.id;
   const hadConnection = Boolean(project.value.connection);
   const selection = projectGeneration;
   const generation = ++saveGeneration;
-  const payload = { expectedRevision: project.value.revision, kind: materialKind.value, name: materialName.value.trim(), text: materialText.value };
+  const payload = materialAttachment.value
+    ? { expectedRevision: project.value.revision, kind: materialKind.value, name: materialName.value.trim(), attachment: { mimeType: materialAttachment.value.mimeType, dataUrl: materialAttachment.value.dataUrl } }
+    : { expectedRevision: project.value.revision, kind: materialKind.value, name: materialName.value.trim(), text: materialText.value };
   saving.value = true;
   formError.value = '';
   notice.value = '';
@@ -428,12 +482,18 @@ onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; projectGenerat
           <SemanticOnboardingCalculation :client="client" :project="project" :can-write="writable" :blocked="creating || saving || readingFile || testingConnection || handingOff || alignmentBusy || conflict" @busy="calculating = $event" @open-model="emit('open-model')" />
           <section class="mock-connection" aria-label="建模交接"><h4>交给元域智语 Agent 校对</h4><p>需先验证业务映射并为每条规则绑定当前材料摘录。再次读取完整模拟快照后生成候选结构；不会自动编译指标、采纳草稿或发布模型。</p><button type="button" data-testid="handoff-model" :disabled="!writable || busy || conflict || project.alignment?.status !== 'validated_scope' || project.alignment?.evidenceStatus !== 'quotes_verified'" @click="handoffModel">{{ handingOff ? '正在读取与交接…' : project.handoff?.current ? '查看 / 复用当前交接' : '生成待审阅建模任务' }}</button><template v-if="project.handoff"><p>任务：{{ project.handoff.taskId }} · {{ project.handoff.current ? '来源版本未变化' : '来源已变化，需重新验证和交接' }}</p><button type="button" :disabled="busy" @click="emit('open-agent', project.handoff.taskId)">转到 Agent 审阅</button></template></section>
           <form class="material-editor" data-testid="material-form" aria-label="登记或替换材料" @submit.prevent="saveMaterial">
-            <h4>登记 / 替换材料</h4><p>支持 UTF-8 JSON / TXT 本地文件，或直接粘贴内容。仅提交合成模拟材料。</p>
+            <h4>登记 / 替换材料</h4><p>支持 UTF-8 JSON / TXT 本地文件、直接粘贴内容，或在支持文档的类别上传 PDF / DOCX / XLSX（登记服务端提取文本，原文件不保存）。仅提交合成模拟材料。</p>
             <div class="material-fields"><label>材料类别<select v-model="materialKind" data-testid="material-kind" :disabled="!writable || busy || conflict"><option v-for="kind in materialKinds" :key="kind.kind" :value="kind.kind">{{ kind.label }}</option></select></label><label>材料名称<input v-model="materialName" data-testid="material-name" maxlength="160" placeholder="材料名称或文件名" :disabled="!writable || busy || conflict" required /></label></div>
             <p class="format-hint">{{ currentKind?.hint }}</p>
-            <p v-if="existingMaterial" class="replacement-hint">已有材料：{{ existingMaterial.name }}。保存会替换这一类材料并生成新的项目修订。</p>
-            <label class="file-picker">读取本地文件<input type="file" data-testid="material-file" accept=".json,.txt,application/json,text/plain" :disabled="!writable || busy || conflict" @change="readMaterialFile" /></label>
-            <label>材料正文<textarea v-model="materialText" data-testid="material-text" rows="8" placeholder="粘贴本次准备的原始材料。不会自动填入预设模型或标准答案。" :disabled="!writable || busy || conflict" required /></label>
+            <p v-if="existingMaterial" class="replacement-hint">已有材料：{{ existingMaterial.name }}{{ existingMaterial.source ? `（文档登记 · ${existingMaterial.source.mimeType} · ${existingMaterial.source.pageCount} 页 · 原文件未保存）` : '' }}。保存会替换这一类材料并生成新的项目修订。</p>
+            <label class="file-picker">{{ acceptsDocument ? '读取本地文件（JSON / TXT，或 PDF / DOCX / XLSX 文档）' : '读取本地文件' }}<input type="file" data-testid="material-file" :accept="fileAccept" :disabled="!writable || busy || conflict" @change="readMaterialFile" /></label>
+            <div v-if="materialAttachment" class="attachment-panel" data-testid="attachment-panel" role="status">
+              <strong>{{ materialAttachment.mimeType === 'application/pdf' ? 'PDF 文档' : materialAttachment.mimeType.includes('spreadsheetml') ? 'Excel 工作簿' : 'Word 文档' }}</strong>
+              <span>{{ materialName }} · {{ attachmentKilobytes }} KB · 原文件仅用于本次提取，不会保存到项目。</span>
+              <small>服务端将登记受控提取文本与解析取证（页数、截断/缺页、内容扫描、脱敏信号）；提取不完整或超过 64 KiB 时整份拒绝，不做静默截断。</small>
+              <button type="button" data-testid="remove-attachment" :disabled="busy" @click="removeAttachment">改用文本登记</button>
+            </div>
+            <label v-if="!materialAttachment">材料正文<textarea v-model="materialText" data-testid="material-text" rows="8" placeholder="粘贴本次准备的原始材料。不会自动填入预设模型或标准答案。" :disabled="!writable || busy || conflict" :required="!materialAttachment" /></label>
             <div class="editor-footer"><span :class="{ overlimit: textBytes > byteLimit }">{{ textBytes }} / {{ byteLimit }} 字节{{ readingFile ? ' · 正在读取文件…' : '' }}</span><button class="primary-button" data-testid="save-material" :disabled="!canSave">{{ saving ? '正在保存…' : existingMaterial ? '保存材料修订' : '保存材料' }}</button></div>
             <p v-if="conflict" class="conflict-state" role="alert">版本冲突：编辑内容仍保留。先点击“刷新项目并保留编辑”，核对最新状态后再次提交。</p>
           </form>
@@ -543,6 +603,11 @@ onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; projectGenerat
 .material-editor .replacement-hint { color: #cdbb99; }
 .file-picker { display: block; margin-bottom: 13px; }
 .file-picker input { font-size: 12px; padding: 8px; }
+.attachment-panel { border: 1px solid #3d6474; background: #10303f; border-radius: 7px; padding: 12px 14px; margin-bottom: 13px; overflow-wrap: anywhere; }
+.attachment-panel strong { color: #9fd9d2; font-size: 12px; }
+.attachment-panel span { display: block; color: #c4dae5; font-size: 12px; margin-top: 4px; }
+.attachment-panel small { display: block; color: #94b2c2; font-size: 11px; margin-top: 5px; }
+.attachment-panel button { margin-top: 9px; font-size: 11px; padding: 5px 9px; }
 .editor-footer { margin-top: 12px; flex-wrap: wrap; }
 .editor-footer span { font-size: 11px; color: #8ea9ba; }
 .editor-footer .overlimit { color: #f0ad8e; }

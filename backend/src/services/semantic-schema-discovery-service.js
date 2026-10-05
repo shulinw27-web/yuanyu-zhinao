@@ -1,8 +1,11 @@
 import { parse as parseYaml } from 'yaml';
 import { detectRequestedSemanticSystems } from './semantic-source-discovery-service.js';
 import { objectGranularities } from './ontology-contract-service.js';
+import { parseOfficeTableRows } from './office-material-parser.js';
 
 const structuredMimeTypes = new Set(['application/json', 'text/csv', 'application/yaml', 'application/x-yaml', 'text/yaml', 'text/x-yaml']);
+const officeMimeTypes = new Set(['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
+const discoveryMimeTypes = new Set([...structuredMimeTypes, ...officeMimeTypes]);
 const MAX_SCHEMAS = 40;
 const MAX_FIELDS = 80;
 const clip = (value, length = 240) => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, length);
@@ -14,7 +17,7 @@ const referenceParts = (value) => typeof value === 'object' && value
 const objectId = (value) => clip(value, 120).split(/[^\p{L}\p{N}]+/u).filter(Boolean).map((item) => `${item[0]?.toUpperCase() || ''}${item.slice(1)}`).join('').replace(/^\d+/, '') || 'DiscoveredObject';
 const snake = (value) => clip(value, 120).replace(/([a-z\d])([A-Z])/g, '$1_$2').replace(/[^\p{L}\p{N}]+/gu, '_').replace(/^_+|_+$/g, '').toLowerCase();
 const refName = (value) => String(value || '').split('/').at(-1) || '';
-const lowerKeys = (value) => Object.fromEntries(Object.entries(value || {}).map(([key, item]) => [key.toLowerCase().replace(/[^a-z0-9]/g, ''), item]));
+const lowerKeys = (value) => Object.fromEntries(Object.entries(value || {}).map(([key, item]) => [key.toLowerCase().replace(/[^a-z0-9\p{Script=Han}]/gu, ''), item]));
 const firstValue = (row, aliases) => {
   const normalized = lowerKeys(row);
   return aliases.map((key) => normalized[key]).find((value) => value !== undefined && value !== null && String(value).trim() !== '');
@@ -41,9 +44,22 @@ const parseCsv = (text) => {
   }
   row.push(field);
   if (row.some((item) => item.trim())) rows.push(row);
-  if (rows.length < 2) return [];
-  const headers = rows[0].map((item) => clip(item, 100));
-  return rows.slice(1).map((values) => Object.fromEntries(headers.map((header, index) => [header, clip(values[index], 1000)])));
+  return matrixToRecords(rows);
+};
+
+// Shared header/record semantics for CSV files and document-form dictionaries:
+// first row is the header, later rows are records, both positionally aligned.
+// Sparse columns (cells that were never present in the worksheet) stay aligned
+// by index rather than shifting into a neighbouring header.
+const matrixToRecords = (rows) => {
+  const meaningful = rows.filter((row) => Array.isArray(row) && row.some((item) => String(item ?? '').trim()));
+  if (meaningful.length < 2) return [];
+  const width = Math.max(...meaningful.map((row) => row.length));
+  const headers = Array.from({ length: width }, (_, index) => clip(meaningful[0][index], 100));
+  return meaningful.slice(1).map((row) => {
+    const values = Array.from({ length: width }, (_, index) => clip(row?.[index], 1000));
+    return Object.fromEntries(headers.map((header, index) => [header, values[index]]));
+  });
 };
 
 const fieldType = (property = {}) => property.type || (property.$ref ? `ref:${refName(property.$ref)}` : property.items?.$ref ? `array:${refName(property.items.$ref)}` : property.format || 'string');
@@ -187,7 +203,7 @@ export function discoverSchemasFromAttachments({ attachments = [], reports = [],
   const files = [];
   const schemas = [];
   const warnings = [];
-  for (const attachment of attachments.filter((item) => structuredMimeTypes.has(item.mimeType) && eligible.has(item.id))) {
+  for (const attachment of attachments.filter((item) => discoveryMimeTypes.has(item.mimeType) && eligible.has(item.id))) {
     const filenameSystems = detectRequestedSemanticSystems(attachment.name);
     const requested = detectRequestedSemanticSystems(input);
     const sourceSystem = filenameSystems.length === 1 ? filenameSystems[0] : requested.length === 1 ? requested[0] : 'UNASSIGNED';
@@ -197,6 +213,14 @@ export function discoverSchemasFromAttachments({ attachments = [], reports = [],
       let format;
       if (attachment.mimeType === 'text/csv') { parsed = parseCsv(text); format = 'csv_dictionary'; }
       else if (attachment.mimeType === 'application/json') { parsed = JSON.parse(text); format = parsed?.openapi ? 'openapi_json' : 'json_dictionary'; }
+      else if (officeMimeTypes.has(attachment.mimeType)) {
+        // 文档形态字典（阶段 5a-2）：从登记/工作台持久化的提取文本还原行列矩阵，
+        // 与 CSV 走同一条确定性候选路径；证据等级与 CSV 同级，仍需 Critic 与人工校对。
+        const tables = parseOfficeTableRows(text);
+        parsed = tables.flatMap(({ rows }) => matrixToRecords(rows));
+        format = attachment.mimeType.includes('spreadsheetml') ? 'xlsx_dictionary' : 'docx_dictionary';
+        if (!parsed.length) warnings.push(`${attachment.name}：未在文档中识别到含表头的结构化表格；内容仍作为文本进入上下文，字段级候选需提供带表头的 CSV/XLSX/JSON 字典。`);
+      }
       else { parsed = parseYaml(text, { maxAliasCount: 20 }); format = parsed?.openapi ? 'openapi_yaml' : 'yaml_dictionary'; }
       const discovered = parsed?.openapi ? schemasFromOpenApi(parsed, sourceSystem) : schemasFromDictionary(parsed, sourceSystem, format);
       const sampleDocument = Array.isArray(parsed?.records) && parsed.records.every(item => item && typeof item.objectType === 'string' && item.payload);
@@ -206,6 +230,10 @@ export function discoverSchemasFromAttachments({ attachments = [], reports = [],
     } catch (error) {
       warnings.push(`${attachment.name}：结构解析失败（${clip(error.message, 120)}）。`);
     }
+  }
+  // PDF 文本不参与结构化候选（不保证行列语义），只走自然语言上下文——必须点名披露。
+  for (const attachment of attachments) {
+    if (attachment.mimeType === 'application/pdf' && reports.some(item => item.attachmentId === attachment.id && item.status === 'content_scanned')) warnings.push(`${attachment.name}：PDF 提取文本未作为结构化字典解析，仅进入自然语言上下文；字段级候选请提供带表头的 CSV/XLSX/JSON 字典。`);
   }
   return finalizeSchemaDiscovery({ files, schemas, warnings });
 }

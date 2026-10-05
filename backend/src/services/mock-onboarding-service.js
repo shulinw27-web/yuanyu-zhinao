@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mockOnboardingScenarios as scenarios, mockOnboardingMaterialKinds as kinds, mockOnboardingLimits as limits, mockOnboardingBoundary as boundary } from '../data/mock-onboarding-catalog.js';
+import { mockOnboardingScenarios as scenarios, mockOnboardingMaterialKinds as kinds, mockOnboardingLimits as limits, mockOnboardingBoundary as boundary, mockOnboardingDocumentMimeTypes as documentMimeTypes, mockOnboardingDocumentBoundary as documentBoundary } from '../data/mock-onboarding-catalog.js';
+import { inspectMultimodalInput, extractMultimodalEvidence } from './multimodal-input-service.js';
 import { getEffectiveAccess, hasButtonPermission } from './access-control-service.js';
 import { runWithSemanticTenant } from './semantic-tenant-context.js';
 import { semanticOperationsPrincipalKey } from './semantic-operations-identity.js';
@@ -41,6 +42,26 @@ const materialRevision = project => project.materialRevision ?? project.revision
 const activeConnection = project => project.connection?.materialRevision === materialRevision(project) ? project.connection : null;
 const revisionConflict = () => fail('MOCK_ONBOARDING_REVISION_CONFLICT', '项目已被更新，请重新读取项目后提交。', 409);
 const sourceCount = value => Number.isSafeInteger(value) && value >= 0 && value <= 2000 ? value : 0;
+const attachmentKinds = new Set(['requirements', 'api', 'rules']);
+const documentMime = new Set(documentMimeTypes);
+
+// 阶段 5a：文档类材料登记。走与对话面同一套安全闸门（签名/嵌入文本检查、
+// 内容级扫描、DLP、提示注入隔离），登记的只有提取文本与解析取证——原文件
+// 不持久化；提取不完整或超限时整份拒绝，不做静默截断。
+async function extractDocumentMaterial(attachment, roleId) {
+  const multimodal = inspectMultimodalInput({ attachments: [attachment] }, { id: roleId });
+  if (multimodal.error) return fail('MOCK_ONBOARDING_ATTACHMENT_INVALID', multimodal.error);
+  const extraction = await extractMultimodalEvidence(multimodal.attachments);
+  const report = extraction.reports[0] || {};
+  if (report.status !== 'content_scanned') return fail('MOCK_ONBOARDING_ATTACHMENT_EXTRACT_FAILED', report.reason || '文档未通过受控内容检查，整份拒绝登记。');
+  if (report.parserTruncated) return fail('MOCK_ONBOARDING_ATTACHMENT_EXTRACT_INCOMPLETE', '文档超出受控解析范围（PDF 最多 20 页、工作表最多 2000 行），请拆分后分批登记；不做静默截断。');
+  if (report.partial || report.missingPages?.length) return fail('MOCK_ONBOARDING_ATTACHMENT_EXTRACT_INCOMPLETE', `文档存在未识别页面（${report.missingPages.join('、')}），内容不完整时整份拒绝登记；可启用企业 OCR 后重试。`);
+  const document = extraction.documents?.[0];
+  if (!document?.text) return fail('MOCK_ONBOARDING_ATTACHMENT_EXTRACT_FAILED', '受控解析未产出可登记文本，整份拒绝。');
+  const [inspected] = multimodal.attachments;
+  return { text: document.text, source: { form: 'document', mimeType: inspected.mimeType, attachmentName: inspected.name, attachmentBytes: inspected.size,
+    pageCount: report.pageCount || 1, totalPages: report.totalPages || report.pageCount || 1, securityScan: report.securityScan || null, dlpSignals: [...(report.dlpSignals || [])], extractedCharacters: report.extractedCharacters ?? document.text.length } };
+}
 
 // identityScope comes exclusively from the authenticated request. Body identity,
 // role and project-state fields never participate in scope or permission checks.
@@ -154,7 +175,7 @@ function publicProject(project) {
     const item = project.materials[kind];
     const issues = kind === 'dictionary' ? dictionary.issues : kind === 'samples' ? validateSamples(item, dictionary)
       : item.text.replace(/\s/gu, '').length < 24 ? ['描述至少需要 24 个非空白字符，请补充业务细节；简单确认不能视为材料就绪。'] : [];
-    return { kind, name: item.name, bytes: item.bytes, digest: item.digest, issues };
+    return { kind, name: item.name, bytes: item.bytes, digest: item.digest, issues, ...(item.source ? { source: structuredClone(item.source) } : {}) };
   });
   const missing = kinds.filter(item => !project.materials[item.kind]).map(({ kind, label, description }) => ({ kind, label, reason: `尚未提供${label}。${description}` }));
   const issues = materials.flatMap(item => item.issues.map(issue => `${kinds.find(kind => kind.kind === item.kind).label}：${issue}`));
@@ -183,7 +204,7 @@ const owned = (project, scope) => project?.owner === scope.owner && project.role
 export async function listMockOnboarding(options) {
   return scoped(options, false, async scope => {
     const index = await readSemanticGovernanceState(NAMESPACE, scope.key) || {};
-    return { mode: 'synthetic', scenarios: structuredClone(scenarios), materialKinds: structuredClone(kinds), limits: { ...limits }, boundary, projects: Object.values(index).filter(project => owned(project, scope)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(publicProject) };
+    return { mode: 'synthetic', scenarios: structuredClone(scenarios), materialKinds: structuredClone(kinds), limits: { ...limits }, boundary, documentMimeTypes: structuredClone(documentMimeTypes), documentBoundary, projects: Object.values(index).filter(project => owned(project, scope)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(publicProject) };
   });
 }
 
@@ -211,20 +232,35 @@ export async function getMockOnboardingProject(options) {
 }
 
 export async function saveMockOnboardingMaterial(options) {
-  return scoped(options, true, scope => {
+  return scoped(options, true, async scope => {
     const { body } = options;
     if (!kinds.some(item => item.kind === body?.kind)) return fail('MOCK_ONBOARDING_KIND_INVALID', '不支持的材料类型；仅支持 requirements/api/dictionary/samples/rules。');
     if (!Number.isSafeInteger(body?.expectedRevision) || body.expectedRevision < 1) return fail('MOCK_ONBOARDING_REVISION_REQUIRED', '请提供项目当前 expectedRevision。');
-    if (!validLabel(body?.name, 160) || typeof body?.text !== 'string' || !body.text.trim() || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(body.text)) return fail('MOCK_ONBOARDING_MATERIAL_INVALID', '材料需要有效名称和非空纯文本，不接受二进制控制字符。');
-    const bytes = Buffer.byteLength(body.text, 'utf8');
-    if (bytes > limits.materialBytes) return fail('MOCK_ONBOARDING_MATERIAL_LIMIT', '单份材料不能超过 64 KiB UTF-8 文本。', 413);
+    if (!validLabel(body?.name, 160)) return fail('MOCK_ONBOARDING_MATERIAL_INVALID', '材料需要有效名称和非空纯文本，不接受二进制控制字符。');
+    const attachment = record(body?.attachment) ? body.attachment : null;
+    const rawText = typeof body?.text === 'string' ? body.text : null;
+    if ((rawText !== null) === Boolean(attachment)) return fail('MOCK_ONBOARDING_MATERIAL_INVALID', '材料需提供非空纯文本或单个文档附件之一，二者不可同时提供。');
+    let text = rawText;
+    let source = null;
+    if (attachment) {
+      if (!attachmentKinds.has(body.kind)) return fail('MOCK_ONBOARDING_MATERIAL_FORM_UNSUPPORTED', '数据字典与合成样本仅接受 JSON 文本；文档附件仅支持业务需求、接口说明与业务规则。');
+      const mimeType = String(attachment.mimeType || '').toLowerCase();
+      if (/^(?:image|audio|video)\//u.test(mimeType)) return fail('MOCK_ONBOARDING_MATERIAL_FORM_UNSUPPORTED', '图片、音频与视频材料需要视觉/语音模型通道（阶段 5b），当前一律整份拒绝登记。');
+      if (!documentMime.has(mimeType)) return fail('MOCK_ONBOARDING_MATERIAL_FORM_UNSUPPORTED', '文档附件仅支持 PDF、DOCX 与 XLSX；结构化 JSON 请用纯文本登记。');
+      const extracted = await extractDocumentMaterial(attachment, scope.roleId);
+      if (extracted.error) return extracted;
+      text = extracted.text;
+      source = extracted.source;
+    } else if (!text.trim() || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text)) return fail('MOCK_ONBOARDING_MATERIAL_INVALID', '材料需要有效名称和非空纯文本，不接受二进制控制字符。');
+    const bytes = Buffer.byteLength(text, 'utf8');
+    if (bytes > limits.materialBytes) return fail('MOCK_ONBOARDING_MATERIAL_LIMIT', source ? '文档提取文本超过 64 KiB，请拆分文档后分批登记；不做静默截断。' : '单份材料不能超过 64 KiB UTF-8 文本。', 413);
     return mutateSemanticGovernanceState(NAMESPACE, scope.key, {}, index => {
       const project = index[options.id];
       if (!owned(project, scope)) return { commit: false, result: missingProject() };
       if (body.expectedRevision !== project.revision) return { commit: false, result: fail('MOCK_ONBOARDING_REVISION_CONFLICT', '项目已被更新，请重新读取项目后提交。', 409) };
       const delta = bytes - (project.materials[body.kind]?.bytes || 0);
       if (materialBytes(project) + delta > limits.projectBytes || Object.values(index).reduce((sum, item) => sum + materialBytes(item), 0) + delta > limits.principalRoleBytes) return { commit: false, result: fail('MOCK_ONBOARDING_TOTAL_LIMIT', '超过单项目 256 KiB 或当前身份角色 1 MiB 材料上限。', 413) };
-      project.materials[body.kind] = { name: body.name.trim(), bytes, digest: hash(body.text), text: body.text };
+      project.materials[body.kind] = { name: body.name.trim(), bytes, digest: hash(text), text, ...(source ? { source } : {}) };
       project.revision++; project.updatedAt = new Date().toISOString();
       project.materialRevision = project.revision; project.connection = null; delete project.preview;
       if (project.alignment) project.alignment.report = null;
@@ -401,7 +437,7 @@ export async function handoffMockOnboardingModel(options, { readSource = readMoc
     const alignmentReport = evaluateProjectAlignment(project, dictionary.tables, source.records, options.identityScope.tenantId);
     if (alignmentReport.status !== 'validated_scope') return fail('MOCK_HANDOFF_ALIGNMENT_CHANGED', '新读取的完整快照未通过映射规则，请重新验证。', 409);
     const documents = Object.entries(project.materials).filter(([kind]) => kind !== 'samples').map(([kind, material]) => ({
-      name: material.name, mimeType: kind === 'dictionary' ? 'application/json' : 'text/plain', text: material.text, kind
+      name: material.name, mimeType: material.source?.mimeType || (kind === 'dictionary' ? 'application/json' : 'text/plain'), text: material.text, kind
     }));
     documents.push({ name: 'handoff-synthetic-snapshot.json', kind: 'handoff_samples', mimeType: 'application/json', text: JSON.stringify({ records: source.records }) });
     const workspace = await extendSemanticMaterials({ content: { documents }, identityScope: options.identityScope, roleId: scope.roleId });

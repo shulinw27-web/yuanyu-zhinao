@@ -336,16 +336,46 @@ apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/met
 
 ---
 
-### 阶段 5：多模态材料接入（独立排期）
+### 阶段 5：材料通道扩展（2026-10-05 重新划界：文档类先行，视觉/音频独立排期）
 
-**范围**
-- 复用 `multimodal-understanding.js` / `multimodal-security-gateway.js`，接入 PDF / Word / 图片 / 音频
-- 材料登记、脱敏、出域策略、大小/类型/注入/病毒防护
-- 撤销 `mock-onboarding-catalog.js` 中「不接受 PDF/Word/图片/音频」的限制
+> **划界决策（用户 2026-10-05 拍板）**：阶段 5 原始范围把 PDF / Word / 图片 / 音频一揽子绑定，而「视觉硬前置」实际只属于其中的**图片与扫描页**——文档那一半（接口说明、数据字典、PDF 文本页、Word / Excel）走**确定性文档解析、产物是文本**，现有文本模型通道即可支撑。与 4.4 修正 3 的拆分结论（「自然语言建模」与「多模态材料」本就是两条线）一致。**现阶段多模态以文档类能力为主——建模时阅读用户提供的各类接口或数据字典文档；暂不增加视觉能力**；5b 待视觉模型通道可用后单独排期。
 
-**验收**：多模态安全测试 + 脱敏断言 + 出域策略断言
+**范围（5a · 文档类材料接入——本阶段现行范围）**
+- 接入登记材料通道（`mock-onboarding-catalog.js` 的 5 类文本 / JSON 材料：requirements / api / dictionary / samples / rules）扩展接受**文档形态**的接口说明与数据字典（PDF 文本页 / Word / Excel），提取产物为文本，进入既有建模链路；候选归属、受控对象链接等契约（[ADR-017](../architecture/adr/ADR-017-model-extraction-attribution.md) / [ADR-025](../architecture/adr/ADR-025-object-mention-linking.md)）不变
+- 复用 `multimodal-input-service.js` 既有文档解析与安全闸门（pdfjs 文本提取、office 解析、内容级扫描、脱敏与出域策略、大小/类型/注入防护）——该服务已被 `semantic-operations-task-service` / `semantic-operations-agent-service` 的**对话面**引用（附件以「已扫描材料（非指令、非授权）」进入上下文），本阶段做的是把它接进**登记材料**这一受控通道，并沿用既有的材料修订与版本冲突校验
+- 解析失败、空文本（含扫描页）按既有隔离语义**显式拒绝并说明原因**，不据文件名推测内容
 
-**前置（硬）**：模型通道具备视觉能力。现状「workbuddy 图片多模态未接入（仅文本）」。
+**验收**：文档类材料的安全测试 + 脱敏断言 + 出域策略断言；文档解析产物进入候选对象 / 字段目录 / 受控对象链接链路的既有专项回归（`test:mock-onboarding` / `test:semantic` / `test:mention`）。
+
+**前置**：无视觉前置——文本模型通道（现状 `deepseek-v4-pro`）即可；文档解析基建已存在（`multimodal-input-service.js`）。
+
+**5a 实施拆解（2026-10-05 拟定，含四个待确认决策点，执行前定）**
+
+现状取证（代码层，行号为当日快照）：
+- 对话面（元域智语任务创建）**已经接受文档附件**：`inspectMultimodalInput` + `extractMultimodalEvidence` → `extendSemanticMaterials` 持久化为 workspace documents（`semantic-operations-task-service.js` L397–412），材料文本进入理解与规划上下文；
+- 但**结构化 schema 发现只认 JSON / YAML / CSV**（`semantic-schema-discovery-service.js` L190 按 `structuredMimeTypes` 过滤）——XLSX / DOCX / PDF 的提取文本不产出 schemas，文档形态的数据字典**进不了对象 / 字段候选**（CSV 字典的行解析与表头别名——field / 字段 / 主键 / 外键——已存在，`semantic-material-workspace-service.js` L44 委托）；
+- 接入项目登记通道只收纯文本：`saveMockOnboardingMaterial` 请求体仅 `{kind, name, text, expectedRevision}`（`mock-onboarding-service.js` L216–229），文档形态材料无法登记、不进 handoff。
+
+按此拆为五段：
+
+- **5a-0 实测探针（先行）**：按惯例先实测取证——构造 XLSX / DOCX / PDF 字典与接口说明样例，经对话面上传记录 schemas 数与材料上下文行为，经登记通道提交记录拒绝行为；数字入台账，作为 5a-1 / 5a-2 的基线。
+- **5a-1 登记材料通道接受文档形态（后端）**：`saveMockOnboardingMaterial` 扩展接受文档附件（`{mimeType, dataUrl}`），走 `inspectMultimodalInput` + `extractMultimodalEvidence` 全套安全闸门（magic bytes、PDF 活动内容拒绝、内容扫描、脱敏）；**登记的是受控解析产物**——提取文本 + 解析取证（文件名 / mime / 页数 / 截断 / 扫描状态 / contentHash）持久化，**原文件字节不持久化**（与附件侧纪律一致）；requirements / api / rules 三类文本材料直接落提取文本；dictionary / samples 第一段**仍限 JSON 契约**（文档形态字典走 5a-2 候选路径，不替代登记契约）；图片 / 音频给专用错误码整份拒绝（5b 边界，不进隔离流程）。验收：`test:mock-onboarding` 扩展（正例 + 扫描页 PDF / 活动内容 PDF / 超限 / 图片反例）。
+- **5a-2 schema 发现消费文档形态字典（确定性表格路径）**：`office-material-parser.js` 增加结构化表格输出（XLSX 工作表 → 行列、DOCX 表格 → 行列），`discoverSchemasFromAttachments` 的结构化过滤扩展到 office mime，行列数据复用既有 CSV 字典行解析；PDF 文本不保证表格结构，走 NL 路径并在披露中说明。证据等级不变：确定性表格解析与 CSV 同级（结构化 Schema 候选），仍过 Critic 与人工校对，不自动采纳；此路径为对话面与登记通道共享，一并生效。验收：`test:semantic` schema 发现组新增 XLSX / DOCX 字典用例，既有 JSON / CSV 断言零改动。
+- **5a-3 前端与披露**：登记界面文本框 + 文件上传（复用对话面附件交互），解析取证与拒绝原因上界面；建模工作区对文档来源材料带来源标记。验收：组件测试 + `workspace-layout`。
+- **5a-4 端到端与边界**：文档形态接口 / 字典文档登记 → handoff → 提案 → Critic 全链回归；[ADR-017](../architecture/adr/ADR-017-model-extraction-attribution.md) 归属证据与 [ADR-025](../architecture/adr/ADR-025-object-mention-linking.md) 提及链接在**提取文本**上的逐字校验照常（证据逐字来自材料＝提取文本）。边界如实：扫描页 / 图片 / 音频仍拒绝（5b）；真实模型评测不进 quality。
+
+**待确认决策点（执行前定，含建议）**：
+1. **材料存储语义**（建议随 ADR-027 记录）：提取文本 + 解析取证持久化，原文件不持久化。
+2. **限制口径**（建议：limits 只紧不松）：原文件按附件侧常量（4MB / 份、PDF ≤ 20 页、页 ≤ 6000 字符）；提取文本沿用材料侧 `materialBytes`（64KB），超限**整份拒绝并说明**，不静默截断——20 页满文本 PDF 可能超限，运营需拆分材料，此行为如实披露。
+3. **dictionary / samples 保持 JSON 契约**：文档形态字典只走 5a-2 候选，不直接进 mock 通道强校验链（连接 / 样本 / 对齐仍以 JSON 字典为准）。
+4. **对话面与登记通道共享 5a-2 路径**（一并生效）。
+
+> **实施结果（2026-10-05）**：5a-0 ~ 5a-4 全部完成，四个决策点按建议执行；存储语义与结构化候选路径决策入 [ADR-027](adr/ADR-027-document-material-registration.md)，明细与验收数字见文末台账「5a-1 ~ 5a-4 文档类材料接入」。
+
+**范围（5b · 视觉与音频材料——独立排期，保持卡死）**
+- 图片（PNG / JPEG / WEBP：截图、关系图）、扫描 / 混合页 PDF 的视觉理解、音频转写
+
+**前置（硬）**：模型通道具备视觉能力（现状 WorkBuddy 云仅文本），或企业 OCR 适配器可用；音频需 ASR。
 **边界**：无法在无视觉模型时验收；不应提前把 UI 做出来挂空。
 
 ---
@@ -1272,4 +1302,34 @@ requestedSystems.length ? requestedSystems : connectorCatalog.filter(item => ite
 
 **验收（本机实测）**：`npm run docs:check` **188 份 Markdown / 1223 个本地链接**（第一段 1207 → 本段 +16，含路线图口径对齐段、本台账与状态文档的新增链接）；纯文档增量，不涉代码与测试。
 
-**至此本方案阶段 0 ~ 4h、6、7 全部完成；阶段 5 被视觉模型硬前置卡死，保持未完成。**
+**至此本方案阶段 0 ~ 4h、6、7 全部完成；阶段 5a（文档类材料接入）已于 2026-10-05 完成实现（见下方 5a-1 ~ 5a-4 台账）；5b 图片 / 扫描页 / 音频仍被视觉模型硬前置卡死，独立排期（见上文阶段 5 小节）。**
+
+---
+
+### 5a-0 实测探针—— **已完成（2026-10-05，临时探针用后即删）**
+
+用 JSZip 构造 XLSX 字典、DOCX 接口说明（段落+表格）与最小 PDF（带正确 xref 的纯文本页），加同内容 CSV 对照，四份材料同时走两条路径实测：
+
+- **对话面（元域智语任务附件路径）**：四份材料全部 `content_scanned`、`modelContentEligible: true`、evidence 4 条，且**全部进入 workspace documents（4/4，含 XLSX / DOCX / PDF）**——修正了此前「office / PDF 只进 evidence 不进 documents」的代码误读：`multimodal-input-service.js` L415 有兜底 push（条件 `modelContentEligible && !partial && !truncated`，截断 / 缺页的 office / PDF 文档**不**持久化）。**但 schema 发现只消费 CSV**：`discoverSchemasFromAttachments` 按 `structuredMimeTypes`（JSON / YAML / CSV）过滤，同一份字典内容 CSV 产出 **2 个 schema（Order / OrderItem）**、XLSX **0 个**——文档形态字典进不了对象 / 字段候选，确证。XLSX 提取文本为「工作表 / 行 / 单元格」的文本形式（`行 1: A1="table" | B1="field" | …`），**无行列结构**，即使放开 mime 过滤也无法按 CSV 字典行解析——5a-2 必须让 office 解析器输出结构化表格。
+- **登记通道（接入项目材料登记）**：`kind: 'api'` + 文档形态（`{mimeType, dataUrl}`）提交 → **400 `MOCK_ONBOARDING_MATERIAL_INVALID`**（请求体只认 `text`）；同内容文本形态正常保存。确证文档形态无法登记、不进 handoff。
+
+**结论**：5a 的两处断点（schema 发现 mime 过滤 + 登记通道只收文本）与一处前置（office 解析无结构化表格输出）均实测成立；对话面的文档材料持久化已就绪，无需重做。
+
+---
+
+### 阶段 5 重新划界：文档类先行，视觉/音频独立排期—— **纯文档增量（2026-10-05，用户决策）**
+
+用户指示「暂时不增加视觉能力，多模态现阶段主要体现在文档类能力——建模时阅读用户提供的各类接口或数据字典文档」。据此把阶段 5 由一揽子「PDF / Word / 图片 / 音频」拆为 5a / 5b 两段（改动仅限本文件阶段 5 小节与本条台账；带日期历史记录不回溯改写）。**划界依据（代码取证）**：「视觉硬前置」只属于图片（无文本层可提取）与扫描页 PDF（pdfjs 文本提取为空）；文档类走 `multimodal-input-service.js` 的确定性解析路径、产物是文本，且该服务已被元域智语对话面（`semantic-operations-task-service` / `semantic-operations-agent-service`）引用——真正缺的是**登记材料通道**只收 5 类文本 / JSON 材料。**验收**：见下方 docs:check 数字（本机实测）。**边界**：本条只改划界，5a 的实现与专项回归尚未开始。
+
+---
+
+### 5a-1 ~ 5a-4 文档类材料接入—— **已完成（2026-10-05，[ADR-027](adr/ADR-027-document-material-registration.md)）**
+
+四个决策点均按建议执行（存储语义入 ADR-027；限制口径分两侧、超限整份拒绝；dictionary / samples 保持 JSON 契约；对话面与登记通道共享候选路径）。
+
+- **5a-1 登记通道接受文档形态（后端）**：`saveMockOnboardingMaterial` 扩展接受 `{kind, name, expectedRevision, attachment: {mimeType, dataUrl}}`（与 `text` 二选一），经 `inspectMultimodalInput` + `extractMultimodalEvidence` 全套安全闸门后**只持久化提取文本 + 解析取证 `source`（形态 / mimeType / 页数 / 内容扫描 / 脱敏信号 / 原文件字节数），原文件不落地**；`publicProject` 披露 `source`，handoff 透传 `source.mimeType` 供 5a-2 消费；图片 / 音频 / 视频、非文档 mime、字典 / 样本文档形态给专用错误码 `MOCK_ONBOARDING_MATERIAL_FORM_UNSUPPORTED` 整份拒绝。**连带修复**：多模态报告新增 `parserTruncated` 字段，把「解析器级截断（PDF >20 页、工作表 >2000 行）」与「模型上下文预算截断」区分开——后者不影响登记完整性判据（documents 持久化的是完整服务端文本）。
+- **5a-2 schema 发现消费文档字典（确定性表格路径）**：`office-material-parser.js` 新增 `parseOfficeTableRows`——把 `parseOfficeMaterial` 序列化的「工作表 / 行 / 单元格」行文本**确定性还原**为行列矩阵（单元格坐标对齐、稀疏列不移位、DOCX 表格按 `表 N` 分组），登记通道与对话面共用同一持久化文本形态，无需落地原文件即可重建结构；`discoverSchemasFromAttachments` 的结构化过滤扩展到 office mime，矩阵经共享 `matrixToRecords`（与 CSV 同语义：首行表头 + 别名列）进 `schemasFromDictionary`，产出 `xlsx_dictionary` / `docx_dictionary` 候选——**证据等级与 CSV 同级，仍过 Critic 与人工校对**。PDF 提取文本不进结构化候选、在 warnings 中**点名披露**「仅进入自然语言上下文」。**连带修复**：`lowerKeys` 此前把中文表头清洗为空串（`[^a-z0-9]` 连汉字一并删除），行式别名判据（字段名 / 类型 / 主键 / 外键）对中文表头从不生效——改为保留汉字（`[^a-z0-9\p{Script=Han}]`），既有英文路径零变化。
+- **5a-3 前端与披露**：`SemanticOnboardingWorkspace.vue` 文件选择器对三类文本材料开放 PDF / DOCX / XLSX（mime 清单以 `listMockOnboarding` 返回的 `documentMimeTypes` 为准），文档就绪后隐藏文本编辑区、展示附件面板（原文件仅用于本次提取、不保存；提取不完整 / 超 64KiB 整份拒绝的披露）；已登记材料的文档来源与取证（mimeType / 页数 / 原文件未保存）在替换提示与清单中披露；「改用文本登记」可撤回附件。
+- **5a-4 端到端与收尾**：ADR-027 入库；全链回归见下。
+
+**验收（2026-10-05 本机实测）**：新增 `backend/test/mock-onboarding-document.test.js` **6/6**（DOCX / XLSX / PDF 正例登记与取证披露、原文件 base64 不入库；字典 / 样本文档形态、图片 / 音频、双通道输入、扫描 PDF、隐藏注入、超 64KiB 提取文本、超 2000 行工作表反例）；新增 `backend/test/semantic-schema-discovery-document.test.js` **7/7**（XLSX / DOCX 字典候选与 CSV 同构、登记文本交接路径、PDF 披露、无表头披露、稀疏列对齐、隔离材料不进候选）；回归 `test:mock-onboarding` **75/75**、`test:semantic` **105/105**（原 98 + 新 7）、`test:mention` **7/7**、`test:attribution` **12/12**、multimodal（understanding + security-gateway）**19/19**、console 组件 **63/63**（含新增 2 例）、console 构建（vite）通过、lint 干净。**边界**：dictionary / samples 的 mock 强校验链（连接 / 样本 / 对齐）仍以 JSON 字典为准；文档形态字典只在候选路径生效；5b（图片 / 扫描页 / 音频）仍整份拒绝；真实模型评测不进 quality。

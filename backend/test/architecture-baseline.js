@@ -154,6 +154,10 @@ export const CROSS_DOMAIN_EDGE_BASELINE = new Set([
   'meta-model-service.js -> semantic-tenant-context.js',
   'mock-onboarding-service.js -> iam-store.js',
   'mock-onboarding-service.js -> meta-model-service.js',
+  // 阶段 5a（ADR-027）：登记材料通道消费多模态受控解析闸门，与下方
+  // semantic-operations-task/agent-service、上方 knowledge-material-review
+  // -> multimodal-input-service 三条边同性质（消费方不是复制闸门，是共享闸门），非新领域耦合。
+  'mock-onboarding-service.js -> multimodal-input-service.js',
   'mock-onboarding-service.js -> semantic-governance-store.js',
   'mock-onboarding-service.js -> semantic-material-workspace-service.js',
   'mock-onboarding-service.js -> semantic-model-fingerprint.js',
