@@ -1,6 +1,6 @@
 # WorkBuddy 协作工作记录
 
-更新：2026-09-29（覆盖至系统接入重构阶段 7 收官）。本页按时间线维护 WorkBuddy 接手「元域智脑」（demo-platform）以来完成的工作，供交接与回溯使用。当前整体状态以 [当前状态](PROJECT_STATUS.md) 为准，此处只记录协作过程中的增量、根因与边界，不重复验收结论。
+更新：2026-10-05（覆盖至阶段 5a 文档类材料接入完成）。本页按时间线维护 WorkBuddy 接手「元域智脑」（demo-platform）以来完成的工作，供交接与回溯使用。当前整体状态以 [当前状态](PROJECT_STATUS.md) 为准，此处只记录协作过程中的增量、根因与边界，不重复验收结论。
 
 ## 时间线总览
 
@@ -50,6 +50,7 @@
 | 42 | 阶段 6 第一段·权限等价合并 | [ADR-026](../architecture/adr/ADR-026-permission-equivalence-merge.md)：`world.draft.create/validate/publish` 删除并语义等价映射到 `meta_model.draft.save/validate/publish`；**删除服务层隐藏的第二道闸门**（`world-model-template-service.js` 硬编码角色白名单，与 IAM 重复且不可见），权限系统成为唯一权威；`test:permissions` **29/29**、`test:access` 13/13 |
 | 43 | 阶段 6 第二段·元域智营「元模型」菜单全迁删除 | 方案 4.3 决策 A：删 world 页全部前端链路（页面组件目录、状态/动作/数据分支/导航注册/19 个 API 方法/样式）；**关键取证**——`page.world.view` 被 4 处元域智语服务复用为访问权限，权限条目按阶段 2 先例**保留一个版本周期**，权限矩阵与后端零变化；`test:permissions` **31/31**（新增「持旧权限不可进入已移除页面」等 2 用例）、`test:access` **13/13**、管理 Web 构建 1.67s |
 | 44 | 阶段 7·文档同步与路线图口径对齐 | 第一段：`iam-seed` 菜单描述重构 + 全量事实性文档同步（`docs/modules/07` 权限列按 ADR-026、`ARCHITECTURE` 按钮清单、`SEMANTIC_CONTEXT_MICROSERVICE` 表述）。第二段：[开发路线](../development/DEVELOPMENT_ROADMAP.md) 口径对齐（用户 2026-09-25 已确认）——阶段 1「模拟企业与接入项目」→「**系统接入**」、新增口径对齐段；带日期历史增量保留原口径不回溯改写。`docs:check` **188 md / 1223 链接**。**至此系统接入重构阶段 0~4h、6、7 全部完成；阶段 5 被视觉模型硬前置卡死** |
+| 45 | 阶段 5a·文档类材料接入（ADR-027） | 用户 2026-10-05 决策重新划界：暂不增加视觉能力，多模态现阶段以文档类能力为主（建模时阅读接口/数据字典文档）。5a-0 探针取证后实施：登记通道 `saveMockOnboardingMaterial` 扩展接受 `{attachment}`（与 `text` 二选一），走对话面同一套安全闸门，**只持久化提取文本+解析取证、原文件不落地**；图片/音频/视频与字典/样本文档形态给专用错误码整份拒绝；`office-material-parser` 新增 `parseOfficeTableRows`，office mime 与 CSV 同路径产出 `xlsx_dictionary`/`docx_dictionary` 候选；PDF 不进结构化候选并在 warnings 点名披露；前端三类文本材料开放文档上传。**连带修复两处真缺陷**：多模态报告新增 `parserTruncated`（解析器级截断与模型上下文预算截断此前混为一谈会误拒合法文档）；`lowerKeys` 的 `[^a-z0-9]` 把中文表头清洗成空串——「字段名/主键/外键」等中文别名列**从不生效**（属「实现与断言同错」）。新边 `mock-onboarding-service → multimodal-input-service` 按同性质先例登记。`npm run quality` **EXIT=0**（1m36s）；新增 `mock-onboarding-document` **6/6**、`semantic-schema-discovery-document` **7/7**；回归 mock-onboarding 75/75、semantic 105/105、mention 7/7、attribution 12/12、multimodal 19/19、console 63/63 + 构建；`docs:check` **189 md / 1241 链接**。**边界**：dictionary/samples 强校验链仍以 JSON 字典为准，文档形态字典只走候选路径；5b（图片/扫描页/音频）仍整份拒绝，待视觉/语音通道可用后单独排期 |
 
 ## 1. 项目理解与基线梳理
 
@@ -1101,9 +1102,35 @@ const selectedCodes = requestedSystems.length
 
 **验收（本机实测）**：`docs:check` **188 md / 1223 链接**（增量 +16 均为新增链接）；纯文档增量。**至此系统接入重构阶段 0~4h、6、7 全部完成；阶段 5 仍被视觉模型硬前置卡死**（云通道仅文本、视觉能力是硬前置）。挂起项：`evaluate:mention-linking` 真实模型评测待云配额恢复后补跑。
 
+## 46. 阶段 5a：文档类材料接入（ADR-027）
+
+**触发点**：阶段 5 原本一揽子绑定「PDF / Word / 图片 / 音频」四类材料，因图片与扫描页 PDF 缺乏视觉模型通道而被整段卡死。用户 2026-10-05 决策重新划界——「暂不增加视觉能力，多模态现阶段主要体现在文档类能力，在建模时阅读用户提供的各类接口或者数据字典文档」。据此把阶段 5 拆为 5a（文档类）与 5b（视觉/音频），**改动仅限方案文档阶段 5 小节与台账，带日期历史记录不回溯改写**。
+
+**5a-0 探针取证（修正了两处此前的代码误读）**：
+
+1. **对话面其实已经接受文档附件**——元域智语任务创建接受 PDF/DOCX/XLSX 附件，经 `inspectMultimodalInput` + `extractMultimodalEvidence` 提取文本、4/4 持久化为 workspace documents、进入理解与规划上下文。此前以为「office/PDF 路径只进 evidence 不进 documents」是误读，实测全部进入。
+2. **真正的两处断点**：① **schema 发现只消费 CSV**——`semantic-schema-discovery-service.js` L190 按 `structuredMimeTypes` 过滤，同一份字典内容 CSV 产出 2 个 schema（Order/OrderItem），**XLSX 产出 0**；② **登记通道只收纯文本**——`saveMockOnboardingMaterial` 仅 `{kind, name, text, expectedRevision}`，文档形态附件被 `MOCK_ONBOARDING_MATERIAL_INVALID` 拒绝。
+
+**5a-1 登记通道接受文档形态（后端）**：`saveMockOnboardingMaterial` 扩展接受 `{attachment: {mimeType, dataUrl}}`（与 `text` 二选一），走对话面同一套安全闸门（magic bytes / PDF 活动内容拒绝 / 内容扫描 / DLP / 提示注入隔离）。**存储语义**（[ADR-027](../architecture/adr/ADR-027-document-material-registration.md)）：登记=**提取文本+解析取证持久化**（`source`：mimeType / 页数 / 扫描状态 / 脱敏信号），**原文件不持久化**；`publicProject` 披露取证，handoff 透传原始 mimeType 供 5a-2 schema 发现消费。**整份拒绝边界**：图片/音频/视频与字典/样本文档形态给专用错误码 `MOCK_ONBOARDING_MATERIAL_FORM_UNSUPPORTED`；提取超 64KiB 整份拒绝、不静默截断（满页 20 页 PDF 可能超限需拆分）。`mock-onboarding-catalog.js` 新增 `mockOnboardingDocumentMimeTypes` 清单下发给前端。
+
+**5a-2 schema 发现消费文档形态字典**：`office-material-parser.js` 新增 `parseOfficeTableRows`——把序列化行文本（`行 1: A1="字段名" | C1="类型"` 形式）**确定性还原为行列矩阵**，单元格坐标对齐、稀疏列不移位（登记通道与对话面共用同一持久化文本形态，无需落地原文件）。发现服务 office mime 与 CSV 走同一条候选路径（表头行 + 别名列），产出 `xlsx_dictionary` / `docx_dictionary` 候选；PDF 不进结构化候选并在 warnings **点名披露**。
+
+**5a-3 前端**：登记界面三类文本材料（requirements/api/rules）开放 PDF/DOCX/XLSX 上传，附件面板披露提取语义与整份拒绝边界，已登记材料的文档取证上界面，可撤回改用文本登记。修一个隐患：4MB 文件直接 `String.fromCharCode(...bytes)` 会爆调用栈，改分块。
+
+**5a-4 收尾**：ADR-027 入库；架构棘轮新边 `mock-onboarding-service → multimodal-input-service` 按同性质先例登记（共享闸门而非复制闸门——与 `semantic-operations-task-service` / `agent-service` 等三条消费多模态闸门的边一致）。
+
+**两处连带修复的真缺陷**（值得记入踩坑）：
+
+- **多模态报告 `parserTruncated`**：`extractMultimodalEvidence` 的 blocks 循环会把「模型上下文预算截断」合并进 `report.truncated`，把解析器级截断（PDF > 20 页、XLSX > 2000 行）的信号冲掉——`report.truncated` 既不能用来判「解析器级截断要整份拒绝」也不能用来判「预算截断要继续」。新增不混淆的 `parserTruncated` 字段，`extractDocumentMaterial` 改用此判据。
+- **`lowerKeys` 把中文表头清洗成空串**：`key.toLowerCase().replace(/[^a-z0-9]/g, '')` 对中文表头返回空串——「字段名/主键/外键」等中文别名列**从不生效**，但既有断言跟着同错一起绿。改为保留汉字（`/[^a-z0-9\u4e00-\u9fff]/g`）。属「实现与断言同错」踩坑：批量改名、字段列表白名单、`lowerKeys` 这类清洗函数都要用真实输入跑一次。
+
+**验收（本机实测）**：`npm run quality` 端到端 **EXIT=0**（**1m36s**）；新增 `backend/test/mock-onboarding-document.test.js` **6/6**（正例 DOCX/XLSX/PDF 登记、取证披露、原文件不入库；反例：字典/样本文档形态、图片/音频、双通道输入、扫描 PDF、隐藏注入、超 64KiB、超 2000 行）、`backend/test/semantic-schema-discovery-document.test.js` **7/7**（XLSX/DOCX 字典候选与 CSV 同构、登记文本交接路径、PDF 披露、无表头披露、稀疏列对齐、隔离材料不进候选）；回归 `test:mock-onboarding` **75/75**、`test:semantic` **105/105**、`test:mention` **7/7**、`test:attribution` **12/12**、multimodal **19/19**、console 组件 **63/63** + vite 构建、lint 干净；`docs:check` **189 md / 1241 链接**。
+
+**边界（如实）**：dictionary/samples 强校验链仍以 JSON 字典为准，文档形态字典只走候选路径；5b（图片/扫描页/音频）仍整份拒绝，待视觉/语音通道可用后单独排期；真实模型评测不进 quality。
+
 ## 质量与边界
 
-- 每批改动均运行对应专项与 ESLint；文档检查（docs:check）通过（阶段 7 收官复核实测 **188 份 Markdown、1223 个本地链接**；阶段 7 第一段 188 / 1207；阶段 4h 187 / 1192；交付复核 **184 份 Markdown、1169 个本地链接**；阶段 4g 184 / 1166——交付复核新增 3 条链接；4f 183 / 1125；4e 182 / 1104；4d 181 / 1068；4c 第三段 180 / 1042；4c 第二段 179 / 1018；4c 第一段 178 / 995）。
+- **本批（2026-10-05 阶段 5a：文档类材料接入 ADR-027）回归口径**：`npm run quality` 端到端 **EXIT=0**（**1m36s**，全量 Node 测试块 0 处 `not ok`）；新增 `mock-onboarding-document.test.js` **6/6** 与 `semantic-schema-discovery-document.test.js` **7/7** 并分别挂入 `test:mock-onboarding` 与 `test:semantic` 链；`test:mock-onboarding` **75/75**（69→75，新增 6 用例）、`test:semantic` **105/105**（6/6 + 61/61 + 98→105，新增 7 用例）、`test:mention` **7/7**、`test:attribution` **12/12**、multimodal `understanding`+`security-gateway`+`security-regression` **19/19**（受 `parserTruncated` 改动波及，全部回归通过）、元域智语 console 组件 **63/63**（22→63，含本次新增的 5a-3 文档上传用例）+ vite 构建；架构棘轮登记 1 条新边（`mock-onboarding-service → multimodal-input-service`，同性质先例），`test:architecture` 全绿；lint / typecheck 干净；`docs:check` **189 md / 1241 链接**。**边界**：dictionary/samples 强校验链仍以 JSON 字典为准，文档形态字典只走候选路径；5b（图片/扫描页/音频）仍整份拒绝；真实模型评测不进 quality。
 - **本批（2026-09-26 交付复核：改名回归收口 + 提交推送）回归口径**：修掉第 18 节补记的「元域元域智语」缺陷后复跑，`npm run quality` 端到端 **EXIT=0**（**1m40s，全量 35 个 Node 测试块 970 / 970 通过、0 处 `not ok`**，比 4g 口径多 1 项即新增的目录名反向锁死用例）；`npm run docs:check` 通过（**184 份 Markdown、1169 个本地链接**，比 4g 多 3 条）；控制台测试 **61/61**。**5 端构建本轮全部实测通过**（web **2.02s** + 元域智语 **2.86s**、desktop **2.66s**、mobile **1.15s**、dingtalk **2.29s**）——**其中 mobile / dingtalk 是重跑后取得的数字**：第一次把 4 端写在同一次调用里，被沙箱 `SAFE_DELETE_BULK_CONFIRM_REQUIRED`（`scope: turn`）拦下（计数按「整轮」累计），按「每轮一端」重跑即过。
 - **本批（阶段 4g + 模块化审计第 3/5 项）回归口径**：`npm run quality` 端到端 **EXIT=0**（**1m38s，全量 35 个 Node 测试块 969 / 969 通过、0 处 `not ok`**）；`test:semantic` **6/6 + 60/60 + 96/96**（`semantic-operations-agent.test.js` 31 → **33**）；控制台 `workspace-layout` **8/8**（7 → 8，含 `selected.value` 反向锁死）；`test:architecture` **10/10**（**未增跨域边**）；`test:events` **17/17**（`domains/events` 迁移后的回归）；lint / typecheck 干净；**5 端构建通过**（web 2.04s + 元域智语 2.83s、desktop 2.22s、mobile 2.19s、dingtalk 3.47s，分端调用避开沙箱 `safe-delete` 单次阈值）。
 - **本批（阶段 4f）回归口径**：`npm run quality` 端到端 **EXIT=0**（1m39s，全量 35 个 Node 测试块 `fail=0`、0 处 `not ok`）（35 个测试块中 `test:semantic` 第三组 92 → 94、`test:identity` 21/21）；`test:semantic` **6/6 + 60/60 + 94/94**（`semantic-operations-agent.test.js` 29 → **31**）；`npm run lint` 干净；**5 端构建通过**（web 2.90s + 元域智语 2.62s、desktop 3.33s、mobile 3.10s、dingtalk 5.01s，分端调用避开沙箱 `safe-delete` 单次阈值）。
