@@ -1302,7 +1302,7 @@ requestedSystems.length ? requestedSystems : connectorCatalog.filter(item => ite
 
 **验收（本机实测）**：`npm run docs:check` **188 份 Markdown / 1223 个本地链接**（第一段 1207 → 本段 +16，含路线图口径对齐段、本台账与状态文档的新增链接）；纯文档增量，不涉代码与测试。
 
-**至此本方案阶段 0 ~ 4h、6、7 全部完成；阶段 5a（文档类材料接入）已于 2026-10-05 完成实现（见下方 5a-1 ~ 5a-4 台账）；5b 图片 / 扫描页 / 音频仍被视觉模型硬前置卡死，独立排期（见上文阶段 5 小节）。**
+**至此本方案阶段 0 ~ 4h、6、7 全部完成；阶段 5a（文档类材料接入）已于 2026-10-05 完成实现（见上方 5a-1 ~ 5a-4 台账）；阶段 8（系统接入连接配置段，[ADR-028](adr/ADR-028-system-onboarding-connection-config.md)）于 2026-10-06 完成 8-1~8-3 实现（见下方 8-1 ~ 8-3 台账）；5b 图片 / 扫描页 / 音频仍被视觉模型硬前置卡死，独立排期（见上文阶段 5 小节）。**
 
 ---
 
@@ -1333,3 +1333,60 @@ requestedSystems.length ? requestedSystems : connectorCatalog.filter(item => ite
 - **5a-4 端到端与收尾**：ADR-027 入库；全链回归见下。
 
 **验收（2026-10-05 本机实测）**：新增 `backend/test/mock-onboarding-document.test.js` **6/6**（DOCX / XLSX / PDF 正例登记与取证披露、原文件 base64 不入库；字典 / 样本文档形态、图片 / 音频、双通道输入、扫描 PDF、隐藏注入、超 64KiB 提取文本、超 2000 行工作表反例）；新增 `backend/test/semantic-schema-discovery-document.test.js` **7/7**（XLSX / DOCX 字典候选与 CSV 同构、登记文本交接路径、PDF 披露、无表头披露、稀疏列对齐、隔离材料不进候选）；回归 `test:mock-onboarding` **75/75**、`test:semantic` **105/105**（原 98 + 新 7）、`test:mention` **7/7**、`test:attribution` **12/12**、multimodal（understanding + security-gateway）**19/19**、console 组件 **63/63**（含新增 2 例）、console 构建（vite）通过、lint 干净。**边界**：dictionary / samples 的 mock 强校验链（连接 / 样本 / 对齐）仍以 JSON 字典为准；文档形态字典只在候选路径生效；5b（图片 / 扫描页 / 音频）仍整份拒绝；真实模型评测不进 quality。
+
+---
+
+### 阶段 8：系统接入连接配置段（ADR-028）—— **进行中（2026-10-06，用户决策）**
+
+**触发点**：ADR-024 触发式复审第 1 条「若引入真实企业连接器，登记物料需扩展连接配置段（端点 / 凭据引用 / 协议）」被用户三点需求提前触发：① 系统登记时应可选附加文档型物料（数据字典 / 接口文档）；② 系统登记时必选填写心跳接口做连通性测试；③ 系统登记时要考虑授权方式（智脑侧如何访问到目标系统）。ADR-024 边界第 3 条「登记物料是业务描述性物料，不是连接配置」由本阶段兑现升级。
+
+**用户确认的三点决策**（2026-10-06）：
+1. 文档型物料选 **方案 A**：系统登记时附带文档（不沿用接入项目登记通道），文档跟着系统走、任何接入项目可复用。
+2. 授权方式选 **a + b 组合**：默认用户令牌透传（智脑不持有凭据、转发当前用户 SSO 令牌、服从「智脑不提权」），后台场景退到服务主体凭据（client_credentials，存 Key Center、声明 scope、写操作仍需用户审批）。
+3. 三点一起做，立 ADR-028 兑现 ADR-024 触发式复审第 1 条。
+
+**前置**：无视觉前置——本阶段是连接配置段，与 5a 文档解析能力正交；文档物料复用 5a 的 `inspectMultimodalInput` + `extractMultimodalEvidence` 安全闸门与提取文本持久化（原文件不落地）契约。
+
+**实施拆解五段**：
+
+- **8-0 取证（已完成）**：摸清 `registerTenantCustomSystem` / `validateRegistrationMaterials` / `probeSystemConnection` / `key-center-service.js` 凭据策略 / `SystemAccessWorkspace.vue` 登记 schema 渲染的现状与接入点。**关键事实**：探测完全读模拟数据源、无真实 HTTP 调用；Key Center 有 policies + activeLeases + auditEvents 但自定义系统无入口；前端按服务端 `registration.fields` schema 渲染、不复制第二份字段规则；登记物料当前 7 必填 + 3 可选，无文档/心跳/授权字段。
+
+- **8-1 后端登记物料扩展三段**：`SYSTEM_REGISTRATION_FIELDS` 新增三段——
+  - `attachmentDocuments`（可选，0–N 份，复用 5a 文档解析：提取文本 + 解析取证持久化、原文件不落地、只进理解上下文与 schema 发现候选、不进 mock 强校验链）；
+  - `heartbeat`（必填：`endpoint` URL、可选 `method`/`expectedStatus`/`expectedBody`/`timeoutMs`）——心跳只证明网络可达 + 服务应答，**不证明业务接口可用**，故接通仍保留「人工签字」闸；
+  - `auth`（必填：`scheme` 枚举 `user_token_passthrough` | `service_principal`；`credentialRef` kms:// 引用——方案 a 不填；`scope` 声明访问范围数组；`writeApprovalRequired` 默认 true）。
+  `validateRegistrationMaterials` 消费三段；`registerTenantCustomSystem` 落库；`customDefinitionView` 披露连接配置段。**边界**：凭据永不进登记物料，只存 `credentialRef`（Key Center 引用），与平台系统 `connector.credentialRef` 一致。
+
+- **8-2 探测升级 + Key Center 凭据解析**：
+  - `probeSystemConnection` 升级为双路径：① 配置了 `heartbeat` 的系统走真实 HTTP 探测（按 `auth.scheme` 取凭据、调 `heartbeat.endpoint`、断言 `expectedStatus` + `expectedBody`）；② 未配置心跳或探测失败的系统保留模拟场景为降级路径（`simulatedScope` 标注不变）。接通门禁升级：ADR-023「最近探测 verified」→「心跳满足 + 人工签字」（不放宽）。
+  - `key-center-service.js` 扩展：登记物料 `auth.credentialRef` → Key Center 凭据策略入口（按 connectorId=`custom-{code}` 保管、租约 TTL、审计）；用户令牌透传（a）路径不取凭据、转发当前会话令牌；服务主体凭据（b）路径取租约、按 scope 限制操作集。
+
+- **8-3 前端登记表单扩展**：`SystemAccessWorkspace.vue` 登记表单加三段渲染（按 schema 新增 `format`：`documentAttachments` 复用 5a 文件上传组件、`heartbeat` 多字段、`auth` scheme 下拉 + 凭据引用录入 + scope 多选 + 写操作审批开关）；接通门禁 UI 升级显示心跳探测结果与人工签字入口。
+
+- **8-4 端到端与收尾**：ADR-028 入库（连接配置段：文档 A + 心跳 + 授权 a+b）；全链回归 `test:registry` / `test:access` / `test:mock-onboarding` / `test:semantic` + `quality`；更新 PROJECT_STATUS、方案台账、memory；按 GITHUB_DELIVERY 提交推送。
+
+**验收（待执行）**：见各段台账。
+
+**边界（不得在界面或文档中弱化）**：
+- 心跳通过 ≠ 业务接口可用——接通仍保留人工签字闸（不放宽 ADR-023 第 3 条）；心跳只证明网络可达 + 服务应答符合预期契约。
+- 用户令牌透传（a）路径智脑不持有任何凭据，服从「智脑不提权」纪律；服务主体凭据（b）路径智脑获得服务身份权限，**必须声明 scope + 写操作仍需用户审批**，否则违反纪律。
+- 凭据永不进登记物料，只存 `credentialRef`（Key Center 引用）；登记物料是描述性 + 连接配置引用，不是凭据保险柜。
+- 文档型物料复用 5a 边界：原文件不落地、只进理解上下文与 schema 发现候选、不进 mock 强校验链。
+- 真实 HTTP 探测只在沙箱内验证（demo 环境）；生产验收需真实企业连接器阶段，本阶段不覆盖。
+
+**触发式复审**：
+- 若引入 OAuth 授权码（d）或 mTLS（e）授权方式，`auth.scheme` 枚举需扩展、Key Center 需支持对应凭据类型；本阶段只实现 a + b。
+- 若心跳契约需扩展（如定时探测、告警阈值），属独立增量；本阶段只做手动探测。
+- 若文档型物料需进入 mock 强校验链（dictionary/samples），5a 边界需复审；本阶段保持 5a 边界不变。
+
+---
+
+### 8-1 ~ 8-3 系统接入连接配置段—— **已完成（2026-10-06，[ADR-028](adr/ADR-028-system-onboarding-connection-config.md)）**
+
+三个决策点均按用户确认执行（文档物料方案 A、授权 a+b 组合、一起做）。
+
+- **8-1 后端登记物料扩展三段**：`SYSTEM_REGISTRATION_FIELDS` 新增 `attachmentDocuments`（可选 0–N 份，复用 5a 文档解析）、`heartbeat`（必填：endpoint + 可选 method/expectedStatus/expectedBody/timeoutMs）、`auth`（必填：scheme 枚举 + credentialRef + scope + writeApprovalRequired）；`validateRegistrationMaterials` 消费三段（URL/方法/状态码/超时/scheme/credentialRef/scope 全套校验）；`registerTenantCustomSystem` 落库三段 + service_principal 自动注册 Key Center 凭据策略（`registerCustomSystemCredentialPolicy`，按租户隔离、版本递增）；`customDefinitionView` 披露 heartbeat/auth/attachmentDocuments。**凭据永不进登记物料，只存 credentialRef（kms:// 引用）**。
+- **8-2 探测升级 + 凭据解析**：新增 `executeHeartbeatProbe`（可注入 fetcher + credentialResolver，按 auth.scheme 取凭据：user_token_passthrough 转发 X-On-Behalf-Of、service_principal 从 Key Center 取 opaque Bearer token）；`probeSystemConnection` 双路径——自定义系统有 heartbeat 优先走真实 HTTP 探测，心跳失败 + 有 mockScenarioId 降级到模拟场景（`probeKind: 'heartbeat_fallback_to_scenario'` + `heartbeatIssue`），无 mockScenarioId 心跳失败即 failed；平台系统仍走模拟数据源。新增 `heartbeat-credential-resolver.js`（service_principal 路径读 Key Center 凭据策略，返回 opaque handle，标注 `source: 'tenant_registration'`，不暴露凭据明文）。接通门禁不放宽（reason 必填 = 人工签字语义）。
+- **8-3 前端登记表单扩展**：`SystemAccessWorkspace.vue` 登记表单按 schema 新增 format 渲染——`heartbeat`（endpoint/method/expectedStatus/expectedBody/timeoutMs 多字段）、`auth`（scheme 下拉 + 条件渲染 service_principal 的 credentialRef/scope + 写操作审批开关）、`documentAttachments`（文件上传 + 文档清单 + 移除）；`registrationAuthSchemes` 由服务端 schema 下发（前端不本地硬编码）；接通门禁文案升级为「心跳 verified」；`readRegistrationDocuments` 分块 base64 避免 4MB 爆栈。
+
+**验收（2026-10-06 本机实测）**：新增 `backend/test/system-registry.test.js` 7 用例（8→**15**）、`backend/test/system-access-heartbeat.test.js` **11** 用例（新增）、`workspace-layout.test.js` 8→**9**；回归 `test:access` **24/24**（13 原有 + 11 新心跳）、`test:registry` **15/15**、`test:mock-onboarding` **75/75**、`test:semantic` **105/105**、console **63/63** + 构建（vite 2.39s）、lint 干净。**边界**：真实 HTTP 探测只在沙箱内验证；Key Center 凭据保管最小化（不完整实现 lease 签发）；a+b 之外的授权方式属触发式复审；文档物料复用 5a 边界不进 mock 强校验链。

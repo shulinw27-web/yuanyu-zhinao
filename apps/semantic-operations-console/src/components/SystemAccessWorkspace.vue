@@ -286,10 +286,18 @@ const registrationSchema = computed(() => overview.value?.registration || null);
 const registrationFields = computed(() => registrationSchema.value?.fields || []);
 const registrationDataDomains = computed(() => registrationSchema.value?.dataDomains || []);
 const registrationScenarios = computed(() => registrationSchema.value?.mockScenarios || []);
+const registrationAuthSchemes = computed(() => registrationSchema.value?.authSchemes || []);
 const isLongText = (key) => key === 'description' || key === 'accessIntention';
 
 function openRegistration() {
-  registrationForm.value = { name: '', domain: '', description: '', keyEntities: '', dataDomains: [], accessIntention: '', businessOwner: '', code: '', vendor: '', mockScenarioId: '' };
+  registrationForm.value = {
+    name: '', domain: '', description: '', keyEntities: '', dataDomains: [],
+    accessIntention: '', businessOwner: '', code: '', vendor: '', mockScenarioId: '',
+    // 连接配置段（ADR-028）
+    heartbeat: { endpoint: '', method: 'GET', expectedStatus: 200, expectedBody: '', timeoutMs: 5000 },
+    auth: { scheme: 'user_token_passthrough', credentialRef: '', scope: [], writeApprovalRequired: true },
+    attachmentDocuments: []
+  };
   registrationIssues.value = [];
   registrationMessage.value = '';
   registrationOpen.value = true;
@@ -301,15 +309,63 @@ function toggleRegistrationDomain(domainId) {
   if (index >= 0) list.splice(index, 1); else list.push(domainId);
 }
 
+// 读取登记时附加的文档物料（ADR-028）：只读成 dataUrl 存入 form，
+// 提交时随 payload 发给后端走 5a 安全闸门（提取文本+取证持久化、原文件不落地）。
+async function readRegistrationDocuments(event) {
+  const files = Array.from(event.target?.files || []);
+  if (event.target) event.target.value = '';
+  if (!files.length) return;
+  for (const file of files) {
+    if (file.size > 4 * 1024 * 1024) { registrationMessage.value = `文档 ${file.name} 超过 4MB 附件侧上限。`; continue; }
+    const buffer = await file.arrayBuffer();
+    // 分块 base64 避免 4MB 直接 String.fromCharCode 爆栈
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    const chunk = 8192;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    const base64 = btoa(binary);
+    registrationForm.value.attachmentDocuments.push({
+      name: file.name,
+      mimeType: file.type || 'application/octet-stream',
+      dataUrl: `data:${file.type || 'application/octet-stream'};base64,${base64}`
+    });
+  }
+}
+
+const heartbeatReady = computed(() => {
+  const hb = registrationForm.value?.heartbeat;
+  return Boolean(hb && String(hb.endpoint || '').trim());
+});
+
+const authReady = computed(() => {
+  const auth = registrationForm.value?.auth;
+  if (!auth?.scheme) return false;
+  const scheme = registrationAuthSchemes.value.find((option) => option.id === auth.scheme);
+  if (scheme?.requiresCredentialRef && !String(auth.credentialRef || '').trim()) return false;
+  if (scheme?.requiresCredentialRef && !(Array.isArray(auth.scope) ? auth.scope : []).length) return false;
+  return true;
+});
+
 function precheckRegistration() {
   const issues = [];
   const form = registrationForm.value || {};
   for (const field of registrationFields.value) {
     if (!field.required) continue;
     const value = form[field.key];
-    const missing = field.format === 'dataDomains' || field.format === 'list'
-      ? !(Array.isArray(value) ? value : String(value || '').split(/[、,，;；]/u)).some((item) => String(item || '').trim())
-      : !String(value ?? '').trim();
+    let missing;
+    if (field.format === 'dataDomains' || field.format === 'list') {
+      missing = !(Array.isArray(value) ? value : String(value || '').split(/[、,，;；]/u)).some((item) => String(item || '').trim());
+    } else if (field.format === 'heartbeat') {
+      missing = !heartbeatReady.value;
+    } else if (field.format === 'auth') {
+      missing = !authReady.value;
+    } else if (field.format === 'documentAttachments') {
+      missing = false; // 文档物料可选
+    } else {
+      missing = !String(value ?? '').trim();
+    }
     if (missing) issues.push({ field: field.key, message: `${field.label}为必填项：${field.help}` });
   }
   return issues;
@@ -339,7 +395,24 @@ async function submitRegistration() {
       businessOwner: form.businessOwner.trim(),
       ...(form.code.trim() ? { code: form.code.trim().toUpperCase() } : {}),
       ...(form.vendor.trim() ? { vendor: form.vendor.trim() } : {}),
-      ...(form.mockScenarioId ? { mockScenarioId: form.mockScenarioId } : {})
+      ...(form.mockScenarioId ? { mockScenarioId: form.mockScenarioId } : {}),
+      // 连接配置段（ADR-028）
+      heartbeat: {
+        endpoint: form.heartbeat.endpoint.trim(),
+        method: form.heartbeat.method || 'GET',
+        expectedStatus: Number(form.heartbeat.expectedStatus) || 200,
+        ...(form.heartbeat.expectedBody?.trim() ? { expectedBody: form.heartbeat.expectedBody.trim() } : {}),
+        timeoutMs: Number(form.heartbeat.timeoutMs) || 5000
+      },
+      auth: {
+        scheme: form.auth.scheme,
+        ...(form.auth.scheme === 'service_principal' ? {
+          credentialRef: form.auth.credentialRef.trim(),
+          scope: [...(form.auth.scope || [])]
+        } : {}),
+        writeApprovalRequired: form.auth.writeApprovalRequired !== false
+      },
+      ...(form.attachmentDocuments?.length ? { attachmentDocuments: form.attachmentDocuments } : {})
     };
     const result = await props.client.registerSystemOnboarding(payload);
     if (disposed || generation !== overviewGeneration) return;
@@ -414,13 +487,42 @@ onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; detailGenerati
                 <option v-for="scenario in registrationScenarios" :key="scenario.id" :value="scenario.id">{{ scenario.label }} — {{ scenario.description }}</option>
               </select>
             </label>
+            <fieldset v-else-if="field.format === 'heartbeat'" class="wide sa-heartbeat" data-testid="register-field-heartbeat">
+              <legend>{{ field.label }}<em> *必填</em></legend>
+              <p class="sa-help">{{ field.help }}</p>
+              <label class="sa-hb-endpoint">心跳 URL<input v-model="registrationForm.heartbeat.endpoint" data-testid="register-heartbeat-endpoint" placeholder="https://api.example.com/health" /></label>
+              <label class="sa-hb-method">方法<select v-model="registrationForm.heartbeat.method" data-testid="register-heartbeat-method"><option>GET</option><option>POST</option><option>HEAD</option></select></label>
+              <label class="sa-hb-status">预期状态码<input type="number" v-model.number="registrationForm.heartbeat.expectedStatus" data-testid="register-heartbeat-status" min="100" max="599" /></label>
+              <label class="sa-hb-timeout">超时(ms)<input type="number" v-model.number="registrationForm.heartbeat.timeoutMs" data-testid="register-heartbeat-timeout" min="500" max="30000" step="500" /></label>
+              <label class="sa-hb-body wide">预期返回体（可选，子串匹配）<input v-model="registrationForm.heartbeat.expectedBody" data-testid="register-heartbeat-body" placeholder='"status":"ok"' /></label>
+            </fieldset>
+            <fieldset v-else-if="field.format === 'auth'" class="wide sa-auth" data-testid="register-field-auth">
+              <legend>{{ field.label }}<em> *必填</em></legend>
+              <p class="sa-help">{{ field.help }}</p>
+              <label class="sa-auth-scheme">授权方式<select v-model="registrationForm.auth.scheme" data-testid="register-auth-scheme">
+                <option v-for="option in registrationAuthSchemes" :key="option.id" :value="option.id">{{ option.label }} — {{ option.description }}</option>
+              </select></label>
+              <template v-if="registrationForm.auth.scheme === 'service_principal'">
+                <label class="sa-auth-cred wide">凭据引用（Key Center kms://）<input v-model="registrationForm.auth.credentialRef" data-testid="register-auth-credentialRef" placeholder="kms://integration/your-system-sp" /></label>
+                <label class="sa-auth-scope wide">访问范围 scope（逗号分隔）<input :value="registrationForm.auth.scope.join(', ')" data-testid="register-auth-scope" placeholder="read:supplier, read:contract" @input="registrationForm.auth.scope = String($event.target.value).split(/[,\s]+/u).map(s => s.trim()).filter(Boolean)" /></label>
+              </template>
+              <label class="sa-auth-write wide"><input type="checkbox" v-model="registrationForm.auth.writeApprovalRequired" data-testid="register-auth-writeApproval" />写操作仍需用户审批（推荐开启，服从「智脑不提权」）</label>
+            </fieldset>
+            <label v-else-if="field.format === 'documentAttachments'" class="wide sa-docs" data-testid="register-field-attachmentDocuments">
+              {{ field.label }}
+              <p class="sa-help">{{ field.help }}</p>
+              <input type="file" data-testid="register-docs-file" accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple @change="readRegistrationDocuments" />
+              <ul v-if="registrationForm.attachmentDocuments?.length" class="sa-doc-list">
+                <li v-for="(doc, index) in registrationForm.attachmentDocuments" :key="index"><span>{{ doc.name || doc.mimeType }}</span><button type="button" @click="registrationForm.attachmentDocuments.splice(index, 1)">移除</button></li>
+              </ul>
+            </label>
           </template>
         </div>
         <p v-for="issue in registrationIssues" :key="`${issue.field}-${issue.message}`" class="sa-help sa-blocked-inline">{{ issue.message }}</p>
         <p v-if="registrationMessage" class="sa-notice" role="status" data-testid="registration-message">{{ registrationMessage }}</p>
         <div class="sa-lifecycle-actions">
           <button type="button" class="sa-primary" data-testid="register-submit" :disabled="registering" @click="submitRegistration">{{ registering ? '正在登记…' : '提交登记（进入「已登记」）' }}</button>
-          <span class="sa-help">提交后生命周期为「已登记」；接通仍需通过连通性测试（verified），门禁在服务端强制。</span>
+          <span class="sa-help">提交后生命周期为「已登记」；接通仍需通过连通性测试（心跳 verified），门禁在服务端强制。</span>
         </div>
       </section>
 

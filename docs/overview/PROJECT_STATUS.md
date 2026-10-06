@@ -1,5 +1,12 @@
 # 当前项目状态
 
+2026-10-06 **阶段 8：系统接入连接配置段（[ADR-028](../architecture/adr/ADR-028-system-onboarding-connection-config.md)）**——用户三点需求（文档型物料 / 心跳接口 / 授权方式）触发 ADR-024 复审条件 1，登记物料从「业务描述性」扩展到「连接配置段」：
+
+- **8-1 后端登记物料扩展三段**：`SYSTEM_REGISTRATION_FIELDS` 新增 `attachmentDocuments`（可选，复用 5a 文档解析）、`heartbeat`（必填：endpoint + 可选 method/expectedStatus/expectedBody/timeoutMs）、`auth`（必填：scheme 枚举 `user_token_passthrough` | `service_principal` + credentialRef + scope + writeApprovalRequired）；`validateRegistrationMaterials` 全套校验；`registerTenantCustomSystem` 落库 + service_principal 自动注册 Key Center 凭据策略（按租户隔离、版本递增）。**凭据永不进登记物料，只存 credentialRef（kms:// 引用）**。
+- **8-2 探测升级 + 凭据解析**：`executeHeartbeatProbe`（可注入 fetcher + credentialResolver）按 auth.scheme 取凭据——user_token_passthrough 转发 X-On-Behalf-Of（智脑不持有凭据）、service_principal 从 Key Center 取 opaque Bearer token；`probeSystemConnection` 双路径（心跳优先、失败+有 mockScenarioId 降级到模拟场景、平台系统仍走模拟数据源）；新增 `heartbeat-credential-resolver.js`。**接通门禁不放宽**（reason 必填 = 人工签字语义）。
+- **8-3 前端**：`SystemAccessWorkspace.vue` 登记表单按 schema 新增 format 渲染（heartbeat 多字段 / auth scheme 下拉 + 条件渲染 credentialRef/scope / documentAttachments 文件上传）；`registrationAuthSchemes` 服务端下发；接通门禁文案升级「心跳 verified」。
+- **验收（本机实测）**：新增 `system-registry.test.js` 7 用例（8→**15**）、`system-access-heartbeat.test.js` **11** 用例、`workspace-layout.test.js` 8→**9**；回归 `test:access` **24/24**、`test:registry` **15/15**、`test:mock-onboarding` **75/75**、`test:semantic` **105/105**、console **63/63** + 构建（vite 2.39s）、lint 干净。**边界**：真实 HTTP 探测只在沙箱内验证；Key Center 凭据保管最小化（不完整实现 lease 签发）；a+b 之外授权方式属触发式复审；文档物料复用 5a 边界不进 mock 强校验链。
+
 2026-10-05（第二段）**阶段 5a：文档类材料接入完成（[ADR-027](../architecture/adr/ADR-027-document-material-registration.md)）**——按当日早间的划界与四决策点执行，5a-0 探针 → 5a-1 登记通道 → 5a-2 结构化候选 → 5a-3 前端 → 5a-4 收尾全链完成：
 
 - **5a-1 登记通道接受文档形态**：`saveMockOnboardingMaterial` 扩展接受 `{attachment: {mimeType, dataUrl}}`（与 `text` 二选一），走对话面同一套安全闸门（magic bytes / PDF 活动内容拒绝 / 内容扫描 / DLP / 提示注入隔离）；**只持久化提取文本 + 解析取证 `source`（mimeType / 页数 / 扫描状态 / 脱敏信号），原文件不落地**；`publicProject` 披露 `source`，handoff 透传 `source.mimeType`；图片 / 音频 / 视频、字典 / 样本文档形态给专用错误码 `MOCK_ONBOARDING_MATERIAL_FORM_UNSUPPORTED` 整份拒绝；提取超 64KiB 整份拒绝不静默截断。**连带修复**：多模态报告新增 `parserTruncated`（此前解析器截断与模型上下文预算截断混为一谈）。

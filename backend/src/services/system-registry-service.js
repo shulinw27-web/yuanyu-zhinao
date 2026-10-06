@@ -19,12 +19,13 @@ import {
   systemDefinitions,
   ROLE_DATA_DOMAINS, ROLE_RECORD_SYSTEMS,
   SYSTEM_CONNECTION_STATES, SYSTEM_CONNECTION_TRANSITIONS, ONBOARDING_STATE_SEED,
-  DATA_DOMAIN_OPTIONS, SYSTEM_REGISTRATION_FIELDS,
+  DATA_DOMAIN_OPTIONS, SYSTEM_REGISTRATION_FIELDS, AUTH_SCHEME_OPTIONS,
   getDemoConnectedSystems, getConnectionTargets
 } from '../data/system-catalog.js';
 import { mockOnboardingScenarios } from '../data/mock-onboarding-catalog.js';
 import { readState, mutateState, mutateStates } from '../repositories/runtime-state-repository.js';
 import { semanticTenantStateKey, currentSemanticTenant } from './semantic-tenant-context.js';
+import { registerCustomSystemCredentialPolicy } from './key-center/key-center-service.js';
 
 const REGISTRY_NAMESPACE = 'system_registry_runtime';
 const CONNECTIONS_KEY = 'connections';
@@ -119,14 +120,20 @@ const readCustomSystems = () => readState(REGISTRY_NAMESPACE, semanticTenantStat
 
 const MOCK_SCENARIO_IDS = new Set(mockOnboardingScenarios.map((scenario) => scenario.id));
 const DATA_DOMAIN_IDS = new Set(DATA_DOMAIN_OPTIONS.map((option) => option.id));
+const AUTH_SCHEME_IDS = new Set(AUTH_SCHEME_OPTIONS.map((option) => option.id));
+const HEARTBEAT_METHODS = new Set(['GET', 'POST', 'HEAD']);
+const CREDENTIAL_REF_PATTERN = /^kms:\/\/[a-z0-9][a-z0-9._/-]*$/iu;
+const SCOPE_PATTERN = /^[a-z][a-z0-9_:]{0,63}$/iu;
+const URL_PATTERN = /^https?:\/\/[a-z0-9]([a-z0-9.\-_]*[a-z0-9])?(:\d{1,5})?(\/[^\s]*)?$/iu;
 
-/** 登记物料表（供接入总览透出给前端渲染表单）：字段 + 数据域选项 + 模拟场景选项。 */
+/** 登记物料表（供接入总览透出给前端渲染表单）：字段 + 数据域选项 + 模拟场景选项 + 授权方式选项。 */
 export function getSystemRegistrationSchema() {
   return {
-    policy: '接入清单不预设备任何待接入/未登记系统；登记需提交完整接入物料，使智脑能够理解系统名称、业务归类、定位、核心对象、授权边界、接入目的与责任人。系统码缺省自动生成且不得占用平台保留码。',
+    policy: '接入清单不预设备任何待接入/未登记系统；登记需提交完整接入物料（含心跳接口与授权方式），使智脑能够理解系统名称、业务归类、定位、核心对象、授权边界、接入目的、责任人，以及如何连通与如何访问。系统码缺省自动生成且不得占用平台保留码。凭据永不进登记物料，只存 credentialRef（Key Center 引用）。',
     fields: SYSTEM_REGISTRATION_FIELDS.map((field) => ({ ...field })),
     dataDomains: DATA_DOMAIN_OPTIONS.map((option) => ({ ...option })),
-    mockScenarios: mockOnboardingScenarios.map((scenario) => ({ id: scenario.id, label: scenario.label, description: scenario.description }))
+    mockScenarios: mockOnboardingScenarios.map((scenario) => ({ id: scenario.id, label: scenario.label, description: scenario.description })),
+    authSchemes: AUTH_SCHEME_OPTIONS.map((option) => ({ ...option }))
   };
 }
 
@@ -176,10 +183,106 @@ function validateRegistrationMaterials(materials) {
     issues.push({ field: 'mockScenarioId', message: `未知的模拟数据源场景：${mockScenarioId}。` });
   }
 
+  // ── 连接配置段（ADR-028）─────────────────────────────────────────────
+  // 文档型物料：可选 0–N 份，复用 5a 安全闸门契约（mimeType/dataUrl），登记服务只做结构与上限校验；
+  // 提取文本与解析取证由 5a 的 inspectMultimodalInput + extractMultimodalEvidence 在 8-2 落地时执行。
+  const attachmentDocuments = [];
+  if (materials?.attachmentDocuments !== undefined && materials?.attachmentDocuments !== null) {
+    const raw = Array.isArray(materials.attachmentDocuments) ? materials.attachmentDocuments : [materials.attachmentDocuments];
+    for (const doc of raw) {
+      if (!doc || typeof doc !== 'object') { issues.push({ field: 'attachmentDocuments', message: '附加文档每份必须是 { mimeType, dataUrl } 对象。' }); continue; }
+      const mimeType = asTrimmedString(doc.mimeType);
+      const dataUrl = asTrimmedString(doc.dataUrl);
+      if (!mimeType || !dataUrl) { issues.push({ field: 'attachmentDocuments', message: '附加文档每份必须含 mimeType 与 dataUrl。' }); continue; }
+      if (!dataUrl.startsWith('data:') || !dataUrl.includes(';base64,')) { issues.push({ field: 'attachmentDocuments', message: '附加文档 dataUrl 必须是 data:...;base64,... 形式。' }); continue; }
+      attachmentDocuments.push({ mimeType, dataUrl });
+    }
+    if (attachmentDocuments.length > 8) issues.push({ field: 'attachmentDocuments', message: '附加文档最多 8 份。' });
+  }
+
+  // 心跳接口：必填 endpoint，可选 method/expectedStatus/expectedBody/timeoutMs
+  const heartbeatRaw = materials?.heartbeat;
+  const heartbeat = {};
+  if (!heartbeatRaw || typeof heartbeatRaw !== 'object') {
+    issues.push({ field: 'heartbeat', message: '心跳接口为必填项：至少提供 endpoint。' });
+  } else {
+    const endpoint = asTrimmedString(heartbeatRaw.endpoint);
+    if (!endpoint) {
+      issues.push({ field: 'heartbeat', message: '心跳接口 endpoint 为必填项（http/https URL）。' });
+    } else if (!URL_PATTERN.test(endpoint)) {
+      issues.push({ field: 'heartbeat', message: '心跳接口 endpoint 必须是合法的 http/https URL。' });
+    } else {
+      heartbeat.endpoint = endpoint;
+    }
+    const method = String(heartbeatRaw.method || 'GET').toUpperCase().trim();
+    if (method !== 'GET' && !HEARTBEAT_METHODS.has(method)) {
+      issues.push({ field: 'heartbeat', message: `心跳接口 method 只支持 GET / POST / HEAD，当前：${method}。` });
+    } else {
+      heartbeat.method = method;
+    }
+    const expectedStatus = Number.isSafeInteger(heartbeatRaw.expectedStatus) ? heartbeatRaw.expectedStatus : 200;
+    if (expectedStatus < 100 || expectedStatus > 599) {
+      issues.push({ field: 'heartbeat', message: `心跳接口 expectedStatus 必须在 100–599 之间，当前：${expectedStatus}。` });
+    } else {
+      heartbeat.expectedStatus = expectedStatus;
+    }
+    if (heartbeatRaw.expectedBody !== undefined && heartbeatRaw.expectedBody !== null) {
+      const body = asTrimmedString(heartbeatRaw.expectedBody);
+      if (body) heartbeat.expectedBody = body;
+    }
+    const timeoutMs = Number.isSafeInteger(heartbeatRaw.timeoutMs) ? heartbeatRaw.timeoutMs : 5000;
+    if (timeoutMs < 500 || timeoutMs > 30000) {
+      issues.push({ field: 'heartbeat', message: `心跳接口 timeoutMs 必须在 500–30000ms 之间，当前：${timeoutMs}。` });
+    } else {
+      heartbeat.timeoutMs = timeoutMs;
+    }
+  }
+
+  // 授权方式：必填 scheme（枚举），service_principal 必填 credentialRef + scope；
+  // user_token_passthrough 不需要 credentialRef（智脑不持有凭据）
+  const authRaw = materials?.auth;
+  const auth = {};
+  if (!authRaw || typeof authRaw !== 'object') {
+    issues.push({ field: 'auth', message: '授权方式为必填项：至少提供 scheme。' });
+  } else {
+    const scheme = asTrimmedString(authRaw.scheme);
+    if (!scheme) {
+      issues.push({ field: 'auth', message: '授权方式 scheme 为必填项（user_token_passthrough / service_principal）。' });
+    } else if (!AUTH_SCHEME_IDS.has(scheme)) {
+      issues.push({ field: 'auth', message: `未知的授权方式：${scheme}（只支持 user_token_passthrough / service_principal）。` });
+    } else {
+      auth.scheme = scheme;
+    }
+    const credentialRef = asTrimmedString(authRaw.credentialRef);
+    if (scheme === 'service_principal') {
+      if (!credentialRef) {
+        issues.push({ field: 'auth', message: '服务主体凭据方式必须提供 credentialRef（kms:// 引用，Key Center 保管）。' });
+      } else if (!CREDENTIAL_REF_PATTERN.test(credentialRef)) {
+        issues.push({ field: 'auth', message: 'credentialRef 必须是 kms:// 开头的 Key Center 引用。' });
+      } else {
+        auth.credentialRef = credentialRef;
+      }
+      const scope = Array.isArray(authRaw.scope) ? authRaw.scope.map(asTrimmedString).filter(Boolean) : [];
+      if (!scope.length) {
+        issues.push({ field: 'auth', message: '服务主体凭据方式必须声明 scope（至少 1 个，如 read:inventory）。' });
+      } else {
+        for (const item of scope) if (!SCOPE_PATTERN.test(item)) issues.push({ field: 'auth', message: `scope 项「${item}」格式不合法（须以字母开头、字母数字下划线冒号、≤64 字符）。` });
+        auth.scope = [...new Set(scope)];
+      }
+    } else if (credentialRef) {
+      issues.push({ field: 'auth', message: '用户令牌透传方式不需要 credentialRef（智脑不持有凭据）；如需后台执行请改用 service_principal。' });
+    }
+    auth.writeApprovalRequired = authRaw.writeApprovalRequired === false ? false : true;
+  }
+
   if (issues.length) {
     return { error: `接入物料校验未通过（${issues.length} 处）：${issues.map((issue) => issue.message).join(' ')}`, code: 'SYSTEM_MATERIALS_INVALID', issues };
   }
-  return { name, domain, description, accessIntention, businessOwner, vendor: vendor || null, keyEntities, dataDomains, requestedCode: requestedCode || null, mockScenarioId: mockScenarioId || null };
+  return {
+    name, domain, description, accessIntention, businessOwner, vendor: vendor || null,
+    keyEntities, dataDomains, requestedCode: requestedCode || null, mockScenarioId: mockScenarioId || null,
+    attachmentDocuments, heartbeat, auth
+  };
 }
 
 /** 从系统名称派生候选系统码：取名称中的 ASCII 字母数字段，防撞由调用方完成。 */
@@ -205,7 +308,7 @@ export function registerTenantCustomSystem({ materials, actor } = {}) {
   const normalized = validateRegistrationMaterials(materials);
   if (normalized.error) return normalized;
 
-  return mutateStates([
+  const result = mutateStates([
     { name: 'customSystems', namespace: REGISTRY_NAMESPACE, key: semanticTenantStateKey(CUSTOM_SYSTEMS_KEY), initialValue: initialCustomSystems },
     { name: 'connections', namespace: REGISTRY_NAMESPACE, key: semanticTenantStateKey(CONNECTIONS_KEY), initialValue: seedConnections }
   ], (values) => {
@@ -239,13 +342,29 @@ export function registerTenantCustomSystem({ materials, actor } = {}) {
         businessOwner: normalized.businessOwner,
         vendor: normalized.vendor,
         mockScenarioId: normalized.mockScenarioId,
-        codeProvidedByTenant: Boolean(normalized.requestedCode)
+        codeProvidedByTenant: Boolean(normalized.requestedCode),
+        // 连接配置段（ADR-028）：文档物料只存提取文本+取证（8-2 落地）、心跳契约、授权方式
+        attachmentDocuments: normalized.attachmentDocuments,
+        heartbeat: normalized.heartbeat,
+        auth: normalized.auth
       }
     };
     values.customSystems[code] = record;
     values.connections[code] = { code, state: 'registered', reason: '登记接入：租户提交接入物料', updatedAt: registeredAt, updatedBy: operator };
     return { values, result: { code, id: record.id, name: record.name, state: 'registered', registeredAt, registeredBy: operator } };
   });
+
+  // 登记成功后注册凭据策略（ADR-028）：service_principal 方式需在 Key Center 保管凭据引用；
+  // user_token_passthrough 方式不持有凭据，跳过。凭据明文不入库，只存 secretRef（kms:// 引用）。
+  if (result.code && !result.error && normalized.auth?.scheme === 'service_principal') {
+    registerCustomSystemCredentialPolicy({
+      connectorId: result.id,
+      secretRef: normalized.auth.credentialRef,
+      scope: normalized.auth.scope,
+      classification: `${normalized.domain} 受限（租户登记）`
+    });
+  }
+  return result;
 }
 
 /** 自定义系统的统一类型视图（与平台目录定义同构，供接入视图组装）。 */
@@ -257,7 +376,12 @@ function customDefinitionView(record) {
     name: record.name,
     domain: materials.domain,
     aliases: [],
+    // 连接配置段（ADR-028）：8-1 阶段只在 custom 里披露 heartbeat 与 auth；
+    // connector 组装与探测升级在 8-2 落地（避免破坏现有 probeSystemConnection 行为）
     connector: null,
+    heartbeat: materials.heartbeat || null,
+    auth: materials.auth || null,
+    attachmentDocuments: materials.attachmentDocuments || [],
     onboardingStatus: 'registered_by_tenant',
     worldObjectTypes: [...materials.keyEntities],
     demoConnection: null,

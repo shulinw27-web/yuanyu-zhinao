@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getKmsAdapterStatus, issueOpaqueCredential } from './kms-adapter.js';
 import { readState, writeState } from '../../repositories/runtime-state-repository.js';
+import { semanticTenantStateKey } from '../semantic-tenant-context.js';
 
 const initialPolicies = [
   { id: 'kc-erp-broker', name: 'ERP 采购草稿凭据', connectorId: 'mcp-erp', operations: ['create_procurement_draft', 'approve_procurement'], secretRef: 'kms://integration/erp-read-write', keyRef: 'hsm://health-prod/keys/erp-broker', classification: '供应链受限', maxTtlSeconds: 120, rotationDays: 30, version: 3, status: 'active' },
@@ -102,6 +103,49 @@ const publicLease = (lease) => ({
 });
 
 const findPolicy = ({ connectorId, operation }) => policies.find((policy) => policy.connectorId === connectorId && policy.operations.includes(operation));
+
+// ── 自定义系统凭据策略（ADR-028）──────────────────────────────────────────
+// 与预设的 8 条平台系统凭据策略分开存储：按租户隔离（state key 用 semanticTenantStateKey），
+// 由系统登记时 auth.credentialRef 触发注册（registerCustomSystemCredentialPolicy）。
+// 凭据明文永不入库，只存 secretRef（kms:// 引用）+ scope + classification。
+const CUSTOM_CREDENTIALS_KEY = 'custom_credentials';
+const readCustomCredentials = () => readState('key_center', semanticTenantStateKey(CUSTOM_CREDENTIALS_KEY), {});
+
+/**
+ * 注册自定义系统凭据策略（登记时由 system-registry-service 调用，按 auth.credentialRef）。
+ * 凭据明文不入库；secretRef 是 kms:// 引用，由管理员在 Key Center 侧真正保管。
+ */
+export function registerCustomSystemCredentialPolicy({ connectorId, secretRef, scope = [], classification = '租户登记受限' }) {
+  if (!connectorId || !secretRef) return { error: 'connectorId 与 secretRef 均为必填。' };
+  const store = readCustomCredentials();
+  const existing = store[connectorId];
+  const policy = {
+    id: existing?.id || `kc-custom-${randomUUID()}`,
+    name: `自定义系统凭据（${connectorId}）`,
+    connectorId,
+    operations: scope.length ? [...scope] : ['heartbeat'],
+    secretRef,
+    keyRef: null,
+    classification,
+    maxTtlSeconds: 180,
+    rotationDays: 45,
+    version: existing ? existing.version + 1 : 1,
+    status: 'active',
+    registeredAt: existing?.registeredAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  store[connectorId] = policy;
+  writeState('key_center', semanticTenantStateKey(CUSTOM_CREDENTIALS_KEY), store);
+  return { policy: { ...policy, materialExposed: false } };
+}
+
+/**
+ * 读取自定义系统凭据策略（心跳探测时由 heartbeat-credential-resolver 调用）。
+ */
+export function getCustomSystemCredentialPolicy(connectorId) {
+  const store = readCustomCredentials();
+  return store[connectorId] || null;
+}
 
 export async function requestKeyLease({ connectorId, operation, purpose, role, authorization, taskId, ttlSeconds }) {
   cleanupExpiredLeases();

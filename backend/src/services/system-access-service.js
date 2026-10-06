@@ -35,10 +35,17 @@ import {
 } from './mock-onboarding-source-service.js';
 import { readState, mutateState } from '../repositories/runtime-state-repository.js';
 import { semanticTenantStateKey, currentSemanticTenant } from './semantic-tenant-context.js';
+import { resolveHeartbeatCredential } from './heartbeat-credential-resolver.js';
 
 const NAMESPACE = 'system_access_runtime';
 const PROBES_KEY = 'probes';
 const MAX_PROBE_HISTORY = 24;
+
+// 心跳探测的默认 fetcher：生产用 globalThis.fetch；测试通过 executeHeartbeatProbe 的
+// fetcher 参数注入 mock。这层间接让心跳探测可测、不在测试里发真实网络请求。
+const defaultFetcher = (typeof globalThis.fetch === 'function')
+  ? (url, options) => globalThis.fetch(url, options)
+  : null;
 
 export const SYSTEM_ACCESS_BOUNDARY = '系统接入视图：接入清单＝6 个 Mock 演示接入样例＋租户自行登记的系统，不预设备待接入/未登记系统；接入状态与生命周期按租户隔离；连通性探测读取内置合成模拟数据源，不连接任何真实企业系统；接入配置样例与字段映射来自受控种子快照，仍需人工复核后才可用于生产。';
 
@@ -418,14 +425,84 @@ export function transitionTenantSystemConnection({ code, to, reason, identitySco
 }
 
 /**
+ * 心跳探测（ADR-028）：对自定义系统配置的真实心跳 URL 做一次 HTTP 调用，
+ * 断言状态码与返回体。心跳通过只证明网络可达 + 服务应答，不证明业务接口可用——
+ * 接通仍保留 reason 必填（人工签字语义，ADR-023 第 4 条）。
+ *
+ * 授权方式（auth.scheme）：
+ *   * user_token_passthrough —— 智脑不持有凭据，转发当前用户身份（X-On-Behalf-Of）；
+ *     服从「智脑不提权」——目标系统应自己校验用户令牌权限。
+ *   * service_principal —— 从 heartbeat-credential-resolver 取凭据，请求头带 Authorization。
+ *
+ * 可注入 fetcher 与 credentialResolver：生产用默认（globalThis.fetch + Key Center 解析），
+ * 测试注入 mock。这层间接让心跳探测可测、不在测试里发真实网络请求。
+ */
+export async function executeHeartbeatProbe(definition, {
+  identityScope,
+  fetcher = defaultFetcher,
+  credentialResolver = resolveHeartbeatCredential
+} = {}) {
+  const heartbeat = definition.heartbeat;
+  if (!heartbeat?.endpoint) {
+    return { status: 'failed', issue: { code: 'HEARTBEAT_NOT_CONFIGURED', message: '心跳接口未配置 endpoint，无法执行真实探测。' } };
+  }
+  if (!fetcher) {
+    return { status: 'failed', issue: { code: 'HEARTBEAT_FETCHER_UNAVAILABLE', message: '运行时无 fetch 实现，心跳探测不可用。' } };
+  }
+  const auth = definition.auth || { scheme: 'user_token_passthrough' };
+  const headers = { Accept: 'application/json, text/plain, */*' };
+  if (auth.scheme === 'service_principal') {
+    const credential = await credentialResolver({ credentialRef: auth.credentialRef, scope: auth.scope, identityScope, definition });
+    if (credential?.error) {
+      return { status: 'failed', issue: { code: 'HEARTBEAT_CREDENTIAL_UNRESOLVED', message: credential.error } };
+    }
+    if (credential?.authorizationHeader) headers.Authorization = credential.authorizationHeader;
+  } else if (identityScope?.subjectId) {
+    // 用户令牌透传：智脑不持有凭据，转发当前用户身份。目标系统与智脑共用 IdP 时，
+    // 目标系统应自己校验用户令牌权限——智脑不替它做权限决策。
+    headers['X-On-Behalf-Of'] = String(identityScope.subjectId);
+  }
+  const method = heartbeat.method || 'GET';
+  const timeoutMs = Math.max(500, Math.min(heartbeat.timeoutMs || 5000, 30000));
+  const controller = (typeof AbortController === 'function') ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  let response;
+  try {
+    response = await fetcher(heartbeat.endpoint, { method, headers, signal: controller?.signal });
+  } catch (error) {
+    if (timer) clearTimeout(timer);
+    const message = error?.name === 'AbortError' ? `心跳探测超时（${timeoutMs}ms）` : `心跳探测请求失败：${error?.message || String(error)}`;
+    return { status: 'failed', issue: { code: 'HEARTBEAT_TRANSPORT_FAILED', message } };
+  }
+  if (timer) clearTimeout(timer);
+  const expectedStatus = heartbeat.expectedStatus || 200;
+  if (response.status !== expectedStatus) {
+    return { status: 'failed', issue: { code: 'HEARTBEAT_STATUS_MISMATCH', message: `心跳返回 ${response.status}，预期 ${expectedStatus}。`, detail: { actual: response.status, expected: expectedStatus } } };
+  }
+  if (heartbeat.expectedBody) {
+    let bodyText;
+    try { bodyText = await response.text(); }
+    catch { bodyText = ''; }
+    if (!bodyText.includes(heartbeat.expectedBody)) {
+      return { status: 'failed', issue: { code: 'HEARTBEAT_BODY_MISMATCH', message: `心跳返回体不含预期内容「${heartbeat.expectedBody}」。`, detail: { snippet: bodyText.slice(0, 200) } } };
+    }
+  }
+  return { status: 'verified', issue: null };
+}
+
+/**
  * 连通性探测：对内置合成模拟 HTTP 数据源做一次真实的分页读取，并按场景字典校验结构。
  * 这是「真正接上」的行为——它会监听本地端口、发 HTTP 请求、校验响应契约与分页完整性；
  * 但它**不是**企业连接器验收，返回值与界面都必须标注为合成模拟。
  *
  * 平台演示系统：读取数据源中属于该系统的记录（按 row.system 过滤）。
  * 自定义系统：读取挂接的模拟场景**整场景**作为该系统的模拟数据面（simulatedScope 标注）。
+ *
+ * 心跳路径（ADR-028）：自定义系统若配置了 heartbeat，优先走真实 HTTP 心跳探测；
+ * 未配置心跳或探测失败时保留模拟场景为降级路径（simulatedScope 标注不变）。
+ * 平台系统仍走模拟数据源（无 heartbeat 字段）。
  */
-export async function probeSystemConnection({ code, faultMode = 'none', roleId, identityScope } = {}) {
+export async function probeSystemConnection({ code, faultMode = 'none', roleId, identityScope, fetcher, credentialResolver } = {}) {
   const normalized = String(code || '').toUpperCase();
   const { definition, platformKnown } = resolveSystemDefinition(normalized);
   if (!definition) {
@@ -436,6 +513,48 @@ export async function probeSystemConnection({ code, faultMode = 'none', roleId, 
   if (!mockOnboardingSourceFaults.includes(faultMode)) return { error: `不支持的响应模式：${faultMode}`, code: 'SYSTEM_PROBE_FAULT_UNKNOWN', status: 400 };
   const isCustom = definition.origin === 'tenant_custom';
   if (!isCustom && !definition.connector) return { error: `系统 ${definition.code} 尚未登记受控连接器，不能进行连通性探测。`, code: 'SYSTEM_CONNECTOR_NOT_REGISTERED', status: 409 };
+
+  // 心跳路径（ADR-028）：自定义系统配置了 heartbeat 时优先走真实 HTTP 探测。
+  // 心跳通过 → 返回 verified；心跳失败 + 挂接了模拟场景 → 降级到模拟场景路径（开发环境降级，
+  // 生产环境无模拟场景则直接 failed）。这保持既有「挂接场景的自定义系统可探测」行为不破。
+  let heartbeatFallback = null;
+  if (isCustom && definition.heartbeat?.endpoint) {
+    if (!isAuthorizedForRole(definition, roleId)) {
+      return { error: `当前运营身份未获 ${definition.code} 所属数据域授权，拒绝探测。`, code: 'SYSTEM_PROBE_FORBIDDEN', status: 403 };
+    }
+    const heartbeatResult = await executeHeartbeatProbe(definition, { identityScope, fetcher, credentialResolver });
+    if (heartbeatResult.status === 'verified') {
+      const tenantId = identityScope?.tenantId || currentSemanticTenant();
+      const checkedAt = new Date().toISOString();
+      const outcome = {
+        code: definition.code, status: 'verified', supported: true, faultMode, checkedAt,
+        probeKind: 'heartbeat', issue: null
+      };
+      mutateState(NAMESPACE, semanticTenantStateKey(PROBES_KEY), initialProbes, (probes) => {
+        const history = (probes[definition.code]?.history || []).slice(0, MAX_PROBE_HISTORY - 1);
+        probes[definition.code] = { ...outcome, tenantId, history: [outcome, ...history] };
+        return { value: probes, result: { code: definition.code } };
+      });
+      return outcome;
+    }
+    // 心跳失败：若挂接了模拟场景，降级到模拟场景路径（标注 heartbeat 失败原因）
+    if (!definition.custom.mockScenarioId) {
+      const tenantId = identityScope?.tenantId || currentSemanticTenant();
+      const checkedAt = new Date().toISOString();
+      const outcome = {
+        code: definition.code, status: 'failed', supported: true, faultMode, checkedAt,
+        probeKind: 'heartbeat', issue: heartbeatResult.issue
+      };
+      mutateState(NAMESPACE, semanticTenantStateKey(PROBES_KEY), initialProbes, (probes) => {
+        const history = (probes[definition.code]?.history || []).slice(0, MAX_PROBE_HISTORY - 1);
+        probes[definition.code] = { ...outcome, tenantId, history: [outcome, ...history] };
+        return { value: probes, result: { code: definition.code } };
+      });
+      return outcome;
+    }
+    heartbeatFallback = heartbeatResult.issue;
+  }
+
   if (isCustom && !definition.custom.mockScenarioId) {
     return { error: `自定义系统 ${definition.code} 尚未挂接模拟数据源场景，不能进行连通性探测；未挂接场景的系统无法取得 verified 结果，也就无法接通。`, code: 'SYSTEM_PROBE_DATASET_NOT_ATTACHED', status: 409 };
   }
@@ -461,6 +580,7 @@ export async function probeSystemConnection({ code, faultMode = 'none', roleId, 
       code: definition.code, status: drift.length ? 'schema_drift' : 'verified', supported: true, faultMode,
       checkedAt: new Date().toISOString(), scenarioId: scenario,
       ...(isCustom ? { simulatedScope: 'attached_scenario' } : {}),
+      ...(heartbeatFallback ? { probeKind: 'heartbeat_fallback_to_scenario', heartbeatIssue: heartbeatFallback } : {}),
       sourceKind: read.sourceKind, protocol: read.protocol,
       requests: read.requests, pageCount: read.pageCount,
       recordCount: records.length, readableRecords: read.records.length,

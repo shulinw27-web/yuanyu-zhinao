@@ -226,8 +226,25 @@ export const SYSTEM_REGISTRATION_FIELDS = Object.freeze([
   { key: 'businessOwner', label: '业务责任人', required: true, format: 'text', help: '该系统接入后的业务第一责任人（2–30 字）', constraints: { minLength: 2, maxLength: 30 } },
   { key: 'code', label: '系统码', required: false, format: 'code', help: '留空则按名称自动生成；不可占用平台目录保留码', constraints: { pattern: '^[A-Z][A-Z0-9_]{1,15}$' } },
   { key: 'vendor', label: '厂商 / 供应商', required: false, format: 'text', help: '系统供应方，便于后续连接器对接（不超过 40 字）', constraints: { maxLength: 40 } },
-  { key: 'mockScenarioId', label: '模拟数据源场景', required: false, format: 'mockScenario', help: '演示环境的连通性探测数据面；不挂接则无法探测，也就不能接通', constraints: {} }
+  { key: 'mockScenarioId', label: '模拟数据源场景', required: false, format: 'mockScenario', help: '演示环境的连通性探测数据面；不挂接则无法探测，也就不能接通', constraints: {} },
+  // ── 连接配置段（ADR-028，2026-10-06）──────────────────────────────────
+  // 触发 ADR-024 复审条件 1：登记物料从「业务描述性」扩展到「连接配置引用」。
+  // 凭据永不进登记物料，只存 credentialRef（Key Center 引用），与平台系统 connector.credentialRef 一致。
+  { key: 'attachmentDocuments', label: '附加文档（接口说明 / 数据字典）', required: false, format: 'documentAttachments', help: '可选 0–N 份 PDF / DOCX / XLSX 文档；只持久化提取文本与解析取证、原文件不落地；只进理解上下文与 schema 发现候选、不进 mock 强校验链（5a 边界不变）', constraints: { maxItems: 8 } },
+  { key: 'heartbeat', label: '心跳接口（连通性测试）', required: true, format: 'heartbeat', help: '目标系统提供的健康检查 URL；智脑按授权方式调用，断言预期状态码与返回体。心跳通过只证明网络可达 + 服务应答，不证明业务接口可用——接通仍需人工签字', constraints: {} },
+  { key: 'auth', label: '授权方式（智脑如何访问到）', required: true, format: 'auth', help: '默认用户令牌透传（智脑不持有凭据、转发当前用户 SSO 令牌）；后台场景退到服务主体凭据（Key Center 保管、声明 scope、写操作仍需用户审批）', constraints: {} }
 ]);
+
+// ── 授权方式选项（ADR-028）──────────────────────────────────────────────
+// a. user_token_passthrough —— 智脑不持有凭据，转发当前用户 SSO 令牌；服从「智脑不提权」纪律。
+// b. service_principal       —— 智脑持有服务主体凭据（client_credentials），可后台执行；
+//                               必须声明 scope + 写操作仍需用户审批。
+// 其余方式（OAuth 授权码 / mTLS / Token Exchange / API Key）属触发式复审，本阶段不实现。
+export const AUTH_SCHEME_OPTIONS = Object.freeze([
+  { id: 'user_token_passthrough', label: '用户令牌透传', description: '智脑不持有凭据，调用时转发当前用户 SSO 令牌；目标系统与智脑共用 IdP。服从「智脑不提权」——智脑能调用的，当前用户自己也能调用。', requiresCredentialRef: false },
+  { id: 'service_principal', label: '服务主体凭据', description: '智脑在目标系统注册为受信应用，凭据存 Key Center；与用户会话解耦，可后台执行。必须声明 scope + 写操作仍需用户审批。', requiresCredentialRef: true }
+]);
+
 
 // ── 角色可见性策略：两套并列声明 ────────────────────────────────────────────
 //

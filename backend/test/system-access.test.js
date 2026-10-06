@@ -40,6 +40,8 @@ const registrationMaterials = (overrides = {}) => ({
   accessIntention: '读取供应商资质与绩效数据，支撑采购风险分析与供应商画像。',
   businessOwner: '采购负责人',
   mockScenarioId: 'fulfillment',
+  heartbeat: { endpoint: 'https://api.example.com/health', method: 'GET', expectedStatus: 200, timeoutMs: 5000 },
+  auth: { scheme: 'user_token_passthrough', writeApprovalRequired: true },
   ...overrides
 });
 
@@ -64,11 +66,14 @@ test('总览：接入清单＝6 个 Mock 演示样例，不预设备任何待接
   assert.equal(overview.summary.pending, 0, '不得预设备待接入系统');
   assert.equal(overview.summary.notRegistered, 0, '不得预设备未登记系统');
   assert.equal(overview.summary.custom, 0);
-  // 登记物料 schema 必须随总览下发：七个必填项是让智脑明白「接入的是什么系统」的最小物料
+  // 登记物料 schema 必须随总览下发：七个必填项是让智脑明白「接入的是什么系统」的最小物料；
+  // 连接配置段（ADR-028）追加 heartbeat（必填，连通性测试）与 auth（必填，授权方式）
   const requiredKeys = overview.registration.fields.filter((field) => field.required).map((field) => field.key);
-  assert.deepEqual(requiredKeys, ['name', 'domain', 'description', 'keyEntities', 'dataDomains', 'accessIntention', 'businessOwner']);
+  assert.deepEqual(requiredKeys, ['name', 'domain', 'description', 'keyEntities', 'dataDomains', 'accessIntention', 'businessOwner', 'heartbeat', 'auth']);
   assert.deepEqual(overview.registration.dataDomains.map((option) => option.id), ['production', 'marketing', 'internal']);
   assert.ok(overview.registration.mockScenarios.length >= 1);
+  // 授权方式选项下发（ADR-028：a + b 组合）
+  assert.deepEqual(overview.registration.authSchemes.map((option) => option.id), ['user_token_passthrough', 'service_principal']);
 });
 
 test('详情：字段目录来自合成数据字典，未挂接场景的自定义系统显式说明原因而非留空占位', async () => {
@@ -397,11 +402,15 @@ test('登记：必填物料、系统码防撞、越权与未挂接场景探测�
   assert.equal(denied.status, 403);
   assert.equal(denied.value.denied, 'meta_model.draft.save');
 
-  // 未挂接模拟场景的自定义系统：可登记，但探测被显式拒绝（也就到不了 connected）
+  // 未挂接模拟场景的自定义系统（有 heartbeat）：探测走心跳路径，测试环境无真实 HTTP 端点 → failed（200）
+  // ADR-028 后：有 heartbeat 即可探测（走心跳路径），不再因无 mockScenarioId 返回 409；
+  // 心跳失败且无模拟场景降级 → failed（不接通）。这是 ADR-024 边界第 2 条的细化。
   await call({ method: 'POST', path: '/api/semantic-operations/systems', body: registrationMaterials({ code: 'SRMB', mockScenarioId: '' }) });
   const noDataset = await call({ method: 'POST', path: '/api/semantic-operations/systems/SRMB/probe', body: { faultMode: 'none' } });
-  assert.equal(noDataset.status, 409);
-  assert.equal(noDataset.value.code, 'SYSTEM_PROBE_DATASET_NOT_ATTACHED');
+  assert.equal(noDataset.status, 200);
+  assert.equal(noDataset.value.status, 'failed', '有 heartbeat 无模拟场景：走心跳路径，失败则 failed（无降级路径）');
+  assert.equal(noDataset.value.probeKind, 'heartbeat');
+  assert.ok(noDataset.value.issue, '心跳失败应带 issue 说明原因');
 
   // 自定义系统的授权按其声明的数据域裁剪：marketing 域系统对市场角色可探测、对生产角色拒绝
   await call({ method: 'POST', path: '/api/semantic-operations/systems', body: registrationMaterials({ code: 'MKT1', dataDomains: ['marketing'] }) });

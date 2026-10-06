@@ -217,4 +217,23 @@ test('系统接入：新增接入登记表单、生命周期操作面板与停�
   assert.ok(!/lifecycleState\s*=\s*'connected'/.test(templateSource), '模板中不得硬编码生命周期状态');
   // 去预设（ADR-024）：界面上不得再出现「平台目录里尚未开始接入的系统」这类预设表述。
   assert.ok(!/平台目录里尚未开始接入/.test(accessSource), '不得残留预设待接入系统的表述');
+  // 连接配置段（ADR-028）：心跳接口、授权方式、附加文档必须在登记表单中可见。
+  assert.match(templateSource, /data-testid="register-field-heartbeat"/);
+  assert.match(templateSource, /data-testid="register-heartbeat-endpoint"/);
+  assert.match(templateSource, /data-testid="register-heartbeat-method"/);
+  assert.match(templateSource, /data-testid="register-heartbeat-status"/);
+  assert.match(templateSource, /data-testid="register-field-auth"/);
+  assert.match(templateSource, /data-testid="register-auth-scheme"/);
+  assert.match(templateSource, /v-for="option in registrationAuthSchemes"/);
+  // service_principal 方式才出现的凭据引用与 scope（条件渲染）
+  assert.match(templateSource, /v-if="registrationForm\.auth\.scheme === 'service_principal'"/);
+  assert.match(templateSource, /data-testid="register-auth-credentialRef"/);
+  assert.match(templateSource, /data-testid="register-auth-scope"/);
+  // 附加文档（可选）：文件上传 + 文档清单
+  assert.match(templateSource, /data-testid="register-field-attachmentDocuments"/);
+  assert.match(templateSource, /data-testid="register-docs-file"/);
+  // 授权方式选项由服务端 schema 下发（authSchemes），前端不本地硬编码
+  assert.match(accessSource, /const registrationAuthSchemes = computed\(\(\) => registrationSchema\.value\?\.authSchemes \|\| \[\]\)/);
+  // 接通门禁文案升级：心跳 verified（不再只说「探测 verified」）
+  assert.match(accessSource, /心跳 verified/);
 });

@@ -16,8 +16,9 @@ import { getWorldModelConnectionTargets } from '../src/services/world-model-temp
 import {
   getSystemDefinitions, getSystemByCode, getSystemRegistrySnapshot,
   getConnectorSurfaceSystemCodes, getRecordSurfaceSystemIds, detectSystemCodesInText,
-  getTenantSystemConnections, getTenantSystemConnection,
-  registerTenantCustomSystem, transitionSystemConnection, canTransitionSystemConnection, SYSTEM_REGISTRY_NAMESPACE
+  getTenantSystemConnections, getTenantSystemConnection, getTenantSystemDefinition,
+  registerTenantCustomSystem, transitionSystemConnection, canTransitionSystemConnection, SYSTEM_REGISTRY_NAMESPACE,
+  getSystemRegistrationSchema
 } from '../src/services/system-registry-service.js';
 
 if (process.env.NODE_ENV !== 'test' || process.env.RUNTIME_STORE_DRIVER !== 'memory') throw new Error('Use the runtime-test-bootstrap memory store.');
@@ -34,6 +35,8 @@ const registrationMaterials = (overrides = {}) => ({
   dataDomains: ['production', 'internal'],
   accessIntention: '读取供应商资质与绩效数据，支撑采购风险分析与供应商画像。',
   businessOwner: '采购负责人',
+  heartbeat: { endpoint: 'https://api.example.com/health', method: 'GET', expectedStatus: 200, timeoutMs: 5000 },
+  auth: { scheme: 'user_token_passthrough', writeApprovalRequired: true },
   ...overrides
 });
 
@@ -196,4 +199,103 @@ test('来源发现仍可用，且未登记连接器的系统被明确标注为 n
   const unregistered = discoverSemanticSources({ request: '把 SRM 也纳入', role: 'executive' });
   assert.deepEqual(unregistered.sources.map((item) => item.status), ['not_registered']);
   assert.ok(unregistered.blockers.some((line) => line.startsWith('SRM')));
+});
+
+// ── 连接配置段（ADR-028，2026-10-06）──────────────────────────────────────
+// 登记物料从「业务描述性」扩展到「连接配置段」：附加文档（可选）+ 心跳接口（必填）+ 授权方式（必填）。
+// 凭据永不进登记物料，只存 credentialRef（Key Center 引用）。
+
+const validHeartbeat = { endpoint: 'https://api.supplier.example.com/health', method: 'GET', expectedStatus: 200, timeoutMs: 5000 };
+const validUserTokenAuth = { scheme: 'user_token_passthrough', writeApprovalRequired: true };
+const validServicePrincipalAuth = {
+  scheme: 'service_principal',
+  credentialRef: 'kms://integration/supplier-service-principal',
+  scope: ['read:supplier', 'read:contract'],
+  writeApprovalRequired: true
+};
+
+test('登记物料 schema 下发连接配置段：heartbeat/auth 必填、attachmentDocuments 可选、authSchemes 选项齐全', () => {
+  const schema = getSystemRegistrationSchema();
+  const requiredKeys = schema.fields.filter((field) => field.required).map((field) => field.key);
+  assert.ok(requiredKeys.includes('heartbeat'), 'heartbeat 必填');
+  assert.ok(requiredKeys.includes('auth'), 'auth 必填');
+  assert.ok(!requiredKeys.includes('attachmentDocuments'), 'attachmentDocuments 可选');
+  assert.deepEqual(schema.authSchemes.map((option) => option.id), ['user_token_passthrough', 'service_principal']);
+  // service_principal 必须要求 credentialRef
+  const sp = schema.authSchemes.find((option) => option.id === 'service_principal');
+  assert.equal(sp.requiresCredentialRef, true);
+  const utp = schema.authSchemes.find((option) => option.id === 'user_token_passthrough');
+  assert.equal(utp.requiresCredentialRef, false);
+});
+
+test('正例：登记带用户令牌透传授权与心跳的自定义系统——落库并披露连接配置段', () => {
+  const registered = within('conn-tenant-a', () => registerTenantCustomSystem({
+    materials: registrationMaterials({ code: 'SCMA', heartbeat: validHeartbeat, auth: validUserTokenAuth }),
+    actor: { id: 'architect' }
+  }));
+  assert.equal(registered.code, 'SCMA');
+  assert.equal(registered.state, 'registered');
+  const view = within('conn-tenant-a', () => getTenantSystemDefinition('SCMA'));
+  assert.ok(view, '自定义系统应入租户清单');
+  assert.equal(view.origin, 'tenant_custom');
+  assert.deepEqual(view.heartbeat, validHeartbeat);
+  assert.deepEqual(view.auth, validUserTokenAuth);
+  assert.equal(view.connector, null, '8-1 阶段 connector 保持 null，探测升级在 8-2');
+});
+
+test('正例：登记带服务主体凭据与文档物料的自定义系统——credentialRef 与 scope 落库', () => {
+  const doc = { mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', dataUrl: 'data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,UEsDBA==' };
+  const registered = within('conn-tenant-b', () => registerTenantCustomSystem({
+    materials: registrationMaterials({ code: 'SCMB', heartbeat: validHeartbeat, auth: validServicePrincipalAuth, attachmentDocuments: [doc] }),
+    actor: { id: 'architect' }
+  }));
+  assert.equal(registered.code, 'SCMB');
+  const view = within('conn-tenant-b', () => getTenantSystemDefinition('SCMB'));
+  assert.deepEqual(view.auth, validServicePrincipalAuth);
+  assert.equal(view.attachmentDocuments.length, 1);
+  assert.deepEqual(view.attachmentDocuments[0], doc);
+});
+
+test('反例：心跳 endpoint 缺失或非法 URL', () => {
+  const noEndpoint = within('conn-c', () => registerTenantCustomSystem({ materials: registrationMaterials({ code: 'SCMC', heartbeat: { method: 'GET' }, auth: validUserTokenAuth }), actor: { id: 'a' } }));
+  assert.equal(noEndpoint.code, 'SYSTEM_MATERIALS_INVALID');
+  assert.ok(noEndpoint.issues.some((issue) => issue.field === 'heartbeat' && /endpoint 为必填/.test(issue.message)));
+  const badUrl = within('conn-c', () => registerTenantCustomSystem({ materials: registrationMaterials({ code: 'SCMC2', heartbeat: { endpoint: 'not-a-url' }, auth: validUserTokenAuth }), actor: { id: 'a' } }));
+  assert.equal(badUrl.code, 'SYSTEM_MATERIALS_INVALID');
+  assert.ok(badUrl.issues.some((issue) => issue.field === 'heartbeat' && /合法的 http\/https URL/.test(issue.message)));
+});
+
+test('反例：授权方式缺失、未知 scheme、service_principal 缺 credentialRef 或 scope', () => {
+  // 用 auth: null 覆盖 helper 的默认值，确证「无 auth」被拒
+  const noAuth = within('conn-d', () => registerTenantCustomSystem({ materials: registrationMaterials({ code: 'SCMD', heartbeat: validHeartbeat, auth: null }), actor: { id: 'a' } }));
+  assert.equal(noAuth.code, 'SYSTEM_MATERIALS_INVALID');
+  assert.ok(noAuth.issues.some((issue) => issue.field === 'auth' && /必填项/.test(issue.message)));
+  const unknownScheme = within('conn-d', () => registerTenantCustomSystem({ materials: registrationMaterials({ code: 'SCMD2', heartbeat: validHeartbeat, auth: { scheme: 'api_key' } }), actor: { id: 'a' } }));
+  assert.equal(unknownScheme.code, 'SYSTEM_MATERIALS_INVALID');
+  assert.ok(unknownScheme.issues.some((issue) => /未知的授权方式/.test(issue.message)));
+  const noCred = within('conn-d', () => registerTenantCustomSystem({ materials: registrationMaterials({ code: 'SCMD3', heartbeat: validHeartbeat, auth: { scheme: 'service_principal', scope: ['read:x'] } }), actor: { id: 'a' } }));
+  assert.equal(noCred.code, 'SYSTEM_MATERIALS_INVALID');
+  assert.ok(noCred.issues.some((issue) => /必须提供 credentialRef/.test(issue.message)));
+  const badCred = within('conn-d', () => registerTenantCustomSystem({ materials: registrationMaterials({ code: 'SCMD4', heartbeat: validHeartbeat, auth: { scheme: 'service_principal', credentialRef: 'http://bad', scope: ['read:x'] } }), actor: { id: 'a' } }));
+  assert.equal(badCred.code, 'SYSTEM_MATERIALS_INVALID');
+  assert.ok(badCred.issues.some((issue) => /kms:\/\/ 开头/.test(issue.message)));
+  const noScope = within('conn-d', () => registerTenantCustomSystem({ materials: registrationMaterials({ code: 'SCMD5', heartbeat: validHeartbeat, auth: { scheme: 'service_principal', credentialRef: 'kms://integration/x' } }), actor: { id: 'a' } }));
+  assert.equal(noScope.code, 'SYSTEM_MATERIALS_INVALID');
+  assert.ok(noScope.issues.some((issue) => /必须声明 scope/.test(issue.message)));
+});
+
+test('反例：用户令牌透传方式不得带 credentialRef（智脑不持有凭据）', () => {
+  const withCred = within('conn-e', () => registerTenantCustomSystem({ materials: registrationMaterials({ code: 'SCME', heartbeat: validHeartbeat, auth: { scheme: 'user_token_passthrough', credentialRef: 'kms://integration/x' } }), actor: { id: 'a' } }));
+  assert.equal(withCred.code, 'SYSTEM_MATERIALS_INVALID');
+  assert.ok(withCred.issues.some((issue) => /不需要 credentialRef/.test(issue.message)));
+});
+
+test('反例：附加文档 dataUrl 非法、超过 8 份', () => {
+  const badDataUrl = within('conn-f', () => registerTenantCustomSystem({ materials: registrationMaterials({ code: 'SCMF', heartbeat: validHeartbeat, auth: validUserTokenAuth, attachmentDocuments: [{ mimeType: 'application/pdf', dataUrl: 'https://not-data-url' }] }), actor: { id: 'a' } }));
+  assert.equal(badDataUrl.code, 'SYSTEM_MATERIALS_INVALID');
+  assert.ok(badDataUrl.issues.some((issue) => issue.field === 'attachmentDocuments' && /data:.*;base64,/.test(issue.message)));
+  const tooMany = Array.from({ length: 9 }, () => ({ mimeType: 'application/pdf', dataUrl: 'data:application/pdf;base64,JVBERi0=' }));
+  const overflow = within('conn-f', () => registerTenantCustomSystem({ materials: registrationMaterials({ code: 'SCMF2', heartbeat: validHeartbeat, auth: validUserTokenAuth, attachmentDocuments: tooMany }), actor: { id: 'a' } }));
+  assert.equal(overflow.code, 'SYSTEM_MATERIALS_INVALID');
+  assert.ok(overflow.issues.some((issue) => issue.field === 'attachmentDocuments' && /最多 8 份/.test(issue.message)));
 });
