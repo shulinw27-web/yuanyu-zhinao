@@ -3,9 +3,9 @@
 //      → 建模（草稿/校验/模拟构建）→ 发布（部署到 Semantica）→ 审核（巡检计划/通知）
 //      → 智脑使用模型（运行时/模型配置/会话/消息）。
 //
-// 前置：业务 API 已在本机运行（npm run dev:api）；本脚本只做只读探测 + 受控写入，
-// 写入对象为脚本自建的新实体（系统码带时间戳后缀、新接入项目、新巡检计划、新会话），
-// 不改动既有租户数据。支持 --base <url> 覆盖目标地址。
+// 前置：业务 API 运行在一次性、隔离的测试实例。本脚本会改写固定模型
+// oa-governance 的草稿和发布状态，绝不能在共享实例或真实租户运行。
+// 必须显式传入 --isolated-runtime 和 --base <loopback URL>。
 //
 // 边界（与 evaluate-mock-onboarding 的边界一致，不得弱化）：
 //   * 模型调用走运行时当前配置（默认 Mock 确定性演示模型），不调用真实云模型；
@@ -16,10 +16,15 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import * as fulfillment from '../examples/knowledge/dual-agent-mock/input-materials.mjs';
+import { orderRecord, orderReadPlan } from '../examples/e2e-flow/fixture.mjs';
 
 const args = process.argv.slice(2);
 const baseArg = args.includes('--base') ? args[args.indexOf('--base') + 1] : null;
-const base = baseArg || process.env.E2E_BASE_URL || 'http://127.0.0.1:3001/api';
+const base = baseArg || process.env.E2E_BASE_URL;
+const parsedBase = base ? new URL(base) : null;
+if (!args.includes('--isolated-runtime') || !parsedBase || !['127.0.0.1', 'localhost', '[::1]'].includes(parsedBase.hostname) || parsedBase.protocol !== 'http:') {
+  throw new Error('E2E_ISOLATED_RUNTIME_REQUIRED: 仅允许显式 --isolated-runtime --base <本机隔离实例/api>；脚本会覆盖 oa-governance 模型。');
+}
 const root = resolve(import.meta.dirname, '..');
 const outputDir = join(root, 'output', 'e2e-normal-flow');
 await mkdir(outputDir, { recursive: true });
@@ -267,11 +272,17 @@ try {
   await check('3-建模', '保存业务建模草稿（3 对象 2 关系 + 治理资产）', async () => {
     const result = await call('/meta-models/oa-governance/draft', { method: 'POST', session: adminSession, body: {
       modelingProfile: 'general',
-      scenario: { objective: `E2E 全流程验证：订单履约风险分析（${runToken}）`, questions: ['哪些订单存在缺货或延迟风险？'], decisionBindings: [], actionBindings: [] },
+      scenario: { objective: `E2E 全流程验证：订单履约风险分析（${runToken}）`, questions: ['ORD-E2E-001 的金额与延迟状态是什么？'], requireCaseReplay: true, readPlans: [orderReadPlan], decisionBindings: [], actionBindings: [] },
       objectTypes: [
-        { id: 'E2ESalesOrder', label: '销售订单', key: 'order_id', granularity: 'transaction', fields: ['order_id', 'customer_id', 'amount', 'status'] },
-        { id: 'E2ECustomer', label: '客户', key: 'customer_id', granularity: 'master', fields: ['customer_id', 'name', 'credit_limit'] },
-        { id: 'E2EInventoryLot', label: '库存批次', key: 'lot_id', granularity: 'inventory_item', fields: ['lot_id', 'sku_id', 'qty'] }
+        { id: 'E2ESalesOrder', label: '销售订单', key: 'order_id', granularity: 'transaction', fields: ['order_id', 'customer_id', 'amount', 'status'], sourceSystems: ['OMS'],
+          fieldDefinitions: [
+            { name: 'order_id', type: 'string', required: true },
+            { name: 'customer_id', type: 'string', required: true },
+            { name: 'amount', type: 'number', required: true },
+            { name: 'status', type: 'string', required: true }
+          ] },
+        { id: 'E2ECustomer', label: '客户', key: 'customer_id', granularity: 'master', fields: ['customer_id', 'name', 'credit_limit'], sourceSystems: ['OMS'] },
+        { id: 'E2EInventoryLot', label: '库存批次', key: 'lot_id', granularity: 'inventory_item', fields: ['lot_id', 'sku_id', 'qty'], sourceSystems: ['WMS'] }
       ],
       relationshipTypes: [
         { from: 'E2ESalesOrder', predicate: 'belongs_to', to: 'E2ECustomer', cardinality: 'n:1' },
@@ -285,7 +296,7 @@ try {
         { id: 'e2e_order_amount_sum', label: '订单金额合计', grain: 'E2ESalesOrder', aggregation: 'sum', expression: 'sum(amount)' }
       ],
       dataContracts: [
-        { id: 'e2e_sales_order_contract', sourceSystem: 'OA', objectType: 'E2ESalesOrder', schemaVersion: '1.0', freshnessMinutes: 15, availabilitySlo: 99.9, owner: 'E2E 责任人' }
+        { id: 'e2e_sales_order_contract', sourceSystem: 'OMS', objectType: 'E2ESalesOrder', schemaVersion: '1.0', freshnessMinutes: 15, availabilitySlo: 99.9, owner: 'E2E 责任人' }
       ],
       qualityRules: [
         { id: 'e2e_order_status_valid', objectType: 'E2ESalesOrder', field: 'status', rule: 'not_null', severity: 'error', threshold: 1 }
@@ -294,10 +305,10 @@ try {
         { id: 'e2e_sales_order', term: '销售订单', definition: '客户与平台之间的交易订单，关联金额与状态。', objectType: 'E2ESalesOrder' }
       ],
       accessPolicies: [
-        { id: 'e2e_order_scope_policy', objectType: 'E2ESalesOrder', effect: 'allow', roles: ['executive'], condition: 'organization_id in subject.organization_ids', maskedFields: [] }
+        { id: 'e2e_order_scope_policy', objectType: 'E2ESalesOrder', effect: 'allow', roles: ['executive'], condition: 'iam_scope', maskedFields: [] }
       ],
       lineageEdges: [
-        { from: 'oa.custom_e2esalesorder', to: 'E2ESalesOrder', transformation: 'canonical_mapping', fields: ['order_id', 'amount', 'status'] }
+        { from: 'oms.sales_order', to: 'E2ESalesOrder', transformation: 'canonical_mapping', fields: ['order_id', 'amount', 'status'] }
       ]
     } });
     assert.equal(result.status, 200, `草稿保存失败：${JSON.stringify(result.body)}`);
@@ -308,6 +319,20 @@ try {
     assert.equal(result.status, 200, `校验失败：${JSON.stringify(result.body)}`);
     assert.equal(result.body.draft?.validation?.status, 'passed', `校验未通过：${JSON.stringify(result.body.draft?.validation)}`);
     return { status: result.body.draft.validation.status };
+  });
+  await check('3-建模', '只读方案正反例回放通过，原始记录不持久化', async () => {
+    const current = await call('/meta-models/oa-governance/draft', { session: adminSession });
+    assert.equal(current.status, 200);
+    const result = await call('/meta-models/oa-governance/read-plan-replay', { method: 'POST', session: adminSession, body: {
+      candidateFingerprint: current.body.draft?.fingerprint || current.body.fingerprint,
+      cases: [
+        { planId: orderReadPlan.id, target: orderRecord.id, records: [orderRecord], expected: { orderAmountCny: 33000, isDelayed: true } },
+        { planId: orderReadPlan.id, target: 'ORD-E2E-MISSING', records: [], expectedError: 'READ_ROOT_NOT_FOUND' }
+      ]
+    } });
+    assert.equal(result.status, 200, `回放失败：${JSON.stringify(result.body)}`);
+    assert.equal(result.body.status, 'passed', `回放未通过：${JSON.stringify(result.body)}`);
+    return { status: result.body.status, cases: result.body.results?.length };
   });
   await check('3-建模', '模拟构建通过（含 Semantica 结构验证）', async () => {
     const result = await call('/meta-models/oa-governance/simulate-build', { method: 'POST', session: adminSession });
@@ -326,11 +351,13 @@ try {
     assert.match(result.body.message, /meta_model\.publish/);
     return { code: result.body.code };
   });
+  let publishedVersion = null;
   await check('4-发布', '发布人（executive）发布成功并部署语义服务', async () => {
     const result = await call('/meta-models/oa-governance/publish', { method: 'POST', session: adminSession });
     assert.equal(result.status, 200, `发布失败：${JSON.stringify(result.body)}`);
     assert.equal(result.body.simulation?.status, 'published');
     assert.ok(result.body.simulation?.version, '发布版本缺失');
+    publishedVersion = result.body.simulation.version;
     return { version: result.body.simulation.version };
   });
   await check('4-发布', '发布后模型状态为已发布', async () => {
@@ -395,31 +422,28 @@ try {
     return { status: 401 };
   });
   let conversationId = null;
-  await check('6-智脑', '创建智脑会话（满额自动归档最旧活动任务）', async () => {
-    let result = await call('/agent/conversations', { method: 'POST', session: adminSession, body: { title: `E2E 智脑会话 ${runToken}` } });
-    if (result.status === 400 && result.body?.code === 'AGENT_ACTIVE_TASK_LIMIT') {
-      const list = await call('/agent/conversations', { session: adminSession });
-      const items = list.body?.items || [];
-      const archived = [];
-      for (const item of items.filter((entry) => !entry.archivedAt)) {
-        if (result.status === 201) break;
-        const done = await call(`/agent/conversations/${item.id}/archive`, { method: 'POST', session: adminSession });
-        if (done.status === 200) archived.push(item.id);
-        result = await call('/agent/conversations', { method: 'POST', session: adminSession, body: { title: `E2E 智脑会话 ${runToken}` } });
-      }
-      assert.equal(result.status, 201, `归档后仍创建失败：${JSON.stringify(result.body)}`);
-    }
+  await check('6-智脑', '创建智脑会话（不改动既有会话）', async () => {
+    const result = await call('/agent/conversations', { method: 'POST', session: adminSession, body: { title: `E2E 智脑会话 ${runToken}` } });
+    assert.notEqual(result.body?.code, 'AGENT_ACTIVE_TASK_LIMIT', '隔离实例活动任务已满；不会归档已有会话，请重建干净实例');
     assert.equal(result.status, 201, `创建会话失败：${JSON.stringify(result.body)}`);
     conversationId = result.body.conversation?.id || result.body.id;
     assert.ok(conversationId, '未返回会话 ID');
     return { conversationId: String(conversationId).slice(0, 12) + '…' };
   });
-  await check('6-智脑', '智脑消息回复（按运行时模型配置执行）', async () => {
-    const result = await call('/agent/message', { method: 'POST', session: adminSession, body: { conversationId, text: '目前有哪些订单存在缺货或延迟风险？请只分析，不执行任何处置。' } });
+  await check('6-智脑', '智脑回复必须引用本轮发布模型与受控来源', async () => {
+    const result = await call('/agent/message', { method: 'POST', session: adminSession, body: { conversationId, text: '请按已发布模型只读查询订单 ORD-E2E-001 的金额和延迟状态，给出来源依据；只分析，不执行处置。' } });
     assert.equal(result.status, 200, `消息失败：${JSON.stringify(result.body)}`);
     for (const field of ['text', 'agent', 'evidence', 'plan', 'command']) assert.ok(Object.hasOwn(result.body, field), `回复缺少 ${field} 字段`);
     assert.ok(String(result.body.text).length > 0, '回复文本为空');
-    return { agent: result.body.agent, textHead: String(result.body.text).slice(0, 60) };
+    assert.equal(result.body.command, null, '只读分析不得产生业务写入命令');
+    assert.equal(result.body.agent?.inferenceSource, 'controlled_semantic_read',
+      `回复未经过已发布模型的受控读取：${JSON.stringify({ inferenceSource: result.body.agent?.inferenceSource, route: result.body.route, plan: result.body.plan, text: String(result.body.text).slice(0, 160) })}`);
+    assert.equal(result.body.semanticContext?.modelVersion, publishedVersion, '智脑所用模型版本与本轮发布版本不一致');
+    assert.ok(result.body.evidence?.length > 0, '未返回可复核业务来源证据');
+    const calculations = Object.fromEntries((result.body.semanticContext?.calculations || []).map(item => [item.id, item.value]));
+    assert.equal(calculations.orderAmountCny, 33000, '订单金额没有按授权来源记录计算');
+    assert.equal(calculations.isDelayed, true, '订单延迟状态没有按授权来源记录计算');
+    return { modelVersion: publishedVersion, evidenceCount: result.body.evidence.length, textHead: String(result.body.text).slice(0, 60) };
   });
   await check('6-智脑', '会话交换已记录（上下文持久化）', async () => {
     const result = await call(`/agent/conversations/${conversationId}`, { session: adminSession });

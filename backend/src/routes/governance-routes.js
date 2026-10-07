@@ -64,7 +64,9 @@ import {
   getSystemAccessDetail,
   probeSystemConnection,
   registerSystemOnboarding,
-  transitionTenantSystemConnection
+  transitionTenantSystemConnection,
+  supplementSystemMaterials,
+  getSystemUnderstanding
 } from '../domains/system-onboarding/public-api.js';
 
 export function handleGovernanceRoutes(context) {
@@ -109,7 +111,7 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
   // 为什么把 validate / publish 也一并搬过来：管理 Web 上这三个按钮原本都是有处理器的，
   // 只搬「生成草稿」会让另外两个退化成新的空按钮——那正是本阶段要消除的问题。
   const systemAccessRootMatch = url.pathname.match(/^\/api\/semantic-operations\/systems(?:\/([^/]+))?$/u);
-  const systemAccessActionMatch = url.pathname.match(/^\/api\/semantic-operations\/systems\/([^/]+)\/(probe|mapping-drafts|lifecycle)$/u);
+  const systemAccessActionMatch = url.pathname.match(/^\/api\/semantic-operations\/systems\/([^/]+)\/(probe|mapping-drafts|lifecycle|materials|understanding)$/u);
   const systemAccessDraftMatch = url.pathname.match(/^\/api\/semantic-operations\/systems\/([^/]+)\/mapping-drafts\/([^/]+)\/(validate|publish)$/u);
   const canReadWorldModel = Boolean(effectiveAccess?.pagePermissionIds?.includes('page.semantic-operations.view'));
   const templateFor = (code) => getWorldModelTemplates().find((template) => template.targets.includes(String(code || '').toLowerCase()));
@@ -147,9 +149,21 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
     send(res, 405, { message: '不支持的接入操作。', code: 'SYSTEM_ACCESS_METHOD_NOT_ALLOWED' });
     return true;
   }
-  if (systemAccessActionMatch && req.method === 'POST') {
+  if (systemAccessActionMatch) {
     const code = decodeURIComponent(systemAccessActionMatch[1]);
     const action = systemAccessActionMatch[2];
+    // 缓存读取是只读请求。此前外层只允许 POST，导致 understanding 的 GET
+    // 分支永远不可达，前端只能反复触发模型重算；在这里显式分流，其他动作
+    // 仍然保持 POST-only，避免无意扩大写入面。
+    if (action === 'understanding' && req.method === 'GET') {
+      const result = await getSystemUnderstanding({ code, regenerate: false, identityScope: agentIdentity });
+      send(res, result.error ? result.status || 404 : 200, result.error ? { message: result.error, code: result.code } : result);
+      return true;
+    }
+    if (req.method !== 'POST') {
+      send(res, 405, { message: '不支持的接入操作。', code: 'SYSTEM_ACCESS_METHOD_NOT_ALLOWED' });
+      return true;
+    }
     if (action === 'lifecycle') {
       // 接入生命周期操作（登记 / 授权确认 / 接通 / 停用 / 恢复）：与连通性探测同一把闸门
       // （meta_model.draft.save，接入侧写入）。接通跃迁的服务端门禁是「最近一次探测
@@ -158,6 +172,25 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
       if (!actionRole) { denyButton('meta_model.draft.save'); return true; }
       const body = await readBody(req);
       const result = transitionTenantSystemConnection({ code, to: body?.to, reason: body?.reason, identityScope: agentIdentity });
+      send(res, result.error ? result.status || 400 : 200, result.error ? { message: result.error, code: result.code } : result);
+      return true;
+    }
+    if (action === 'materials') {
+      // 已接入系统补充物料（2026-10-07）：登记后追加文档 + 文字说明；文档走与登记
+      // 同一受控解析管线。写入闸门与接入侧一致（meta_model.draft.save）。
+      const actionRole = selectActionRole('meta_model.draft.save');
+      if (!actionRole) { denyButton('meta_model.draft.save'); return true; }
+      const body = await readBody(req);
+      const result = await supplementSystemMaterials({ code, body, identityScope: agentIdentity });
+      send(res, result.error ? result.status || 400 : 200, result.error ? { message: result.error, code: result.code, issues: result.issues } : result);
+      return true;
+    }
+    if (action === 'understanding') {
+      // 系统理解（2026-10-07）：登记物料 + 文档提取文本交给大模型；GET 读缓存、
+      // POST 重算（重算属接入侧动作，同一把闸门 meta_model.draft.save）。
+      const actionRole = selectActionRole('meta_model.draft.save');
+      if (!actionRole) { denyButton('meta_model.draft.save'); return true; }
+      const result = await getSystemUnderstanding({ code, regenerate: true, identityScope: agentIdentity });
       send(res, result.error ? result.status || 400 : 200, result.error ? { message: result.error, code: result.code } : result);
       return true;
     }

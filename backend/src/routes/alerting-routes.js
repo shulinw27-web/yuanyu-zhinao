@@ -8,7 +8,7 @@ import {
   testVoiceCall
 } from '../domains/alerting/public-api.js';
 
-const actorFor = (role, identity) => ({ type: 'user', roleId: role.id, subjectId: identity.subjectId || 'unknown' });
+const actorFor = (role, identity) => ({ type: 'user', roleId: role.id, subjectId: identity.subjectId || 'unknown', tenantId: identity.tenantId || 'demo-enterprise' });
 
 export async function handleAlertingRoutes({ req, res, url, role, agentIdentity, selectActionRole, denyButton, readBody, send }) {
   if (req.method === 'GET' && url.pathname === '/api/notifications') {
@@ -27,7 +27,7 @@ export async function handleAlertingRoutes({ req, res, url, role, agentIdentity,
   if (req.method === 'POST' && url.pathname === '/api/alerting/configuration') {
     const body = await readBody(req);
     const requiredPermissions = [
-      ...(body.severityLevels !== undefined || body.voiceProviders !== undefined || body.escalationPolicies !== undefined ? ['notification.policy.publish'] : []),
+      ...(body.severityLevels !== undefined || body.voiceProviders !== undefined || body.escalationPolicies !== undefined || body.contactPoints !== undefined ? ['notification.policy.publish'] : []),
       ...(body.onCallSchedules !== undefined ? ['oncall.schedule.manage'] : [])
     ];
     let actionRole = null;

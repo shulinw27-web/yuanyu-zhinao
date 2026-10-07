@@ -28,6 +28,14 @@ export const initialClassificationRules = [
     resultSeverity: 'P0'
   },
   {
+    // 系统接入监控告警（2026-10-07）：接入监控轮询探测连续失败 / 自动降级时，
+    // 监控服务以这两个事件类型分派告警。P1 升级链第 1 步 risk_owner 渠道含 email，
+    // 收件人按事件的 ownerUserId（系统管理员）解析——邮件送达既有联系点邮箱。
+    id: 'system-connection-monitoring', name: '系统接入连接异常', priority: 95, enabled: true, version: 1,
+    match: { eventTypes: ['SystemConnectionProbeFailed', 'SystemConnectionDegraded'] },
+    resultSeverity: 'P1'
+  },
+  {
     id: 'business-impact-warning', name: '已产生中等业务影响', priority: 50, enabled: true, version: 1,
     match: { minimumAffectedOrders: 1, eventTypes: ['InventoryExpiring', 'ProcessDeviation', 'OrderDelay', 'QualityTrend'] },
     resultSeverity: 'P1'

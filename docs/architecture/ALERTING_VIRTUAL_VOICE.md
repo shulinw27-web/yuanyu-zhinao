@@ -12,8 +12,9 @@
 - Mock 电话自动接听、语音播放、按 1 确认收到、按 2 重听、按 3 立即生成下一责任人的通知与外呼任务。
 - 电话回执只表示收到，不授予风险审批、冻结或业务写入权限。
 - 通知、电话和配置事件使用 SHA-256 前向哈希链记录。
-- 调用和审计列表按 IAM 有效组织数据范围过滤，电话号码仅返回脱敏值。
-- PC 管理端五个页签，以及移动/Web/Electron 共享告警卡的等级和电话状态展示。
+- 告警工作区、联系点、通知、电话和审计按可信 IAM 租户分区；管理层升级动态解析当前租户在役 `executive`，不使用跨租户固定用户。
+- 调用和审计列表按 IAM 有效组织数据范围过滤，真实电话 `phoneRef` 不返回浏览器，页面回写也不会意外清空已有受控引用。
+- PC 管理端六个页签，新增“通知联系人”可视化编辑；有发布权限时才下发当前租户在役 IAM 候选，可从名单选择并维护邮箱、脱敏电话和允许渠道。移动/Web/Electron 继续共享告警卡的等级和电话状态展示。
 
 真实云电话、Asterisk、定时升级 Worker 和跨进程消息队列属于生产接入项；当前不会拨打真实号码。
 
@@ -31,6 +32,7 @@ backend/src/domains/alerting/
     voice-provider-registry.js
 backend/src/routes/alerting-routes.js
 frontend/src/features/channels/ChannelsPage.vue
+frontend/src/features/channels/contact-point-editor.js
 frontend/src/styles/alerting-center.css
 frontend/src/styles/alerting-oncall.css
 packages/agent-workbench/src/AgentWorkbench.vue
@@ -70,7 +72,7 @@ backend/test/alerting-orchestration.test.js
 | 方法 | 路径 | 权限 | 说明 |
 |---|---|---|---|
 | GET | `/api/alerting/workspace` | `page.channels.view` | 返回组织范围内的等级、策略、电话和审计工作区 |
-| POST | `/api/alerting/configuration` | 按字段要求 `notification.policy.publish` 和/或 `oncall.schedule.manage` | 版本化发布等级、Provider、值班表与升级策略 |
+| POST | `/api/alerting/configuration` | 按字段要求 `notification.policy.publish` 和/或 `oncall.schedule.manage` | 版本化发布等级、租户联系点、Provider、值班表与升级策略 |
 | POST | `/api/alerting/simulations` | `notification.route.simulate` | 执行规则、路由、Outbox 和 Mock 送达 |
 | POST | `/api/alerting/voice/test` | `notification.voice.test` | 发起 Mock 测试电话 |
 | POST | `/api/alerting/voice-calls/{id}/events` | `notification.voice.test` | 模拟 DTMF 回执 |
@@ -128,7 +130,7 @@ npm.cmd run build:mobile
 npm.cmd run build:desktop
 ```
 
-告警专项覆盖规则分级、P0 自动电话、按键升级后的下一责任人外呼、P1/P2 不立即电话、值班/升级配置版本、P2 安全约束、DTMF 权限边界、组织隔离及 HTTP 页面/按钮门禁。
+告警专项覆盖规则分级、P0 自动电话、按键升级后的下一责任人外呼、P1/P2 不立即电话、值班/升级配置版本、P2 安全约束、DTMF 权限边界、租户与组织隔离、当前租户管理层解析、隐藏 PII 引用安全回写及 HTTP 页面/按钮门禁。联系人编辑模型另由 `test:permissions` 覆盖重复用户、非法邮箱、空渠道和脱敏输出。
 
 ## 9. 生产待办
 

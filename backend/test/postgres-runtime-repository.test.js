@@ -489,12 +489,12 @@ test('PostgreSQL risk and procurement aggregates serialize concurrent transition
     assert.deepEqual(procurementApprovals.map((scenario) => scenario.execution.status), ['已提交执行', '已提交执行']);
     assert.equal((await getProcurementScenario()).execution.status, '已提交执行');
 
-    const alerts = await Promise.all([
-      simulateAlert({ riskId: 'ALERT-PG-1', sourceSystem: 'LIMS', eventType: 'TestResultFailed', organizationId: 'org-quality-dept', ownerUserId: 'usr-003', tenantId: identityScope.tenantId }, { type: 'test', id: 'pg-alerting' }),
-      simulateAlert({ riskId: 'ALERT-PG-1', sourceSystem: 'LIMS', eventType: 'TestResultFailed', organizationId: 'org-quality-dept', ownerUserId: 'usr-003', tenantId: identityScope.tenantId }, { type: 'test', id: 'pg-alerting' })
-    ]);
+    const alerts = await runWithIAMStoreContext(() => Promise.all([
+      simulateAlert({ riskId: 'ALERT-PG-1', sourceSystem: 'LIMS', eventType: 'TestResultFailed', organizationId: 'org-quality-dept', ownerUserId: 'usr-003', tenantId: identityScope.tenantId }, { type: 'test', id: 'pg-alerting', tenantId: identityScope.tenantId }),
+      simulateAlert({ riskId: 'ALERT-PG-1', sourceSystem: 'LIMS', eventType: 'TestResultFailed', organizationId: 'org-quality-dept', ownerUserId: 'usr-003', tenantId: identityScope.tenantId }, { type: 'test', id: 'pg-alerting', tenantId: identityScope.tenantId })
+    ]), identityScope.tenantId);
     assert.deepEqual(alerts.map((alert) => alert.reused).sort(), [false, true]);
-    assert.equal((await getAlertingWorkspaceForAccess('executive', { subjectId: 'pg-alerting' })).auditIntegrity.valid, true);
+    assert.equal(await runWithIAMStoreContext(async () => (await getAlertingWorkspaceForAccess('executive', { tenantId: identityScope.tenantId, subjectId: 'pg-alerting' })).auditIntegrity.valid, identityScope.tenantId), true);
 
     const outbox = await repository.readState(DOMAIN_EVENT_NAMESPACE, DOMAIN_EVENT_WORKSPACE_KEY);
     assert.deepEqual(outbox.events.map((event) => event.type).sort(), [

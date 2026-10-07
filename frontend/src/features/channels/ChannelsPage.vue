@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
+import { contactChannelOptions, contactPointIssue, contactPointPayload, createContactPointDraft, editableContactPoints } from './contact-point-editor.js';
 
 const props = defineProps({
   notifications: { type: Array, default: () => [] },
@@ -9,13 +10,15 @@ const props = defineProps({
   saving: Boolean
 });
 const emit = defineEmits(['save-configuration', 'simulate-alert', 'test-voice', 'voice-event']);
-const tabs = [{ id: 'levels', label: '告警等级' }, { id: 'routing', label: '路由模拟' }, { id: 'oncall', label: '值班升级' }, { id: 'voice', label: '虚拟电话' }, { id: 'deliveries', label: '送达审计' }];
-const channelOptions = [{ id: 'in_app', name: '站内信' }, { id: 'push', name: 'Push' }, { id: 'sms', name: '短信' }, { id: 'voice', name: '虚拟电话' }, { id: 'email', name: '邮件' }, { id: 'webhook', name: 'Webhook' }];
+const tabs = [{ id: 'levels', label: '告警等级' }, { id: 'contacts', label: '通知联系人' }, { id: 'routing', label: '路由模拟' }, { id: 'oncall', label: '值班升级' }, { id: 'voice', label: '虚拟电话' }, { id: 'deliveries', label: '送达审计' }];
+const channelOptions = contactChannelOptions;
 const activeTab = ref('levels');
 const severityLevels = ref([]);
 const providers = ref([]);
 const schedules = ref([]);
 const escalationPolicies = ref([]);
+const contacts = ref([]);
+const contactMessage = ref('');
 const copyConfiguration = (value) => JSON.parse(JSON.stringify(value));
 const testUserId = ref('usr-003');
 const simulation = ref({ sourceSystem: 'LIMS', eventType: 'TestResultFailed', rawSeverity: '', organizationId: 'org-quality-dept', ownerUserId: 'usr-003', title: '模拟关键检验失败', affectedOrders: 2 });
@@ -25,11 +28,15 @@ watch(() => props.workspace, (workspace) => {
   providers.value = copyConfiguration(workspace?.voiceProviders || []);
   schedules.value = copyConfiguration(workspace?.onCallSchedules || []);
   escalationPolicies.value = copyConfiguration(workspace?.escalationPolicies || []);
+  contacts.value = editableContactPoints(workspace?.contactPoints || []);
+  contactMessage.value = '';
   if (workspace?.contactPoints?.length && !workspace.contactPoints.some((item) => item.userId === testUserId.value)) testUserId.value = workspace.contactPoints[0].userId;
 }, { immediate: true, deep: true });
 
 const can = (permission) => props.buttonPermissionIds.includes(permission);
 const metrics = computed(() => props.workspace?.metrics || {});
+const eligibleContactUsers = computed(() => props.workspace?.eligibleContactUsers || []);
+const contactValidation = computed(() => contactPointIssue(contacts.value));
 const channelName = (id) => channelOptions.find((item) => item.id === id)?.name || id;
 const formatDate = (value) => value ? new Date(value).toLocaleString('zh-CN') : '—';
 
@@ -37,6 +44,36 @@ function toggleChannel(level, channel) {
   const next = new Set(level.channels);
   if (next.has(channel)) next.delete(channel); else next.add(channel);
   level.channels = [...next];
+}
+
+function toggleContactChannel(contact, channel) {
+  const next = new Set(contact.enabledChannels);
+  if (next.has(channel)) next.delete(channel); else next.add(channel);
+  contact.enabledChannels = [...next];
+}
+
+function addContact() {
+  const configured = new Set(contacts.value.map((item) => item.userId));
+  const firstAvailable = eligibleContactUsers.value.find((item) => !configured.has(item.id));
+  contacts.value.push(createContactPointDraft(firstAvailable?.id || ''));
+  contactMessage.value = '';
+}
+
+function removeContact(index) {
+  contacts.value.splice(index, 1);
+  contactMessage.value = '';
+}
+
+function publishContacts() {
+  if (contactValidation.value) {
+    contactMessage.value = contactValidation.value;
+    return;
+  }
+  contactMessage.value = '';
+  emit('save-configuration', {
+    expectedVersion: props.workspace.configurationVersion,
+    contactPoints: contactPointPayload(contacts.value)
+  });
 }
 
 function publishConfiguration() {
@@ -94,6 +131,20 @@ function runSimulation() {
         <div class="rule-list"><div v-for="rule in workspace.classificationRules" :key="rule.id"><span>{{ rule.priority }}</span><div><b>{{ rule.name }}</b><small>{{ rule.id }} · v{{ rule.version }}</small></div><em :class="rule.resultSeverity.toLowerCase()">{{ rule.resultSeverity }}</em></div></div>
       </section>
 
+      <section v-else-if="activeTab === 'contacts'" class="panel alerting-panel">
+        <div class="section-header"><div><span class="eyebrow">TENANT CONTACT DIRECTORY</span><h2>本租户通知联系人</h2><p>每个联系点只绑定当前租户已有的 IAM 用户；真实号码由受控 PII 引用保存，此处只展示脱敏号码。</p></div><div class="contact-actions"><button v-if="can('notification.policy.publish')" class="button secondary" :disabled="saving || contacts.length >= 200" @click="addContact">新增联系人</button><button v-if="can('notification.policy.publish')" class="button primary" :disabled="saving || Boolean(contactValidation)" @click="publishContacts">{{ saving ? '发布中…' : '发布联系人' }}</button></div></div>
+        <p v-if="contactMessage || contactValidation" class="permission-warning">{{ contactMessage || contactValidation }}</p>
+        <div v-if="contacts.length" class="contact-point-grid">
+          <article v-for="(contact, index) in contacts" :key="`${contact.userId || 'new'}-${index}`" class="contact-point-card">
+            <header><span>{{ index + 1 }}</span><div><b>{{ contact.userId || '待绑定 IAM 用户' }}</b><small>租户内身份与通知通道</small></div><button v-if="can('notification.policy.publish')" class="contact-remove" type="button" @click="removeContact(index)">移除</button></header>
+            <div class="contact-fields"><label>IAM 用户<select v-model="contact.userId" class="contact-user-select" :disabled="!can('notification.policy.publish')"><option value="">请选择当前租户用户</option><option v-for="user in eligibleContactUsers" :key="user.id" :value="user.id">{{ user.name }} · {{ user.department }}（{{ user.id }}）</option></select></label><label>通知邮箱<input v-model.trim="contact.email" maxlength="254" type="email" placeholder="ops@example.com" :disabled="!can('notification.policy.publish')"/></label><label>脱敏电话<input v-model.trim="contact.maskedPhone" maxlength="40" placeholder="例如 139****0001" :disabled="!can('notification.policy.publish')"/></label></div>
+            <div class="channel-checks"><span>允许渠道</span><label v-for="channel in channelOptions" :key="channel.id"><input type="checkbox" :checked="contact.enabledChannels.includes(channel.id)" :disabled="!can('notification.policy.publish')" @change="toggleContactChannel(contact, channel.id)"/>{{ channel.name }}</label></div>
+          </article>
+        </div>
+        <div v-else class="contact-empty"><b>本租户尚未配置通知联系人</b><p>系统监控告警会保留为待发送，不会回退到 Demo 或其他租户联系人。</p></div>
+        <p class="security-note">页面不会读取或返回真实电话号码、短信密钥和供应商凭据；已有 PII 电话引用在未显式提交新引用时由服务端保留。</p>
+      </section>
+
       <section v-else-if="activeTab === 'routing'" class="panel alerting-panel">
         <div class="section-header"><div><span class="eyebrow">ROUTE SIMULATOR</span><h2>告警分级与路由模拟</h2><p>模拟事件会真实写入 Demo Outbox、送达记录和审计链；P0 将自动触发 Mock 电话。</p></div></div>
         <div class="simulation-form">
@@ -133,3 +184,15 @@ function runSimulation() {
     <div v-else class="loading">正在加载告警编排工作区…</div>
   </div>
 </template>
+
+<style scoped>
+.contact-user-select {
+  min-width: 0;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #2f6687;
+  border-radius: 6px;
+  background: #071d31;
+  color: #dff6ff;
+}
+</style>

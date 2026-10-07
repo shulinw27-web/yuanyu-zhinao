@@ -12,6 +12,7 @@ import {
 } from '../../data/alerting-seed.js';
 import { getRuntimeStoreInfo, mutateState, readState } from '../../repositories/runtime-state-repository.js';
 import { appendDomainEventToWorkspace, DOMAIN_EVENT_NAMESPACE, DOMAIN_EVENT_WORKSPACE_KEY, initialDomainEventWorkspace, mutateWithDomainEvent } from '../../infrastructure/domain-events/domain-event-outbox.js';
+import { currentIAMTenant } from '../../services/iam-store.js';
 
 const NAMESPACE = 'alerting';
 const WORKSPACE_KEY = 'workspace';
@@ -50,29 +51,34 @@ export function appendAlertingAuditToState(state, event) {
   return stored;
 }
 
+export const alertingWorkspaceKey = (tenantId = currentIAMTenant()) => tenantId === 'demo-enterprise'
+  ? WORKSPACE_KEY
+  : JSON.stringify(['alerting-tenant-v1', tenantId, WORKSPACE_KEY]);
+
 const initialWorkspace = () => {
+  const demo = currentIAMTenant() === 'demo-enterprise';
   const state = {
     configurationVersion: 1,
     severityLevels: clone(initialSeverityLevels),
     classificationRules: clone(initialClassificationRules),
     escalationPolicies: clone(initialEscalationPolicies),
-    onCallSchedules: clone(initialOnCallSchedules),
-    contactPoints: clone(initialContactPoints),
+    onCallSchedules: demo ? clone(initialOnCallSchedules) : [],
+    contactPoints: demo ? clone(initialContactPoints) : [],
     voiceProviders: clone(initialVoiceProviders),
     voiceTemplates: clone(initialVoiceTemplates),
-    deliveries: clone(initialAlertingDeliveries),
-    voiceCalls: clone(initialVoiceCalls),
+    deliveries: demo ? clone(initialAlertingDeliveries) : [],
+    voiceCalls: demo ? clone(initialVoiceCalls) : [],
     simulatedAlerts: [],
     outbox: [],
     auditEvents: [],
     auditHeadHash: null
   };
-  appendAlertingAuditToState(state, {
+  if (demo) appendAlertingAuditToState(state, {
     id: 'alert-audit-seed-1', type: 'severity_classified', status: 'completed', riskId: 'RC-2026-0042', organizationId: 'org-quality-dept',
     summary: '风险 RC-2026-0042 按质量放行规则划分为 P0。', createdAt: '2026-07-30T01:42:06.000Z',
     details: { severity: 'P0', ruleId: 'quality-release-blocked', policyVersion: 1 }
   });
-  appendAlertingAuditToState(state, {
+  if (demo) appendAlertingAuditToState(state, {
     id: 'alert-audit-seed-2', type: 'voice_call_started', status: 'answered', riskId: 'RC-2026-0042', organizationId: 'org-quality-dept',
     notificationId: 'NT-VOICE-9005', callId: 'CALL-2026-0001', summary: 'Mock 虚拟电话已拨打质量责任人并完成语音播放。',
     createdAt: '2026-07-30T01:43:28.000Z', details: { providerId: 'mock', receiverUserId: 'usr-003', target: '139****0003' }
@@ -81,14 +87,15 @@ const initialWorkspace = () => {
 };
 
 export const getAlertingState = async () => clone(postgresRepository
-  ? await postgresRepository.readState(NAMESPACE, WORKSPACE_KEY, initialWorkspace)
-  : readState(NAMESPACE, WORKSPACE_KEY, initialWorkspace));
+  ? await postgresRepository.readState(NAMESPACE, alertingWorkspaceKey(), initialWorkspace)
+  : readState(NAMESPACE, alertingWorkspaceKey(), initialWorkspace));
 
 export async function mutateAlertingState(callback, domainEvent) {
+  const key = alertingWorkspaceKey();
   if (postgresRepository) {
-    if (!domainEvent) return postgresRepository.mutateState(NAMESPACE, WORKSPACE_KEY, initialWorkspace, (state, version) => callback(state, version));
+    if (!domainEvent) return postgresRepository.mutateState(NAMESPACE, key, initialWorkspace, (state, version) => callback(state, version));
     return postgresRepository.mutateStates([
-      { name: 'aggregate', namespace: NAMESPACE, key: WORKSPACE_KEY, initialValue: initialWorkspace },
+      { name: 'aggregate', namespace: NAMESPACE, key, initialValue: initialWorkspace },
       { name: 'outbox', namespace: DOMAIN_EVENT_NAMESPACE, key: DOMAIN_EVENT_WORKSPACE_KEY, initialValue: initialDomainEventWorkspace }
     ], ({ aggregate, outbox }, versions) => {
       const outcome = callback(aggregate, versions.aggregate) || {};
@@ -99,10 +106,10 @@ export async function mutateAlertingState(callback, domainEvent) {
       return { values: { aggregate: nextState, outbox }, result: outcome.result };
     });
   }
-  if (!domainEvent) return mutateState(NAMESPACE, WORKSPACE_KEY, initialWorkspace, (state, version) => callback(state, version));
+  if (!domainEvent) return mutateState(NAMESPACE, key, initialWorkspace, (state, version) => callback(state, version));
   return mutateWithDomainEvent({
     namespace: NAMESPACE,
-    key: WORKSPACE_KEY,
+    key,
     initialValue: initialWorkspace,
     mutation: (state, version) => {
       const outcome = callback(state, version) || {};

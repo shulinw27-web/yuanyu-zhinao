@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getEffectiveAccess } from '../../services/access-control-service.js';
-import { getIAMOrganizations, getIAMUsers } from '../../services/iam-store.js';
+import { currentIAMTenant, getIAMOrganizations, getIAMUsers } from '../../services/iam-store.js';
 import { classifyAlert } from './alert-classification-service.js';
 import { appendAlertingAuditToState, getAlertingState, mutateAlertingState, verifyAlertingAudit } from './alerting-store.js';
 import { createVoiceProvider } from './providers/voice-provider-registry.js';
@@ -19,11 +19,12 @@ const publicCall = ({ phoneRef: _phoneRef, ...call }) => clone(call);
 
 const resolveReceiver = (state, alert, receiverType = 'risk_owner') => {
   const schedule = state.onCallSchedules.find((item) => item.enabled && item.organizationId === alert.organizationId);
+  const executiveUserId = getIAMUsers().find((item) => item.status === 'active' && item.roleIds.includes('executive'))?.id || null;
   let userId = alert.ownerUserId;
   if (receiverType === 'on_call') userId = schedule?.primaryUserId || userId;
   if (receiverType === 'organization_manager') userId = schedule?.backupUserIds?.[0] || schedule?.primaryUserId || userId;
-  if (receiverType === 'executive') userId = 'usr-001';
-  if (!userId) userId = schedule?.primaryUserId || 'usr-001';
+  if (receiverType === 'executive') userId = executiveUserId || schedule?.primaryUserId || userId;
+  if (!userId) userId = schedule?.primaryUserId || executiveUserId;
   return { userId, contact: state.contactPoints.find((item) => item.userId === userId) || null };
 };
 
@@ -57,6 +58,9 @@ const enqueueDelivery = (state, alert, classification, policy, step, channel, re
 };
 
 export async function dispatchAlert(event) {
+  if (event.tenantId && event.tenantId !== currentIAMTenant()) {
+    return { error: '告警租户与当前 IAM 工作区不一致。', code: 'ALERT_TENANT_CONTEXT_MISMATCH' };
+  }
   const state = await getAlertingState();
   const classification = classifyAlert(event, state.classificationRules, state.severityLevels);
   if (!classification.level) return { error: '没有可用的告警等级配置。', code: 'ALERT_SEVERITY_UNAVAILABLE' };
@@ -159,10 +163,13 @@ export async function getAlertingWorkspaceForAccess(roleId, identityContext) {
   const deliveries = state.deliveries.filter(visible);
   const calls = state.voiceCalls.filter(visible).map(publicCall);
   const audits = state.auditEvents.filter((item) => !item.organizationId || visible(item));
+  const eligibleContactUsers = access.buttonPermissionIds?.includes('notification.policy.publish')
+    ? getIAMUsers().filter((item) => item.status === 'active').map((item) => ({ id: item.id, name: item.name, department: item.department, orgUnitId: item.orgUnitId }))
+    : [];
   return {
     configurationVersion: state.configurationVersion,
     severityLevels: clone(state.severityLevels), classificationRules: clone(state.classificationRules), escalationPolicies: clone(state.escalationPolicies),
-    onCallSchedules: state.onCallSchedules.filter(visible).map(clone), contactPoints: state.contactPoints.filter((item) => access.unrestricted || calls.some((call) => call.receiverUserId === item.userId)).map(sanitizeContact),
+    onCallSchedules: state.onCallSchedules.filter(visible).map(clone), contactPoints: state.contactPoints.filter((item) => access.unrestricted || calls.some((call) => call.receiverUserId === item.userId)).map(sanitizeContact), eligibleContactUsers,
     voiceProviders: state.voiceProviders.map(({ credentialRef, ...provider }) => ({ ...clone(provider), credentialConfigured: Boolean(credentialRef) })),
     voiceTemplates: clone(state.voiceTemplates), deliveries: clone(deliveries), voiceCalls: calls, simulatedAlerts: state.simulatedAlerts.filter(visible).map(clone),
     audits: clone(audits.slice(-200).reverse()),
@@ -179,7 +186,7 @@ export async function getAlertingWorkspaceForAccess(roleId, identityContext) {
 }
 
 const validateConfiguration = (payload) => {
-  const configurationFields = ['severityLevels', 'voiceProviders', 'onCallSchedules', 'escalationPolicies'];
+  const configurationFields = ['severityLevels', 'voiceProviders', 'onCallSchedules', 'escalationPolicies', 'contactPoints'];
   if (!configurationFields.some((field) => payload[field] !== undefined)) return { error: '没有提交可发布的告警配置。', code: 'EMPTY_ALERTING_CONFIGURATION' };
   if (payload.severityLevels !== undefined) {
     if (!Array.isArray(payload.severityLevels) || payload.severityLevels.length !== 3) return { error: '必须保留 P0、P1、P2 三个告警等级。', code: 'INVALID_SEVERITY_LEVELS' };
@@ -220,6 +227,20 @@ const validateConfiguration = (payload) => {
       if (!Array.isArray(schedule.backupUserIds) || schedule.backupUserIds.some((userId) => userId && !knownUsers.has(userId))) return { error: `${schedule.name || schedule.id} 的备班人员无效。`, code: 'INVALID_ONCALL_ASSIGNMENT' };
     }
   }
+  if (payload.contactPoints !== undefined) {
+    if (!Array.isArray(payload.contactPoints) || payload.contactPoints.length > 200) return { error: '联系点必须是最多 200 项的数组。', code: 'INVALID_CONTACT_POINTS' };
+    const knownUsers = new Set(getIAMUsers().map((item) => item.id));
+    const seenUsers = new Set();
+    for (const contact of payload.contactPoints) {
+      const email = String(contact?.email || '').trim();
+      if (!knownUsers.has(contact?.userId) || seenUsers.has(contact.userId)) return { error: '联系点必须逐一绑定当前租户的唯一 IAM 用户。', code: 'INVALID_CONTACT_POINT_USER' };
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email) || email.length > 254) return { error: `${contact.userId} 的邮件地址无效。`, code: 'INVALID_CONTACT_POINT_EMAIL' };
+      if (!Array.isArray(contact.enabledChannels) || !contact.enabledChannels.length || contact.enabledChannels.some(channel => !supportedChannels.has(channel))) return { error: `${contact.userId} 的通知渠道无效。`, code: 'INVALID_CONTACT_POINT_CHANNELS' };
+      if (contact.phoneRef && !/^pii:\/\/[a-z0-9/_-]{1,240}$/iu.test(String(contact.phoneRef))) return { error: `${contact.userId} 的电话引用必须是受控 pii:// 引用。`, code: 'INVALID_CONTACT_POINT_PHONE_REF' };
+      if (contact.maskedPhone && (String(contact.maskedPhone).length > 40 || /[\u0000-\u001f]/u.test(String(contact.maskedPhone)))) return { error: `${contact.userId} 的脱敏电话格式无效。`, code: 'INVALID_CONTACT_POINT_PHONE' };
+      seenUsers.add(contact.userId);
+    }
+  }
   return null;
 };
 
@@ -228,22 +249,29 @@ export async function saveAlertingConfiguration(payload, actor) {
   if (validation) return validation;
   return mutateAlertingState((state) => {
     if (!Number.isInteger(payload.expectedVersion) || payload.expectedVersion !== state.configurationVersion) return { commit: false, result: { error: '告警配置已被更新，请刷新后重试。', code: 'VERSION_CONFLICT', currentVersion: state.configurationVersion } };
-    const before = { severityLevels: clone(state.severityLevels), escalationPolicies: clone(state.escalationPolicies), onCallSchedules: clone(state.onCallSchedules), voiceProviders: clone(state.voiceProviders) };
+    const before = { severityLevels: clone(state.severityLevels), escalationPolicies: clone(state.escalationPolicies), onCallSchedules: clone(state.onCallSchedules), voiceProviders: clone(state.voiceProviders), contactPointCount: state.contactPoints.length };
     if (Array.isArray(payload.severityLevels)) state.severityLevels = payload.severityLevels.map((level) => ({ ...clone(state.severityLevels.find((item) => item.id === level.id)), ...clone(level), id: level.id }));
     if (Array.isArray(payload.voiceProviders)) state.voiceProviders = state.voiceProviders.map((provider) => {
       const incoming = payload.voiceProviders.find((item) => item.id === provider.id);
       return incoming ? { ...provider, enabled: Boolean(incoming.enabled), language: String(incoming.language || provider.language), voice: String(incoming.voice || provider.voice) } : provider;
     });
-    if (Array.isArray(payload.onCallSchedules)) state.onCallSchedules = state.onCallSchedules.map((schedule) => {
-      const incoming = payload.onCallSchedules.find((item) => item.id === schedule.id);
-      return incoming ? { ...schedule, enabled: Boolean(incoming.enabled), primaryUserId: incoming.primaryUserId, backupUserIds: [...new Set(incoming.backupUserIds)].filter((userId) => userId && userId !== incoming.primaryUserId) } : schedule;
+    if (Array.isArray(payload.onCallSchedules)) state.onCallSchedules = payload.onCallSchedules.map(schedule => ({ ...clone(schedule), enabled: Boolean(schedule.enabled), backupUserIds: [...new Set(schedule.backupUserIds)].filter(userId => userId && userId !== schedule.primaryUserId) }));
+    if (Array.isArray(payload.contactPoints)) state.contactPoints = payload.contactPoints.map(contact => {
+      const existing = state.contactPoints.find((item) => item.userId === contact.userId);
+      return {
+        userId: contact.userId,
+        email: String(contact.email).trim().toLowerCase(),
+        maskedPhone: contact.maskedPhone ? String(contact.maskedPhone) : null,
+        phoneRef: Object.hasOwn(contact, 'phoneRef') ? (contact.phoneRef ? String(contact.phoneRef) : null) : existing?.phoneRef || null,
+        enabledChannels: [...new Set(contact.enabledChannels)]
+      };
     });
     if (Array.isArray(payload.escalationPolicies)) state.escalationPolicies = state.escalationPolicies.map((policy) => {
       const incoming = payload.escalationPolicies.find((item) => item.id === policy.id);
       return incoming ? { ...policy, enabled: Boolean(incoming.enabled), steps: clone(incoming.steps).sort((left, right) => left.order - right.order) } : policy;
     });
     state.configurationVersion += 1;
-    appendAlertingAuditToState(state, { type: 'configuration_published', status: 'completed', actor, summary: `告警、值班升级与虚拟电话配置已发布为 v${state.configurationVersion}。`, details: { before, after: { severityLevels: state.severityLevels, escalationPolicies: state.escalationPolicies, onCallSchedules: state.onCallSchedules, voiceProviders: state.voiceProviders.map(({ credentialRef: _credentialRef, ...provider }) => provider) }, version: state.configurationVersion } });
+    appendAlertingAuditToState(state, { type: 'configuration_published', status: 'completed', actor, summary: `告警、值班升级与虚拟电话配置已发布为 v${state.configurationVersion}。`, details: { before, after: { severityLevels: state.severityLevels, escalationPolicies: state.escalationPolicies, onCallSchedules: state.onCallSchedules, contactPointCount: state.contactPoints.length, voiceProviders: state.voiceProviders.map(({ credentialRef: _credentialRef, ...provider }) => provider) }, version: state.configurationVersion } });
     return { value: state, result: { configurationVersion: state.configurationVersion, message: '告警等级、升级时限与虚拟电话策略已发布。' } };
   }, (mutationResult) => ({
     type: 'alerting.configuration.published',

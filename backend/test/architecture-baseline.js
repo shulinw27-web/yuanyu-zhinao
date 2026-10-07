@@ -27,7 +27,15 @@ export const DOMAIN_EXPORT_CEILING = {
   // 2026-09-26 抬到 6（ADR-024）：补第 6 项契约「登记自定义系统」——接入清单不再
   // 预设备待接入/未登记系统，「新增接入」必须是租户可执行的登记动作；没有这项契约，
   // 去预设后的接入流程没有入口。仍不预留增长空间。
-  'system-onboarding': 6
+  // 2026-10-07 抬到 9（需求 2）：+3 项——「已接入系统补充物料」「系统理解」「物料边界声明」。
+  // 接入成功后租户可继续补充系统物料（8-5 同一受控解析管线），并把登记物料 + 文档提取
+  // 文本交给大模型生成系统理解（理解结果同时是 agent 引导接入的事实面）。实现移至
+  // system-material-service.js。现有 6 项不含登记后增量物料与理解面，故抬高。
+  'system-onboarding': 9,
+  // 2026-10-07 新增领域：系统接入监控（接入成功自动挂载 + 轮询 + 告警）。初始 4 项为
+  // 边界声明 + 总览 + 控制 + 手动触发巡检；同日抬到 5：监控路由必须通过领域公共入口
+  // 绑定受信租户，不能从路由层穿透 services，也不能在 Demo 回落读取默认租户。
+  'system-monitoring': 5
 };
 
 // 领域目录中不作为业务边界、不要求 public-api 的基础设施目录。
@@ -278,7 +286,16 @@ export const CROSS_DOMAIN_EDGE_BASELINE = new Set([
   'world-model-template-service.js -> system-registry-service.js',
   // 阶段 8-5（ADR-028）：schema 发现候选消费系统登记文档提取文本，与
   // mock-onboarding-service -> semantic-material-workspace-service 同性质（组装依赖，非新领域耦合）。
-  'semantic-material-workspace-service.js -> system-access-service.js'
+  'semantic-material-workspace-service.js -> system-access-service.js',
+  // 2026-10-07（系统接入监控 + 物料理解）：
+  //   1) system-monitoring-service -> semantic-tenant-context（监控注册表按租户隔离存储，
+  //      与 system-access/registry -> semantic-tenant-context 同性质：租户隔离设施）。
+  //   2) system-material-service -> semantic-tenant-context（补充物料/理解缓存按租户隔离，同性质）。
+  //   3) system-material-service -> local-model-gateway（大模型理解经模型网关 + 受控 fallback，
+  //      与 semantic-object-mention -> local-model-gateway 同性质：模型网关消费方）。
+  'system-monitoring-service.js -> semantic-tenant-context.js',
+  'system-material-service.js -> semantic-tenant-context.js',
+  'system-material-service.js -> local-model-gateway.js'
 ]);
 
 // 服务文件按前缀归域的判定依据（与仓库既有命名一致）。

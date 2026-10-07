@@ -60,6 +60,21 @@ export function getSystemDocumentTexts(code) {
   return state[normalized] || { documents: [], warnings: [] };
 }
 
+/**
+ * 追加系统文档提取文本（2026-10-07 物料补充）：已登记系统接入成功后继续补充文档物料时，
+ * 新提取文本**追加**到既有文档列表（8-5 的 storeSystemDocumentTexts 是登记时的整份写入）。
+ * 追加数量与单系统总量上限由调用方（system-material-service）校验，本函数只做追加。
+ */
+export function appendSystemDocumentTexts(code, documents, warnings = []) {
+  const normalized = String(code || '').toUpperCase();
+  return mutateState(NAMESPACE, semanticTenantStateKey(SYSTEM_DOCUMENTS_KEY), {}, (state) => {
+    if (!state[normalized]) state[normalized] = { documents: [], warnings: [] };
+    state[normalized].documents = [...(state[normalized].documents || []), ...documents];
+    state[normalized].warnings = [...(state[normalized].warnings || []), ...warnings];
+    return { value: state, result: { code: normalized, totalDocuments: state[normalized].documents.length, added: documents.length } };
+  });
+}
+
 /** 获取当前租户所有自定义系统的登记文档提取文本（供 schema 发现候选批量消费，8-5）。 */
 export function getAllSystemDocumentTexts() {
   const state = readState(NAMESPACE, semanticTenantStateKey(SYSTEM_DOCUMENTS_KEY), {});

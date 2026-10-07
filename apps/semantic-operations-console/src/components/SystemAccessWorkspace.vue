@@ -51,6 +51,18 @@ const error = ref('');
 const detailError = ref('');
 const probeError = ref('');
 const notice = ref('');
+// ADR-031：补充物料 / 系统理解 / 接入监控均由后端做租户隔离与权限闸门；
+// 这里仅管理呈现状态，不在浏览器侧缓存或推断系统事实。
+const understanding = ref(null);
+const understandingLoading = ref(false);
+const understandingMessage = ref('');
+const supplementNote = ref('');
+const supplementDocuments = ref([]);
+const supplementing = ref(false);
+const supplementMessage = ref('');
+const monitoring = ref(null);
+const monitoringLoading = ref(false);
+const monitoringMessage = ref('');
 let disposed = false;
 let overviewGeneration = 0;
 let detailGeneration = 0;
@@ -62,6 +74,7 @@ const selectedTarget = computed(() => targets.value.find((item) => item.id === s
 const selectedTemplate = computed(() => templates.value.find((item) => item.targets?.includes(selected.value?.id)) || null);
 const selectedDraft = computed(() => drafts.value.find((item) => item.targetId === selected.value?.id && item.status !== 'published')
   || drafts.value.find((item) => item.targetId === selected.value?.id) || null);
+const selectedMonitoring = computed(() => (monitoring.value?.systems || []).find((item) => item.code === selectedCode.value) || null);
 const canProbeSelected = computed(() => props.canProbe && selected.value?.probe?.supported === true && !probing.value);
 const probeDisabledReason = computed(() => {
   if (!props.canProbe) return '当前营运身份没有 meta_model.draft.save 权限，接入侧写入（含连通性探测）被拒绝。';
@@ -125,6 +138,103 @@ async function loadOverview() {
   }
 }
 
+async function loadSystemUnderstanding(code = selectedCode.value) {
+  if (!code || typeof props.client.systemUnderstanding !== 'function') return;
+  understandingLoading.value = true;
+  understandingMessage.value = '';
+  try {
+    const result = await props.client.systemUnderstanding(code);
+    if (!disposed && selectedCode.value === code) understanding.value = result.understanding || null;
+  } catch (err) {
+    if (!disposed && selectedCode.value === code) understandingMessage.value = errorMessage(err, '系统理解读取失败。');
+  } finally {
+    if (!disposed && selectedCode.value === code) understandingLoading.value = false;
+  }
+}
+
+async function regenerateSystemUnderstanding() {
+  const code = selectedCode.value;
+  if (!props.canProbe || !code || understandingLoading.value || typeof props.client.regenerateSystemUnderstanding !== 'function') return;
+  understandingLoading.value = true;
+  understandingMessage.value = '';
+  try {
+    const result = await props.client.regenerateSystemUnderstanding(code);
+    if (disposed || selectedCode.value !== code) return;
+    understanding.value = result.understanding || null;
+    understandingMessage.value = result.understanding ? `已基于当前登记物料生成系统理解（${result.understanding.modelMode || 'unknown'} 模式）。` : '尚未生成系统理解。';
+  } catch (err) {
+    if (!disposed && selectedCode.value === code) understandingMessage.value = errorMessage(err, '系统理解生成失败。');
+  } finally {
+    if (!disposed && selectedCode.value === code) understandingLoading.value = false;
+  }
+}
+
+async function readSupplementDocuments(event) {
+  const files = Array.from(event.target?.files || []);
+  if (event.target) event.target.value = '';
+  for (const file of files) {
+    if (file.size > 4 * 1024 * 1024) { supplementMessage.value = `文档 ${file.name} 超过 4MB 附件侧上限。`; continue; }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    supplementDocuments.value.push({ name: file.name, mimeType: file.type || 'application/octet-stream', dataUrl: `data:${file.type || 'application/octet-stream'};base64,${btoa(binary)}` });
+  }
+}
+
+async function submitSupplement() {
+  const code = selectedCode.value;
+  if (!props.canProbe || !code || supplementing.value || typeof props.client.supplementSystemMaterials !== 'function') return;
+  if (!supplementNote.value.trim() && !supplementDocuments.value.length) { supplementMessage.value = '请至少补充一段说明或一份文档。'; return; }
+  supplementing.value = true;
+  supplementMessage.value = '';
+  try {
+    const result = await props.client.supplementSystemMaterials(code, {
+      ...(supplementNote.value.trim() ? { note: supplementNote.value.trim() } : {}),
+      ...(supplementDocuments.value.length ? { attachmentDocuments: supplementDocuments.value } : {})
+    });
+    if (disposed || selectedCode.value !== code) return;
+    supplementNote.value = '';
+    supplementDocuments.value = [];
+    understanding.value = null;
+    supplementMessage.value = `已补充 ${result.documentTexts?.added || 0} 份可用文档物料；旧系统理解已失效，请按需重新生成。`;
+    await selectSystem(code);
+  } catch (err) {
+    if (!disposed && selectedCode.value === code) supplementMessage.value = errorMessage(err, '系统物料补充失败。');
+  } finally {
+    if (!disposed && selectedCode.value === code) supplementing.value = false;
+  }
+}
+
+async function loadMonitoring() {
+  if (typeof props.client.systemMonitoring !== 'function') return;
+  monitoringLoading.value = true;
+  try {
+    const result = await props.client.systemMonitoring();
+    if (!disposed) monitoring.value = result;
+  } catch (err) {
+    if (!disposed) monitoringMessage.value = errorMessage(err, '接入监控总览加载失败。');
+  } finally {
+    if (!disposed) monitoringLoading.value = false;
+  }
+}
+
+async function controlMonitoring(action) {
+  const code = selectedCode.value;
+  if (!props.canProbe || !code || monitoringLoading.value || typeof props.client.controlSystemMonitoring !== 'function') return;
+  monitoringLoading.value = true;
+  monitoringMessage.value = '';
+  try {
+    const result = await props.client.controlSystemMonitoring(code, action);
+    if (disposed || selectedCode.value !== code) return;
+    monitoringMessage.value = result.paused ? '该系统监控已暂停；接入事实仍保留。' : '该系统监控已恢复；后续轮询按挂载规则执行。';
+    await loadMonitoring();
+  } catch (err) {
+    if (!disposed && selectedCode.value === code) monitoringMessage.value = errorMessage(err, '监控状态更新失败。');
+  } finally {
+    if (!disposed && selectedCode.value === code) monitoringLoading.value = false;
+  }
+}
+
 async function selectSystem(code) {
   if (!code) return;
   const generation = ++detailGeneration;
@@ -138,6 +248,7 @@ async function selectSystem(code) {
     if (disposed || generation !== detailGeneration || selectedCode.value !== code) return;
     detail.value = result;
     faultMode.value = 'none';
+    await Promise.all([loadSystemUnderstanding(code), loadMonitoring()]);
   } catch (err) {
     if (!disposed && generation === detailGeneration) { detail.value = null; detailError.value = errorMessage(err, '系统详情加载失败。'); }
   } finally {
@@ -430,7 +541,7 @@ async function submitRegistration() {
   }
 }
 
-onMounted(async () => { await Promise.all([loadOverview(), loadMappingSurface()]); });
+onMounted(async () => { await Promise.all([loadOverview(), loadMappingSurface(), loadMonitoring()]); });
 onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; detailGeneration += 1; });
 </script>
 
@@ -565,6 +676,45 @@ onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; detailGenerati
                 <div v-if="detail.system.custom.vendor"><span>厂商 / 供应商</span><b>{{ detail.system.custom.vendor }}</b></div>
                 <div><span>模拟数据源</span><b>{{ detail.system.custom.mockScenarioId || '未挂接（无法连通性探测）' }}</b></div>
               </div>
+            </section>
+
+            <section class="sa-panel" aria-label="系统物料与理解" data-testid="system-material-understanding">
+              <div class="sa-panel-head"><div><span class="eyebrow">CONTROLLED SYSTEM MATERIALS · AGENT FACT BASE</span><h4>系统物料与理解</h4></div><span class="sa-src">仅基于登记事实，不替代人工签字</span></div>
+              <p class="sa-help">在登记后补充 API 文档、数据字典或业务说明。文件先经受控解析，平台只保存提取文本与取证，不保存原文件；补充物料会自动使旧的系统理解失效。</p>
+              <div class="sa-material-form">
+                <label>补充说明<textarea v-model="supplementNote" maxlength="400" rows="3" data-testid="system-supplement-note" placeholder="例如：供应商分级字段 supplier_level 的枚举口径与变更日期。" :disabled="!canProbe || supplementing" /></label>
+                <label>补充文档（单份≤4MB）<input type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,application/pdf,text/csv,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple data-testid="system-supplement-docs" :disabled="!canProbe || supplementing" @change="readSupplementDocuments" /></label>
+                <ul v-if="supplementDocuments.length" class="sa-doc-list"><li v-for="(doc, index) in supplementDocuments" :key="`${doc.name}-${index}`"><span>{{ doc.name || doc.mimeType }}</span><button type="button" :disabled="supplementing" @click="supplementDocuments.splice(index, 1)">移除</button></li></ul>
+                <div class="sa-lifecycle-actions"><button type="button" class="sa-outline" data-testid="system-supplement-submit" :disabled="!canProbe || supplementing" @click="submitSupplement">{{ supplementing ? '正在受控解析…' : '补充系统物料' }}</button><span v-if="!canProbe" class="sa-help">补充物料需要 meta_model.draft.save 权限。</span></div>
+              </div>
+              <p v-if="supplementMessage" class="sa-notice" role="status">{{ supplementMessage }}</p>
+              <div class="sa-understanding" data-testid="system-understanding">
+                <div class="sa-panel-head"><div><span class="eyebrow">MODEL-GENERATED · REVIEWABLE</span><h4>系统理解</h4></div><button type="button" class="sa-primary" data-testid="system-understanding-generate" :disabled="!canProbe || understandingLoading" @click="regenerateSystemUnderstanding">{{ understandingLoading ? '正在生成…' : understanding ? '重新生成理解' : '生成系统理解' }}</button></div>
+                <p v-if="understandingLoading" class="sa-help">正在读取登记物料、提取文本与最近探测状态…</p>
+                <template v-else-if="understanding">
+                  <p class="sa-help">生成于 {{ displayTime(understanding.generatedAt) }} · {{ understanding.modelMode || 'unknown' }} 模式 · 已引用 {{ understanding.sourceFacts?.documentCount || 0 }} 份文档、{{ understanding.sourceFacts?.supplementCount || 0 }} 条补充说明。</p>
+                  <pre>{{ understanding.answer }}</pre>
+                </template>
+                <p v-else class="sa-help">尚未生成系统理解。生成过程只使用当前系统的登记物料、受控提取文本、补充说明和探测状态；事实不足会明确标为“材料未覆盖”。</p>
+                <p v-if="understandingMessage" class="sa-notice" role="status">{{ understandingMessage }}</p>
+              </div>
+            </section>
+
+            <section class="sa-panel" aria-label="接入监控" data-testid="system-monitoring-panel">
+              <div class="sa-panel-head"><div><span class="eyebrow">SYSTEM ONBOARDING MONITORING</span><h4>接入监控</h4></div><span class="sa-src">{{ monitoring?.summary?.monitored ?? 0 }} 个系统已挂载</span></div>
+              <p class="sa-help">已接通或降级的系统会自动挂载；停用、退回或删除会自动解除。连续 {{ monitoring?.config?.alertThreshold ?? '—' }} 次失败告警，连续 {{ monitoring?.config?.degradeThreshold ?? '—' }} 次失败降级；恢复后不自动接通，仍由人工裁定。</p>
+              <template v-if="monitoringLoading && !monitoring"><p class="sa-help">正在加载接入监控状态…</p></template>
+              <template v-else-if="selectedMonitoring">
+                <div class="sa-grid">
+                  <div><span>挂载状态</span><b>{{ selectedMonitoring.paused ? '已暂停' : '监控中' }}</b></div>
+                  <div><span>连续失败</span><b>{{ selectedMonitoring.monitoring.consecutiveFailures }} 次</b></div>
+                  <div><span>最近巡检</span><b>{{ displayTime(selectedMonitoring.monitoring.lastProbeAt) }}</b></div>
+                  <div><span>最近探测</span><b>{{ selectedMonitoring.lastProbe?.status || '尚无记录' }}</b></div>
+                </div>
+                <div class="sa-lifecycle-actions"><button type="button" class="sa-outline" :disabled="!canProbe || monitoringLoading" data-testid="system-monitoring-toggle" @click="controlMonitoring(selectedMonitoring.paused ? 'resume' : 'pause')">{{ selectedMonitoring.paused ? '恢复监控' : '暂停监控' }}</button><span v-if="!canProbe" class="sa-help">暂停或恢复监控需要 meta_model.draft.save 权限。</span></div>
+              </template>
+              <p v-else class="sa-help">当前系统尚未处于 connected 或 degraded，未被挂载到接入监控。完成接通后会自动进入监控，无需手工创建第二份配置。</p>
+              <p v-if="monitoringMessage" class="sa-notice" role="status">{{ monitoringMessage }}</p>
             </section>
 
             <section class="sa-panel" aria-label="接入流程与生命周期">
@@ -772,6 +922,17 @@ onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; detailGenerati
 .sa-grid span { display: block; color: #8ea9ba; font-size: 10px; }
 .sa-grid b { display: block; font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
 .sa-credential { color: #7fd2e8 !important; font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-size: 11px !important; }
+.sa-material-form { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(260px,100%),1fr)); gap: 11px; margin-top: 12px; }
+.sa-material-form > label { display: block; min-width: 0; border: 1px solid #243c4d; border-radius: 7px; background: #0d2534; padding: 9px 11px; font-size: 12px; }
+.sa-material-form textarea,.sa-material-form input[type="file"] { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; color: #d8eaf3; font: inherit; }
+.sa-material-form textarea { resize: vertical; min-height: 72px; padding: 8px 10px; border: 1px solid #345268; border-radius: 7px; background: #081927; }
+.sa-material-form textarea:focus-visible,.sa-material-form input[type="file"]:focus-visible { outline: 2px solid #7cddda; outline-offset: 2px; }
+.sa-material-form .sa-doc-list,.sa-material-form .sa-lifecycle-actions { grid-column: 1 / -1; margin: 0; }
+.sa-doc-list { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-wrap: wrap; gap: 7px; }
+.sa-doc-list li { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 5px 7px 5px 10px; border: 1px solid #315369; border-radius: 7px; background: #0e2938; color: #b8d2df; font-size: 11px; overflow-wrap: anywhere; }
+.sa-doc-list button { padding: 3px 6px; font-size: 10px; }
+.sa-understanding { margin-top: 16px; padding: 13px; border: 1px solid #315469; border-radius: 8px; background: #091d2a; }
+.sa-understanding pre { margin: 10px 0 0; max-height: 420px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; border: 1px solid #29495c; border-radius: 7px; background: #071723; color: #d2e5ee; font: 12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace; }
 .sa-probe-actions { justify-content: flex-start; align-items: flex-end; }
 .sa-probe-actions label { flex: 0 1 200px; }
 .sa-probe-result { border: 1px solid #396c65; background: #122f32; border-radius: 8px; padding: 13px; overflow-wrap: anywhere; }
@@ -803,5 +964,5 @@ onBeforeUnmount(() => { disposed = true; overviewGeneration += 1; detailGenerati
 .sa-mapping-actions { justify-content: flex-start; align-items: center; margin-top: 12px; }
 .sa-mapping-actions .sa-help { margin: 0; }
 @media (max-width: 1180px) { .sa-layout { grid-template-columns: minmax(0,1fr); } .sa-list { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(260px,100%),1fr)); } }
-@media (max-width: 600px) { .sa-heading h2 { font-size: 18px; } .sa-panel { padding: 13px; } .sa-probe-actions { align-items: stretch; flex-direction: column; } .sa-probe-actions label { flex: 1 1 auto; } .sa-summary article { padding: 9px 11px; } }
+@media (max-width: 600px) { .sa-heading h2 { font-size: 18px; } .sa-panel { padding: 13px; } .sa-probe-actions { align-items: stretch; flex-direction: column; } .sa-probe-actions label { flex: 1 1 auto; } .sa-summary article { padding: 9px 11px; } .sa-understanding { padding: 10px; } }
 </style>

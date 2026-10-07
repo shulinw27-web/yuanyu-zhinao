@@ -2,14 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
-import { resetRuntimeState } from '../src/repositories/runtime-state-repository.js';
+import { resetRuntimeState, writeState } from '../src/repositories/runtime-state-repository.js';
 import {
+  dispatchAlert,
   getAlertingWorkspaceForAccess,
   recordVoiceCallEvent,
   saveAlertingConfiguration,
   simulateAlert,
   testVoiceCall
 } from '../src/domains/alerting/alerting-service.js';
+import { runWithIAMStoreContext } from '../src/services/iam-store.js';
+import { createTenantIAMWorkspace, iamWorkspaceKey } from '../src/services/iam-workspace-model.js';
+import { initialRolePolicies } from '../src/data/iam-seed.js';
+import { getAlertingState } from '../src/domains/alerting/alerting-store.js';
 
 const executiveIdentity = { source: 'demo_header', subjectId: 'demo:executive:alerting-test' };
 const actor = { type: 'test', id: 'alerting-test' };
@@ -78,6 +83,66 @@ test('alerting workspace and calls remain organization scoped', async () => {
   const procurement = await getAlertingWorkspaceForAccess('procurement_manager', { source: 'identity_session', subjectId: 'procurement@demo.local' });
   assert.equal(procurement.voiceCalls.some((item) => item.organizationId === 'org-quality-dept'), false);
   assert.equal(procurement.audits.some((item) => item.organizationId === 'org-quality-dept'), false);
+  assert.deepEqual(procurement.eligibleContactUsers, [], '没有发布权限的角色不得读取联系人候选目录');
+});
+
+test('alerting workspaces and contact points are tenant scoped and never inherit Demo recipients', async () => {
+  resetRuntimeState(['alerting', 'iam', 'domain_event_outbox']);
+  const tenantId = 'alerting-enterprise-a';
+  const iam = createTenantIAMWorkspace(tenantId);
+  iam.organizations = [{ id: 'org-a', name: '企业 A', parentId: null }];
+  iam.users = [{ id: 'admin-a', account: 'admin@a.example', name: '企业 A 管理员', title: '管理员', department: '信息部', orgUnitId: 'org-a', roleIds: ['executive'], primaryRoleId: 'executive', status: 'active', sources: ['local'], version: 1 }];
+  iam.rolePolicies = { executive: structuredClone(initialRolePolicies.executive) };
+  writeState('iam', iamWorkspaceKey(tenantId), iam);
+
+  await runWithIAMStoreContext(async () => {
+    const identity = { tenantId, subjectId: 'admin-a', source: 'identity_session' };
+    const baseline = await getAlertingWorkspaceForAccess('executive', identity);
+    assert.deepEqual(baseline.contactPoints, [], '新租户不得继承 Demo 联系点');
+    assert.deepEqual(baseline.eligibleContactUsers.map((item) => item.id), ['admin-a'], '联系人候选只来自当前租户 IAM');
+    const saved = await saveAlertingConfiguration({
+      expectedVersion: baseline.configurationVersion,
+      contactPoints: [{ userId: 'admin-a', email: 'ops@a.example', maskedPhone: '139****1001', phoneRef: 'pii://tenant-a/users/admin-a/mobile', enabledChannels: ['in_app', 'push', 'email', 'voice'] }]
+    }, { ...actor, tenantId });
+    assert.equal(saved.error, undefined);
+    const publicWorkspace = await getAlertingWorkspaceForAccess('executive', identity);
+    assert.equal(Object.hasOwn(publicWorkspace.contactPoints[0], 'phoneRef'), false, '工作区不得返回真实号码引用');
+    const republished = await saveAlertingConfiguration({
+      expectedVersion: publicWorkspace.configurationVersion,
+      contactPoints: publicWorkspace.contactPoints
+    }, { ...actor, tenantId });
+    assert.equal(republished.error, undefined);
+    assert.equal((await getAlertingState()).contactPoints[0].phoneRef, 'pii://tenant-a/users/admin-a/mobile', '界面回写不得清空隐藏的 PII 引用');
+
+    const escalationWorkspace = await getAlertingWorkspaceForAccess('executive', identity);
+    const escalationPolicies = structuredClone(escalationWorkspace.escalationPolicies);
+    const p2 = escalationPolicies.find((item) => item.severity === 'P2');
+    p2.steps[0].receiverType = 'executive';
+    p2.steps[0].channels = ['email'];
+    assert.equal((await saveAlertingConfiguration({
+      expectedVersion: escalationWorkspace.configurationVersion,
+      escalationPolicies
+    }, { ...actor, tenantId })).error, undefined);
+    const executiveDelivery = await dispatchAlert({ riskId: 'TENANT-A-EXECUTIVE-1', title: '企业 A 管理层通知', sourceSystem: 'OMS', eventType: 'TrendNotice', organizationId: 'org-a', tenantId });
+    assert.ok(executiveDelivery.deliveries.some(item => item.receiverUserId === 'admin-a' && item.target === 'ops@a.example'), '管理层升级必须解析当前租户 executive，而不是 Demo 用户');
+
+    const dispatched = await dispatchAlert({ riskId: 'TENANT-A-SYSMON-1', title: '企业 A 系统异常', sourceSystem: 'ERP', eventType: 'SystemConnectionProbeFailed', organizationId: 'org-a', ownerUserId: 'admin-a', tenantId });
+    assert.equal(dispatched.error, undefined);
+    assert.ok(dispatched.deliveries.some(item => item.channel === 'email' && item.target === 'ops@a.example'));
+    assert.equal((await getAlertingWorkspaceForAccess('executive', identity)).simulatedAlerts.some(item => item.riskId === 'TENANT-A-SYSMON-1'), true);
+  }, tenantId);
+
+  const demo = await getAlertingWorkspaceForAccess('executive', executiveIdentity);
+  assert.equal(demo.simulatedAlerts.some(item => item.riskId === 'TENANT-A-SYSMON-1'), false, 'Demo 不得读取企业 A 告警');
+  assert.ok(demo.contactPoints.some(item => item.email === 'admin@demo.local'), 'Demo 自身种子联系点保持可用');
+});
+
+test('alert dispatch rejects a tenant claim that differs from the bound IAM workspace', async () => {
+  resetRuntimeState(['alerting']);
+  await runWithIAMStoreContext(async () => {
+    const denied = await dispatchAlert({ riskId: 'FORGED-TENANT', eventType: 'TrendNotice', tenantId: 'tenant-b' });
+    assert.equal(denied.code, 'ALERT_TENANT_CONTEXT_MISMATCH');
+  }, 'tenant-a');
 });
 
 async function reservePort() {

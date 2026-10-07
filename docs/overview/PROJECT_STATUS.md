@@ -1,5 +1,19 @@
 # 当前项目状态
 
+2026-10-07（WorkBuddy 复核后的安全与验收口径）：
+
+- 全流程 E2E 会改写固定的 `oa-governance` 草稿和发布状态，因此只允许在一次性隔离的本机实例运行；脚本默认拒绝未显式声明隔离环境的执行，也不再为腾出任务容量归档既有会话。新增 `evaluate:e2e-isolated` 负责独立数据库、端口、API、Semantica、巡检 Worker 与合成 OMS 连接器的启动和回收。智脑阶段要求受控语义读取、同版本模型、可复核证据及确定性计算；2026-10-07 本机合成场景 **44/44 通过、0 失败、53 次 HTTP 请求**。这不是生产连接器或真实模型验收；见 [安全运行与验收口径](../development/E2E_FLOW_ACCEPTANCE.md)。
+- 系统监控 daemon 生产模式必须显式配置 `SYSTEM_MONITOR_TENANT_IDS`，逐租户绑定 IAM 与语义上下文；每租户使用运行时仓库 Leader 租约，多进程共享 SQLite 竞争、续租与过期接管已验证。告警工作区和联系点按 IAM 租户分区，非 Demo 租户可在管理端“通知联系人”可视化维护本租户 IAM 联系点；隐藏的真实电话引用不会返回浏览器或被普通页面回写清空，管理层升级动态解析本租户 `executive`。未配置时保留待发送且不回退 Demo。告警与降级通知失败沿用同一事件 ID 重试。真实邮件供应商回执、生产多节点故障注入与真实企业系统接入仍未验收。
+- `npm run quality` 是确定性代码门禁，**不含真实模型评测或 E2E**；本轮全量门禁已 **EXIT=0**。2026-10-07 的 `evaluate:mention-linking` 6/6 为独立一次性评测结果，不能外推为后续每次 quality 全绿均覆盖模型契约。
+
+2026-10-07（第三段）**ADR-031 接入监控与物料理解操作面收口**——复审正在开发中的系统接入监控链路后补齐一个真实入口缺口，并把已完成的后端能力落到运营界面：
+
+- **修复理解缓存读取路由**：此前 `GET /api/semantic-operations/systems/:code/understanding` 被外层 POST-only 分支拦截，界面无法读取既有缓存、只能反复重算。现已将 GET 明确分流为只读缓存读取；POST 保持重算和 `meta_model.draft.save` 写入闸门，其余动作 GET 返回 405，未扩大写入面。
+- **修复监控路由租户上下文**：监控路由原先没有绑定 `agentIdentity` 的语义租户上下文，在开发环境有误回落读取 `demo-enterprise` 的风险。现与系统接入路由一致显式绑定受信租户；新增双租户回归，验证总览与 pause 都只作用于当前租户。
+- **防止过期理解**：成功补充系统物料后，按同一租户与系统码删除旧系统理解缓存；前端明确提示“旧系统理解已失效”，要求按需重算，避免补充前摘要被当成最新事实。
+- **运营端可执行闭环**：系统接入页新增“补充系统物料 → 受控解析 → 生成/审阅系统理解 → 查看接入监控 → 暂停/恢复”的界面入口。文件仍只以 data URL 进入后端安全闸门，原文件不持久化；系统理解只呈现模型输出与来源计数；监控状态全部由服务端注册表返回，浏览器不本地改写。
+- **SDK 与回归**：SDK 补齐物料、理解、监控 6 个客户端契约；新增理解 GET/POST 路由、缓存失效、SDK URL 编码与前端操作面守护测试。实测 `test:access` **55/55**、SDK **7/7**、语义运营端 Vite 构建通过。完整验收见 [ADR-031](../architecture/adr/ADR-031-system-onboarding-monitoring-and-materials.md)。
+
 2026-10-07（第二段）**边界项四连完成（[ADR-029](../architecture/adr/ADR-029-document-dictionary-strong-chain.md) / [ADR-030](../architecture/adr/ADR-030-semantic-operations-permission-independence.md)）**——未完成清单盘点后用户确认四项全做，按风险从小到大执行：
 
 - **C-3 审计文档补前端三层判据**（纯文档）：模块化审计第 6 项关闭——三层判据（`components/` 无业务语义展示组件 / `packages/agent-ui` 跨端共享业务组件 / `features/<domain>/` 单端页面级组件）写进 [模块化审计](../architecture/MODULARIZATION_AUDIT.md)；第 4 项剩余（risk-service → domains/alerting 分层反转）属架构债务按棘轮基线收敛，不在本轮。
@@ -13,7 +27,7 @@
 - **8-5 文档 → schema 发现消费链**：`storeSystemDocumentTexts` / `getAllSystemDocumentTexts`（DOCS_KEY 状态）把登记文档提取文本串入 `discoverWorkspaceSchemas`——文档物料从「仅持久化与披露」升级为「进 schema 发现候选消费链」（候选路径边界不变、不进 mock 强校验链）；`registerSystemOnboarding` 随文档解析由同步转 async。新增 `system-access-document-discovery.test.js` **5/5**；架构棘轮登记新跨域边 `semantic-material-workspace-service → system-access-service`（净收敛性质）。
 - **8-6 心跳定时探测 Worker**：新增 `heartbeat-probe-worker.js`（可配周期默认 5min、连续 3 次失败自动降级、fetcher/credentialResolver 可注入）；状态机新增 `degraded` 状态（`connected ⇄ degraded`，降级可恢复、非接通撤销；接通门禁不变）。新增 `heartbeat-probe-worker.test.js` **5/5**。
 - **8-7 授权方案扩展**：`AUTH_SCHEME_OPTIONS` 2 → 5（+`api_key` / `oauth_authorization_code` / `mTLS`）；校验（api_key/mTLS 需 credentialRef、oauth 另需 redirectUri https）；凭据策略注册扩展到全部 4 种凭据持有方案；`executeHeartbeatProbe` 按 scheme 分支（api_key→`X-API-Key` 头、oauth→Bearer、mTLS→无特殊请求头 TLS 层签名）；`heartbeat-credential-resolver` 按 scheme 返回 `apiKey`/`authorizationHeader`。心跳测试 11→**15**。**边界**：真实 KMS 签发、mTLS 证书注入、OAuth 真实换 token 仍属触发式复审（opaque handle 占位不变）；Token Exchange（f）保留。
-- **真实模型评测补跑成功**：`evaluate:mention-linking`（ADR-025）因云限流欠账自 2026-09-28，2026-10-07 云配额恢复后补跑——变体轮 **6/6 通过、0 失败**（A 3/3 `linked-as-expected`：收货单→InboundReceipt 结构化候选 + 发运单→OutboundShipment 缺口点名；B 3/3 `abstained` 弃权不硬凑）；E2E 断言 5 项全 true。**「quality 全绿」自此起含真实模型评测数字**。
+- **真实模型评测独立补跑成功**：`evaluate:mention-linking`（ADR-025）因云限流欠账自 2026-09-28，2026-10-07 云配额恢复后单独补跑——变体轮 **6/6 通过、0 失败**（A 3/3 `linked-as-expected`：收货单→InboundReceipt 结构化候选 + 发运单→OutboundShipment 缺口点名；B 3/3 `abstained` 弃权不硬凑）；该评测自身的 E2E 断言 5 项全 true。**它不在 `npm run quality` 内，不能用 quality 结果替代模型契约评测。**
 - **验收（本机实测）**：registry **15/15**、heartbeat **15/15**、worker **5/5**、document-discovery **5/5**；`npm run quality` 端到端 **EXIT=0**（架构棘轮通过）。**剩余（不可完成项如实）**：5b（图片/扫描页/音频）仍被视觉模型硬前置卡死；真实企业连接器、生产多租户、完整 NL 接入问答属生产化范围；文档字典进 mock 强校验链需复审 5a 边界。
 
 2026-10-06 **阶段 8：系统接入连接配置段（[ADR-028](../architecture/adr/ADR-028-system-onboarding-connection-config.md)）**——用户三点需求（文档型物料 / 心跳接口 / 授权方式）触发 ADR-024 复审条件 1，登记物料从「业务描述性」扩展到「连接配置段」：

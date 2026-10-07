@@ -45,6 +45,26 @@ export function prohibitsAction(input, action) {
   return new RegExp(`(?:不要|不用|不必|不想|不需要|无需|禁止|暂不|不能|不可|(?<!识|辨|区|级)别|不)(?:[^，,。；;！!？?\\n]{0,12})(?:${verbs})`, 'iu').test(String(input));
 }
 
+// Mock mode intentionally skips model-based turn understanding. This helper is
+// deliberately narrow: it may only recover an explicit, named, attachment-free
+// read request when a published read plan exists. A model failure returns a
+// turn object, so it cannot enter this path. Authorization is still enforced by
+// the published ontology runtime.
+export function shouldUseExplicitPublishedRead({
+  input,
+  turn,
+  explicitIds = [],
+  hasPublishedReadPlans = false,
+  hasAttachments = false
+}) {
+  return Boolean(hasPublishedReadPlans
+    && !turn
+    && !hasAttachments
+    && explicitIds.length > 0
+    && /(?:只读|读取|查询|核验|核对|查看)/u.test(String(input || ''))
+    && !prohibitsAction(input, 'read_business'));
+}
+
 // This projection removes prohibited clauses from legacy command recognition.
 // It is a conservative action guard, never a substitute for model understanding
 // or the server's permission/confirmation checks.

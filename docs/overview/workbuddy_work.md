@@ -1,6 +1,8 @@
 # WorkBuddy 协作工作记录
 
-更新：2026-10-05（覆盖至阶段 5a 文档类材料接入完成）。本页按时间线维护 WorkBuddy 接手「元域智脑」（demo-platform）以来完成的工作，供交接与回溯使用。当前整体状态以 [当前状态](PROJECT_STATUS.md) 为准，此处只记录协作过程中的增量、根因与边界，不重复验收结论。
+更新：2026-10-07（时间线覆盖至第 49 项）。本页按时间线维护 WorkBuddy 接手「元域智脑」（demo-platform）以来完成的工作，供交接与回溯使用。当前整体状态以 [当前状态](PROJECT_STATUS.md) 为准，此处只记录协作过程中的增量、根因与边界，不重复验收结论。
+
+> 2026-10-07 复核口径：历史段落保留当时的状态与测试数字，不自动代表现在的状态。第 47 项的真实模型 6/6 是单独运行的 `evaluate:mention-linking`；`npm run quality` **不包含**该命令。阶段 5a 文档材料已完成，5b 图片／扫描页／音频仍未完成；local 白名单 basename 问题已在第 48 项修复。当前未完成项以 [项目状态](PROJECT_STATUS.md) 和 [生产 Checklist](../operations/PRODUCTION_TODO_CHECKLIST.md) 为准。
 
 ## 时间线总览
 
@@ -52,8 +54,9 @@
 | 44 | 阶段 7·文档同步与路线图口径对齐 | 第一段：`iam-seed` 菜单描述重构 + 全量事实性文档同步（`docs/modules/07` 权限列按 ADR-026、`ARCHITECTURE` 按钮清单、`SEMANTIC_CONTEXT_MICROSERVICE` 表述）。第二段：[开发路线](../development/DEVELOPMENT_ROADMAP.md) 口径对齐（用户 2026-09-25 已确认）——阶段 1「模拟企业与接入项目」→「**系统接入**」、新增口径对齐段；带日期历史增量保留原口径不回溯改写。`docs:check` **188 md / 1223 链接**。**至此系统接入重构阶段 0~4h、6、7 全部完成；阶段 5 被视觉模型硬前置卡死** |
 | 45 | 阶段 5a·文档类材料接入（ADR-027） | 用户 2026-10-05 决策重新划界：暂不增加视觉能力，多模态现阶段以文档类能力为主（建模时阅读接口/数据字典文档）。5a-0 探针取证后实施：登记通道 `saveMockOnboardingMaterial` 扩展接受 `{attachment}`（与 `text` 二选一），走对话面同一套安全闸门，**只持久化提取文本+解析取证、原文件不落地**；图片/音频/视频与字典/样本文档形态给专用错误码整份拒绝；`office-material-parser` 新增 `parseOfficeTableRows`，office mime 与 CSV 同路径产出 `xlsx_dictionary`/`docx_dictionary` 候选；PDF 不进结构化候选并在 warnings 点名披露；前端三类文本材料开放文档上传。**连带修复两处真缺陷**：多模态报告新增 `parserTruncated`（解析器级截断与模型上下文预算截断此前混为一谈会误拒合法文档）；`lowerKeys` 的 `[^a-z0-9]` 把中文表头清洗成空串——「字段名/主键/外键」等中文别名列**从不生效**（属「实现与断言同错」）。新边 `mock-onboarding-service → multimodal-input-service` 按同性质先例登记。`npm run quality` **EXIT=0**（1m36s）；新增 `mock-onboarding-document` **6/6**、`semantic-schema-discovery-document` **7/7**；回归 mock-onboarding 75/75、semantic 105/105、mention 7/7、attribution 12/12、multimodal 19/19、console 63/63 + 构建；`docs:check` **189 md / 1241 链接**。**边界**：dictionary/samples 强校验链仍以 JSON 字典为准，文档形态字典只走候选路径；5b（图片/扫描页/音频）仍整份拒绝，待视觉/语音通道可用后单独排期 |
 | 46 | 阶段 8·系统接入连接配置段（ADR-028） | 用户三点需求（文档物料/心跳接口/授权方式）触发 ADR-024 复审条件 1：登记物料三段扩展 `attachmentDocuments`（登记即入库、复用 5a 解析）+ `heartbeat`（endpoint 必填）+ `auth`（scheme 枚举、credentialRef 必须 kms://）；探测升级——自定义系统带 heartbeat.endpoint 优先真实心跳（a=X-On-Behalf-Of 透传不持凭据、b=Key Center 按租户策略发 opaque Bearer），心跳失败但有 mockScenarioId 降级模拟场景带 heartbeatIssue；登记时自动注册凭据策略。接通门禁仍=人工签字。registry 15/15、heartbeat 11/11、quality EXIT=0 |
-| 47 | 阶段 8 收官·8-5~8-7 边界项 + 真实模型评测补跑 | 8-5：文档提取文本串入 `discoverWorkspaceSchemas`（DOCS_KEY），`registerSystemOnboarding` 转 async，新增 document-discovery **5/5**、棘轮登记 `semantic-material-workspace → system-access` 跨域边；8-6：心跳定时探测 Worker（连续 3 次失败自动降级，状态机新增 `degraded` connected⇄degraded），worker **5/5**；8-7：auth.scheme 2→5（+api_key/oauth_authorization_code/mTLS），凭据策略注册扩展到全部 4 种凭据持有方案，heartbeat 11→**15**；`evaluate:mention-linking` 云配额恢复后补跑**6/6 通过**（A linked-as-expected、B abstained），关闭 ADR-025 评测欠账——**「quality 全绿」自此起含真实模型评测数字** |
+| 47 | 阶段 8 收官·8-5~8-7 边界项 + 真实模型评测补跑 | 8-5：文档提取文本串入 `discoverWorkspaceSchemas`（DOCS_KEY），`registerSystemOnboarding` 转 async，新增 document-discovery **5/5**、棘轮登记 `semantic-material-workspace → system-access` 跨域边；8-6：心跳定时探测 Worker（连续 3 次失败自动降级，状态机新增 `degraded` connected⇄degraded），worker **5/5**；8-7：auth.scheme 2→5（+api_key/oauth_authorization_code/mTLS），凭据策略注册扩展到全部 4 种凭据持有方案，heartbeat 11→**15**；`evaluate:mention-linking` 云配额恢复后**独立补跑 6/6**（A linked-as-expected、B abstained），关闭 ADR-025 当次评测欠账；该评测不进入 `quality`。 |
 | 48 | 边界项四连·C-1/C-2/C-3/C-4① | 未完成清单盘点后确认：C-3 模块化审计第 6 项关闭（前端三层判据写入审计文档）；C-4① `validateModelSelection` local 通道按 **basename** 比对（白名单存裸文件名、运行时配置是完整路径，精确匹配恒失败）；C-1 [ADR-029](../architecture/adr/ADR-029-document-dictionary-strong-chain.md)：XLSX/DOCX 文档字典直接进 mock 强校验链（推翻 5a 决策点 3，samples 仍限 JSON），mock-onboarding-document **9/9**；C-2 [ADR-030](../architecture/adr/ADR-030-semantic-operations-permission-independence.md)：权限目录新增 `menu.semantic-operations`（元域智语），删除 `menu.world`/`page.world.view`（4.3 决策 A 保留期兑现），8 处后端 + 2 处前端 + 4 处测试换码，AppShell「语义层」死链删除；permissions **31/31**、knowledge **56/56**、multitenant **75/75**、quality 全绿 |
+| 49 | WorkBuddy 复核整改·监控可靠性与严格双 Agent E2E | 接入监控改为生产显式租户清单 + IAM/语义双上下文 + 每租户跨进程 Leader 租约；告警工作区/联系点按租户隔离，失败同事件 ID 重试，管理端可视化维护联系人且管理层升级解析本租户身份；E2E 改一次性隔离编排，不归档既有会话，补合成 OMS 读取方案、对象授权、允许/拒绝回放与同版本证据断言；智脑 Mock 只读兜底收窄为明确编号与只读动词；隔离闭环 **44/44**，全量 `quality` EXIT=0 |
 
 ## 1. 项目理解与基线梳理
 
@@ -1130,6 +1133,14 @@ const selectedCodes = requestedSystems.length
 **验收（本机实测）**：`npm run quality` 端到端 **EXIT=0**（**1m36s**）；新增 `backend/test/mock-onboarding-document.test.js` **6/6**（正例 DOCX/XLSX/PDF 登记、取证披露、原文件不入库；反例：字典/样本文档形态、图片/音频、双通道输入、扫描 PDF、隐藏注入、超 64KiB、超 2000 行）、`backend/test/semantic-schema-discovery-document.test.js` **7/7**（XLSX/DOCX 字典候选与 CSV 同构、登记文本交接路径、PDF 披露、无表头披露、稀疏列对齐、隔离材料不进候选）；回归 `test:mock-onboarding` **75/75**、`test:semantic` **105/105**、`test:mention` **7/7**、`test:attribution` **12/12**、multimodal **19/19**、console 组件 **63/63** + vite 构建、lint 干净；`docs:check` **189 md / 1241 链接**。
 
 **边界（如实）**：dictionary/samples 强校验链仍以 JSON 字典为准，文档形态字典只走候选路径；5b（图片/扫描页/音频）仍整份拒绝，待视觉/语音通道可用后单独排期；真实模型评测不进 quality。
+
+## 49. WorkBuddy 复核整改：监控可靠性与严格双 Agent E2E
+
+复核没有把历史“已完成”直接当成当前事实，而是重新沿执行路径验证。两类高风险缺口已关闭：其一，系统监控 Worker 此前缺少生产租户清单和逐租户上下文，通知状态还可能在投递失败前被提前确认；现改为生产显式配置 `SYSTEM_MONITOR_TENANT_IDS`、逐租户绑定 IAM 与语义上下文、单进程防重叠，并为每租户增加运行时仓库 Leader 租约。共享 SQLite 四进程同租户竞争只有一个 Leader，同一 worker 续租、过期后可接管。告警工作区和联系点按 IAM 租户分区，非 Demo 租户可在管理端可视化发布本租户联系点；页面不接触真实电话引用，回写时服务端保留已有受控引用，管理层升级按当前租户在役 `executive` 解析。未配置则保持待发送且不回退 Demo。告警与降级通知均在分派成功后确认，失败用稳定事件 ID 重试。联调同时发现并修复默认分派器动态导入路径多退一层的 `ERR_MODULE_NOT_FOUND`（此前注入测试遮住了真实默认路径）。其二，旧 E2E 会直接改固定草稿且可归档已有会话，智脑只要返回非空文本就算通过；现由 `evaluate:e2e-isolated` 管理独立端口、数据库与进程，原始脚本无隔离声明即拒绝，容量满时失败而不修改已有会话。
+
+严格闭环使用合成 OMS 记录 `ORD-E2E-001`，先回放允许与拒绝两条读取，再发布带读取方案和条件授权的模型；智脑必须通过 `controlled_semantic_read` 使用同一发布版本，返回来源证据并计算订单金额 **33,000 CNY** 与延期状态。Mock 运行时没有模型意图识别，因此仅增加一个可单测的窄兜底：必须同时满足“有已发布读取方案、明确业务编号、明确只读动词、无附件、无模型失败”，并继续由运行时复核对象、记录与组织权限；它不能选择写操作。
+
+**验收（本机实测）**：隔离 E2E **44/44 通过、0 失败、53 次 HTTP 请求**；`test:access` **63/63**；告警编排 **7/7**；权限与联系人编辑 **33/33**；会话与意图路由 **23/23**；架构棘轮 **10/10**；`npm run quality` 端到端 **EXIT=0**；`docs:check` **194 份 Markdown / 1272 个本地链接**。边界不变：这些结果来自合成数据与 Mock/本机受控组件，不代表真实企业连接器、真实邮件供应商回执、生产多节点故障切换或真实云模型质量已验收。
 
 ## 质量与边界
 

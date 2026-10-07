@@ -92,3 +92,37 @@ test('mock connection and preview retain server errors without an automatic conn
   await assert.rejects(client.onboardingPreview('p1', 'Order'), error => error.status === 409 && error.code === 'MOCK_ONBOARDING_PREVIEW_STALE');
   assert.equal(calls, 2);
 });
+
+test('system access SDK exposes material understanding and monitoring endpoints with encoded system codes', async t => {
+  const previous = { fetch: globalThis.fetch, localStorage: globalThis.localStorage };
+  t.after(() => Object.assign(globalThis, previous));
+  globalThis.localStorage = undefined;
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+  const client = createSemanticOperationsClient({ baseUrl: 'http://mock.test/api', platform: 'system-access-test' });
+  await client.supplementSystemMaterials('ERP / 1', { note: '补充接口字典' });
+  await client.systemUnderstanding('ERP / 1');
+  await client.regenerateSystemUnderstanding('ERP / 1');
+  await client.systemMonitoring();
+  await client.controlSystemMonitoring('ERP / 1', 'pause');
+  await client.runSystemMonitoring({ dryRun: true });
+  assert.deepEqual(calls.map(call => call.url), [
+    'http://mock.test/api/semantic-operations/systems/ERP%20%2F%201/materials',
+    'http://mock.test/api/semantic-operations/systems/ERP%20%2F%201/understanding',
+    'http://mock.test/api/semantic-operations/systems/ERP%20%2F%201/understanding',
+    'http://mock.test/api/semantic-operations/system-monitoring',
+    'http://mock.test/api/semantic-operations/system-monitoring/ERP%20%2F%201/pause',
+    'http://mock.test/api/semantic-operations/system-monitoring/run'
+  ]);
+  assert.equal(calls[0].options.method, 'POST');
+  assert.deepEqual(JSON.parse(calls[0].options.body), { note: '补充接口字典' });
+  assert.equal(calls[1].options.method, undefined);
+  assert.deepEqual(JSON.parse(calls[2].options.body), { regenerate: true });
+  assert.equal(calls[3].options.method, undefined);
+  assert.equal(calls[4].options.method, 'POST');
+  assert.equal(calls[5].options.method, 'POST');
+  assert.deepEqual(JSON.parse(calls[5].options.body), { dryRun: true });
+});

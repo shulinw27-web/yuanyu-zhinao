@@ -52,7 +52,8 @@ const run = async () => {
 if (once) { await run(); await runtimeDependencies.close(); }
 else {
   await run();
-  const timer = setInterval(() => void run(), 30_000);
+  const intervalMs = Math.max(1000, Number(process.env.SEMANTIC_INSPECTION_INTERVAL_MS) || 30_000);
+  const timer = setInterval(() => void run(), intervalMs);
   const stop = async () => { clearInterval(timer); await runtimeDependencies.close(); process.exit(0); };
   process.once('SIGINT', stop); process.once('SIGTERM', stop);
 }

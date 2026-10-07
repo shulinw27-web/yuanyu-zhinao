@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { affirmativeRequest, conversationMaterial, parseTurnUnderstanding, prohibitsAction } from '../src/services/agent-turn-understanding-service.js';
+import { affirmativeRequest, conversationMaterial, parseTurnUnderstanding, prohibitsAction, shouldUseExplicitPublishedRead } from '../src/services/agent-turn-understanding-service.js';
 import { classifySemanticOperationsIntent, createSemanticOperationsTask, listSemanticOperationsTasks } from '../src/services/semantic-operations-task-service.js';
 import { isBroadReportRequest } from '../src/services/agent-dialogue-intent-service.js';
 import { validateNaturalSchema } from '../src/services/semantic-natural-schema-service.js';
@@ -26,6 +26,17 @@ test('turn contract refuses malformed output, cross-surface intents and missing 
   assert.equal(parseTurnUnderstanding(JSON.stringify(good), 'business').answer, good.answer);
   for (const bad of ['not json', '{}', JSON.stringify({ ...good, intent: 'delete_all' }), JSON.stringify({ ...good, needsClarification: null }), JSON.stringify({ ...good, intent: 'publish_model' })]) assert.equal(parseTurnUnderstanding(bad, 'business'), null);
   assert.equal(parseTurnUnderstanding(JSON.stringify({ ...good, intent: 'read_business' }), 'semantic'), null);
+});
+
+test('mock published read fallback only accepts explicit named read requests', () => {
+  const base = { input: '请只读核验订单 ORD-E2E-001', turn: null, explicitIds: ['ORD-E2E-001'], hasPublishedReadPlans: true, hasAttachments: false };
+  assert.equal(shouldUseExplicitPublishedRead(base), true);
+  assert.equal(shouldUseExplicitPublishedRead({ ...base, input: '请分析订单应该怎么处理' }), false);
+  assert.equal(shouldUseExplicitPublishedRead({ ...base, input: '不要查询订单 ORD-E2E-001' }), false);
+  assert.equal(shouldUseExplicitPublishedRead({ ...base, explicitIds: [] }), false);
+  assert.equal(shouldUseExplicitPublishedRead({ ...base, hasPublishedReadPlans: false }), false);
+  assert.equal(shouldUseExplicitPublishedRead({ ...base, hasAttachments: true }), false);
+  assert.equal(shouldUseExplicitPublishedRead({ ...base, turn: { intent: 'dialogue', source: 'understanding_failed' } }), false);
 });
 
 test('unauthorized operations remain visible as denied conversation, not hidden executable plans', async () => {

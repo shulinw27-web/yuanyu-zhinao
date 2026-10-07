@@ -14,6 +14,7 @@ import { handleAlertingRoutes } from './routes/alerting-routes.js';
 import { handleRiskRoutes } from './routes/risk-routes.js';
 import { handleProcurementRoutes } from './routes/procurement-routes.js';
 import { handleGovernanceRoutes } from './routes/governance-routes.js';
+import { handleSystemMonitoringRoutes } from './routes/system-monitoring-routes.js';
 import { handleKnowledgeRoutes } from './routes/knowledge-routes.js';
 import { handleAnomalyRoutes } from './routes/anomaly-routes.js';
 import { handleSimulationRoutes } from './routes/simulation-routes.js';
@@ -43,6 +44,7 @@ const routeHandlers = [
   handleRiskRoutes,
   handleProcurementRoutes,
   handleGovernanceRoutes,
+  handleSystemMonitoringRoutes,
   handleKnowledgeRoutes,
   handleAnomalyRoutes,
   handleSimulationRoutes,

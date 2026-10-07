@@ -237,3 +237,24 @@ test('系统接入：新增接入登记表单、生命周期操作面板与停�
   // 接通门禁文案升级：心跳 verified（不再只说「探测 verified」）
   assert.match(accessSource, /心跳 verified/);
 });
+
+test('系统接入：物料补充、可审阅系统理解与监控控制必须走后端受控入口', async () => {
+  const accessSource = await readFile(new URL('../src/components/SystemAccessWorkspace.vue', import.meta.url), 'utf8');
+  const templateSource = accessSource.slice(accessSource.indexOf('<template>'), accessSource.lastIndexOf('</template>'));
+  // 补充物料不允许只在前端改变候选：必须提交到同一受控解析管线。
+  assert.match(templateSource, /data-testid="system-supplement-submit"/);
+  assert.match(accessSource, /client\.supplementSystemMaterials\(code,/);
+  assert.match(accessSource, /旧系统理解已失效/);
+  // 理解读取与重算分离：读取 GET 缓存，用户显式触发 POST 重算。
+  assert.match(templateSource, /data-testid="system-understanding"/);
+  assert.match(templateSource, /data-testid="system-understanding-generate"/);
+  assert.match(accessSource, /client\.systemUnderstanding\(code\)/);
+  assert.match(accessSource, /client\.regenerateSystemUnderstanding\(code\)/);
+  assert.match(templateSource, /事实不足会明确标为“材料未覆盖”/);
+  // 监控面板只展示后端挂载状态；暂停/恢复也必须走服务端控制，不可本地改 paused。
+  assert.match(templateSource, /data-testid="system-monitoring-panel"/);
+  assert.match(templateSource, /data-testid="system-monitoring-toggle"/);
+  assert.match(accessSource, /client\.systemMonitoring\(\)/);
+  assert.match(accessSource, /client\.controlSystemMonitoring\(code, action\)/);
+  assert.ok(!/selectedMonitoring\.value\.paused\s*=/.test(accessSource), '监控暂停状态不得由浏览器本地改写');
+});

@@ -24,7 +24,7 @@ import {
 
 if (process.env.NODE_ENV !== 'test' || process.env.RUNTIME_STORE_DRIVER !== 'memory') throw new Error('Use the runtime-test-bootstrap memory store.');
 
-const NAMESPACES = ['system_access_runtime', 'system_registry_runtime'];
+const NAMESPACES = ['system_access_runtime', 'system_registry_runtime', 'system_material_runtime'];
 const executiveRole = getRole('executive');
 const identity = tenantId => ({ tenantId, subjectId: 'same-operator', deviceId: 'same-device' });
 const within = (tenant, work) => runWithSemanticTenant(identity(tenant), work);
@@ -313,6 +313,26 @@ test('路由：接入读取沿用页面权限，接入写入仍需 meta_model.dr
 
   const roleMismatch = await callRoute({ method: 'GET', path: '/api/semantic-operations/systems/ERP', role: 'executive', actionRole: null });
   assert.equal(roleMismatch.status, 200, '读取不应受写入闸门影响');
+});
+
+test('路由：系统理解 GET 是只读缓存入口；POST 才触发重算，其他动作不接受 GET', async () => {
+  const empty = await callRoute({ method: 'GET', path: '/api/semantic-operations/systems/ERP/understanding' });
+  assert.equal(empty.status, 200);
+  assert.equal(empty.value.understanding, null);
+  assert.equal(empty.value.cached, false);
+
+  const generated = await callRoute({ method: 'POST', path: '/api/semantic-operations/systems/ERP/understanding' });
+  assert.equal(generated.status, 200);
+  assert.ok(generated.value.understanding?.answer, 'POST 应生成受控系统理解');
+
+  const cached = await callRoute({ method: 'GET', path: '/api/semantic-operations/systems/ERP/understanding' });
+  assert.equal(cached.status, 200);
+  assert.equal(cached.value.cached, true, 'GET 必须读缓存而不是重算');
+  assert.equal(cached.value.understanding.generatedAt, generated.value.understanding.generatedAt);
+
+  const wrongMethod = await callRoute({ method: 'GET', path: '/api/semantic-operations/systems/ERP/probe' });
+  assert.equal(wrongMethod.status, 405);
+  assert.equal(wrongMethod.value.code, 'SYSTEM_ACCESS_METHOD_NOT_ALLOWED');
 });
 
 // ── 6. 接入生命周期操作面（2026-09-26 新增：ADR-023 / ADR-024） ──────────────

@@ -11,6 +11,9 @@
 //   * 2026-09-26：第 5 项（生命周期操作）补齐了 ADR-023 的接入流程缺口；同日第 6 项
 //     （登记自定义系统）落实 ADR-024：接入清单不再预设备待接入/未登记系统，
 //     「新增接入」变成租户提交接入物料、任意命名的登记动作。见 ADR-024。
+//   * 2026-10-07：+2 项（已接入系统补充物料 / 系统理解）——接入成功后租户可继续补充
+//     系统物料（8-5 同一受控解析管线），并把登记物料 + 文档提取文本交给大模型生成
+//     系统理解（理解结果同时是 agent 引导接入的事实面）。实现移至 system-material-service。
 export {
   SYSTEM_ACCESS_BOUNDARY,
   getSystemAccessOverview,
@@ -19,3 +22,8 @@ export {
   probeSystemConnection,
   transitionTenantSystemConnection
 } from '../../services/system-access-service.js';
+export {
+  SYSTEM_MATERIALS_BOUNDARY,
+  supplementSystemMaterials,
+  getSystemUnderstanding
+} from '../../services/system-material-service.js';

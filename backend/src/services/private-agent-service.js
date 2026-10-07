@@ -7,7 +7,7 @@ import { describeQueryCoverage, extractQueryBusinessIds, MAX_QUERY_BUSINESS_IDS,
 import { getAgentSkills, resolveAgentSkill } from './agent-skill-registry.js';
 import { generateLocalSummary, getLocalModelRuntime, inspectModelPromptSafety, recordPromptSafetyBlock } from './local-model-gateway.js';
 import { isExplanationFollowUp, isBroadReportRequest, isLongTermGoalStatement, dialogueFallback } from './agent-dialogue-intent-service.js';
-import { conversationMaterial, understandAgentTurn, prohibitsAction } from './agent-turn-understanding-service.js';
+import { conversationMaterial, understandAgentTurn, prohibitsAction, shouldUseExplicitPublishedRead } from './agent-turn-understanding-service.js';
 import { conversationDocuments } from './conversation-material-index.js';
 import { cancelAgentRun, claimAgentExecution, createAgentRun, forgetAgentLongTermMemory, getAgentLongTermMemory, getAgentMemory, getAgentRun, getAgentRuns, recordAgentEndpointDispatch, recordAgentEndpointReceipt, recordAgentExecution, recordAgentExecutionFailure } from './agent-run-store.js';
 import { getWorkflowDefinitions } from './agent-workflow-service.js';
@@ -58,7 +58,6 @@ import {
   workflowCommandBySkill,
   workflowWriteIntentPattern
 } from './agent-command-authorization.js';
-
 export { getConversationUserContext };
 
 // 仅在本服务内部用于“已识别动作”的二次判定，不参与对外契约。
@@ -211,8 +210,9 @@ export async function runPrivateAgent(request, role, identityScope, options = {}
   appendAgentEvidenceEvent(traceId, { type: 'turn_understanding_completed', stage: 'understanding', status: turn?.source === 'understanding_failed' ? 'failed' : 'completed', actor: { type: 'service', id: 'agent-turn-understanding' }, summary: '本轮理解结果已返回；工具仍需服务器独立校验。', details: { intent: turn?.intent || 'legacy_mock_route', source: turn?.source || 'mock', failureCode: turn?.failureCode || null, diagnostics: turn?.diagnostics || null, timing: turn?.timing || null, modelVersion: publishedOntology?.metadata.modelVersion || null } });
   const explicitComparison = /对比|比较/.test(input) && extractQueryBusinessIds(input).length > 1 && !prohibitsAction(input, 'read_business');
   const refreshRead = shouldRefreshPublishedRead({ input, turn, hasTaskRoot: extractQueryBusinessIds(options.conversationContext?.taskGoal || '').length > 0, materialOnly: Boolean(retrievedMaterial || multimodal.attachments.length) });
-  if (publishedOntology?.metadata.readPlans.length && (turn?.intent === 'read_business' || explicitComparison && turn?.source !== 'understanding_failed' || refreshRead) && !multimodal.attachments.length) {
-    const explicitIds = extractQueryBusinessIds(input);
+  const explicitIds = extractQueryBusinessIds(input);
+  const explicitPublishedRead = shouldUseExplicitPublishedRead({ input, turn, explicitIds, hasPublishedReadPlans: Boolean(publishedOntology?.metadata.readPlans.length), hasAttachments: Boolean(multimodal.attachments.length) });
+  if (publishedOntology?.metadata.readPlans.length && (turn?.intent === 'read_business' || explicitComparison && turn?.source !== 'understanding_failed' || refreshRead || explicitPublishedRead) && !multimodal.attachments.length) {
     const goalIds = extractQueryBusinessIds(options.conversationContext?.taskGoal || '');
     const targets = explicitIds.length ? explicitIds : goalIds;
     if (targets.length >= 1) {
