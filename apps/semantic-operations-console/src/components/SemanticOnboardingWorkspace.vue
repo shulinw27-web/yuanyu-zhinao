@@ -8,7 +8,7 @@ const emit = defineEmits(['open-agent', 'open-model']);
 const materialKinds = [
   { kind: 'requirements', label: '业务需求', hint: '至少 24 个非空白字符，说明业务目标、涉及部门、需要回答的问题与验收口径。也可上传 PDF / Word / Excel 文档，登记的是服务端受控提取文本，原文件不保存。', document: true },
   { kind: 'api', label: '接口说明', hint: '至少 24 个非空白字符，描述来源系统、接口路径、只读方法、响应字段与授权方式。也可上传 PDF / Word / Excel 接口或数据字典文档，登记的是服务端受控提取文本，原文件不保存。仅登记文档，本步骤不调用接口。', document: true },
-  { kind: 'dictionary', label: '数据字典', hint: '提交 JSON：tables 数组中每张表包含 name、system、primaryKey，以及 fields 数组（name、type，可选 required、reference、referenceField）。type 支持 string / number / integer / boolean。文档形态字典请到 Agent 对话面上传，仅进入候选路径。' },
+  { kind: 'dictionary', label: '数据字典', hint: '提交 JSON：tables 数组中每张表包含 name、system、primaryKey，以及 fields 数组（name、type，可选 required、reference、referenceField）。type 支持 string / number / integer / boolean。也可上传 XLSX / DOCX 行式字典文档（表名/字段/类型/主键表头），与 JSON 字典走同一条强校验链（ADR-029）；类型须可映射（如 varchar→string、int→integer），PDF 无表格结构不支持。', document: true, documentMimes: ['docx', 'xlsx'] },
   { kind: 'samples', label: '合成样本', hint: '提交 JSON：records 数组中每条记录包含 objectType 和 payload。objectType 与数据字典表名一致，payload 填合成字段值，主键、必填、字段类型与外键应匹配字典。' },
   { kind: 'rules', label: '业务规则', hint: '至少 24 个非空白字符，说明状态口径、异常判定、跨系统关联依据与需要人工处理的情况。也可上传 PDF / Word / Excel 文档，登记的是服务端受控提取文本，原文件不保存。', document: true }
 ];
@@ -86,7 +86,10 @@ const existingMaterial = computed(() => project.value?.materials?.find(item => i
 const acceptsDocument = computed(() => Boolean(currentKind.value?.document));
 const acceptsMimeTypes = computed(() => {
   const serverList = Array.isArray(documentMimeTypes.value) && documentMimeTypes.value.length ? documentMimeTypes.value : Object.values(documentExtensionMime);
-  return acceptsDocument.value ? serverList : [];
+  if (!acceptsDocument.value) return [];
+  // kind 级 mime 收窄（如数据字典只收 XLSX/DOCX，PDF 无表格结构）
+  const allowed = currentKind.value?.documentMimes;
+  return allowed ? serverList.filter(mime => allowed.some(key => documentExtensionMime[key] === mime)) : serverList;
 });
 const fileAccept = computed(() => ['.json,.txt,application/json,text/plain', ...acceptsMimeTypes.value.map(mime => `.${Object.keys(documentExtensionMime).find(key => documentExtensionMime[key] === mime) || ''}`)]
   .filter(item => item !== '.').join(','));
@@ -263,7 +266,9 @@ async function readMaterialFile(event) {
   const documentMimeType = documentExtensionMime[extension] || (acceptsMimeTypes.value.includes(file.type) ? file.type : null);
   if (documentMimeType) {
     // 文档形态：前端只读原文件为附件（不超过 4MB），文本提取在服务端受控完成。
-    if (!acceptsDocument.value) { formError.value = '当前材料类别仅接受 JSON 文本；文档附件仅支持业务需求、接口说明与业务规则。'; return; }
+    // kind 级 mime 收窄（如数据字典只收 XLSX/DOCX，PDF 无表格结构）在客户端先拦下，不发起请求。
+    if (!acceptsDocument.value) { formError.value = '当前材料类别仅接受 JSON 文本；文档附件仅支持业务需求、接口说明、业务规则与数据字典（XLSX/DOCX）。'; return; }
+    if (!acceptsMimeTypes.value.includes(documentMimeType)) { formError.value = '当前材料类别不支持该文档类型；数据字典仅支持 XLSX / DOCX（表格结构可确定性还原），PDF 无行列结构。'; return; }
     if (file.size > maxAttachmentBytes) { formError.value = '文档附件必须小于 4MB；请拆分后上传。'; return; }
     const generation = ++fileGeneration;
     const selection = projectGeneration;

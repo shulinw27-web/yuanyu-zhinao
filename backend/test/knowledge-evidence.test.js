@@ -106,7 +106,7 @@ test('WK evidence: both route surfaces require their own page and write grants; 
     return { ...output, permission };
   }
   const agent = '/api/agent/knowledge-library'; const semantic = '/api/semantic-operations/knowledge-library';
-  for (const [base, page, write] of [[agent, 'page.agent.view', 'agent.prompt.run'], [semantic, 'page.world.view', 'meta_model.draft.save']]) {
+  for (const [base, page, write] of [[agent, 'page.agent.view', 'agent.prompt.run'], [semantic, 'page.semantic-operations.view', 'meta_model.draft.save']]) {
     assert.equal((await call(base, '/brief', { method: 'POST', payload: { query: '资质' } })).status, 403);
     assert.equal((await call(base, '/providers', { pages: [page] })).data.providers[1].configured, false);
     const denied = await call(base, '/documents/routed', { method: 'PUT', pages: [page], payload: body });
@@ -122,12 +122,12 @@ test('WK evidence: both route surfaces require their own page and write grants; 
   assert.equal((await call(agent, '/joint-plans')).status, 403);
   // A stale outer page grant cannot replace the current identity's live IAM grant.
   assert.equal((await call(agent, '/joint-plans', { pages: ['page.agent.view'] })).status, 403);
-  assert.equal((await call(semantic, '/joint-plans', { pages: ['page.world.view'] })).status, 404);
+  assert.equal((await call(semantic, '/joint-plans', { pages: ['page.semantic-operations.view'] })).status, 404);
   assert.equal((await call(agent, '/read-plan-proposal', { method: 'POST', pages: ['page.agent.view'], grant: true, payload: {} })).status, 404);
   assert.equal((await call(agent, '/joint-brief', { method: 'POST', pages: ['page.agent.view'], payload: {} })).status, 403);
   assert.equal((await call(agent, '/joint-brief', { method: 'POST', pages: ['page.agent.view'], grant: true, payload: {} })).status, 400);
-  assert.equal((await call(semantic, '/joint-brief', { method: 'POST', pages: ['page.world.view'], grant: true, payload: {} })).status, 404);
-  assert.equal((await call(semantic, '/documents/routed', { method: 'PUT', pages: ['page.world.view'], grant: true, payload: body })).status, 200);
+  assert.equal((await call(semantic, '/joint-brief', { method: 'POST', pages: ['page.semantic-operations.view'], grant: true, payload: {} })).status, 404);
+  assert.equal((await call(semantic, '/documents/routed', { method: 'PUT', pages: ['page.semantic-operations.view'], grant: true, payload: body })).status, 200);
   assert.equal((await call(agent, '/documents/routed?revision=1', { pages: ['page.agent.view'] })).data.text, body.text);
 });
 

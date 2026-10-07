@@ -5,7 +5,8 @@ import { getEffectiveAccess, hasButtonPermission } from './access-control-servic
 import { runWithSemanticTenant } from './semantic-tenant-context.js';
 import { semanticOperationsPrincipalKey } from './semantic-operations-identity.js';
 import { readSemanticGovernanceState, mutateSemanticGovernanceState, mutateSemanticGovernanceStates } from './semantic-governance-store.js';
-import { discoverSchemasFromAttachments } from './semantic-schema-discovery-service.js';
+import { discoverSchemasFromAttachments, matrixToRecords } from './semantic-schema-discovery-service.js';
+import { parseOfficeTableRows } from './office-material-parser.js';
 import { getIAMVersion, runWithIAMStoreContext } from './iam-store.js';
 import { readMockOnboardingSource } from './mock-onboarding-source-service.js';
 import { evaluateMockAlignment, validateMockAlignment } from './mock-onboarding-alignment.js';
@@ -42,8 +43,15 @@ const materialRevision = project => project.materialRevision ?? project.revision
 const activeConnection = project => project.connection?.materialRevision === materialRevision(project) ? project.connection : null;
 const revisionConflict = () => fail('MOCK_ONBOARDING_REVISION_CONFLICT', '项目已被更新，请重新读取项目后提交。', 409);
 const sourceCount = value => Number.isSafeInteger(value) && value >= 0 && value <= 2000 ? value : 0;
-const attachmentKinds = new Set(['requirements', 'api', 'rules']);
+// 文档形态字典（ADR-029，2026-10-07）：dictionary 加入文档附件通道——XLSX/DOCX 提取文本
+// 经 parseOfficeTableRows 确定性还原进 mock 强校验链；samples 仍限 JSON 契约（样本是具体
+// 记录，文档形态样本记录的反序列化属独立增量）。
+const attachmentKinds = new Set(['requirements', 'api', 'rules', 'dictionary']);
 const documentMime = new Set(documentMimeTypes);
+const structuredDictionaryMimes = new Set([
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+]);
 
 // 阶段 5a：文档类材料登记。走与对话面同一套安全闸门（签名/嵌入文本检查、
 // 内容级扫描、DLP、提示注入隔离），登记的只有提取文本与解析取证——原文件
@@ -73,7 +81,7 @@ async function scoped(options, write, work) {
   try {
     const access = getEffectiveAccess(roleId, identity);
     if (!access.principalResolved || !access.roleIds.includes(roleId)) return fail('MOCK_ONBOARDING_ROLE_DENIED', '当前身份未获授此角色。', 403);
-    if (!access.pagePermissionIds.includes('page.world.view')) return fail('MOCK_ONBOARDING_PAGE_DENIED', '当前身份没有元域智语页面访问权限。', 403);
+    if (!access.pagePermissionIds.includes('page.semantic-operations.view')) return fail('MOCK_ONBOARDING_PAGE_DENIED', '当前身份没有元域智语页面访问权限。', 403);
     if (write && (!hasButtonPermission(roleId, PERMISSION) || !access.buttonPermissionIds.includes(PERMISSION))) return fail('MOCK_ONBOARDING_PERMISSION_DENIED', `需要 ${PERMISSION} 权限。`, 403);
     return await runWithSemanticTenant(identity, () => work({ owner: semanticOperationsPrincipalKey(identity), roleId, key: JSON.stringify(['principal-role-v1', identity.tenantId, identity.subjectId, roleId]) }));
   } catch (error) {
@@ -87,13 +95,89 @@ function parseJson(material, label) {
   catch { return { value: null, issues: [`${label}不是有效 JSON；请检查括号、引号和逗号。`] }; }
 }
 
+// ── 文档形态字典映射（ADR-029，2026-10-07）────────────────────────────────
+// XLSX/DOCX 提取文本经 parseOfficeTableRows 确定性还原为行列矩阵（首行表头 + 数据行
+// 按列别名映射），与 CSV 字典在 schema 发现里的行式语义同源（matrixToRecords 共享）。
+// **类型映射是严格别名**——不在映射内的类型整份拒绝（不静默默认），mock 强校验链
+// （连接/样本/对齐）的类型契约（string/number/integer/boolean）不放宽。
+const DICTIONARY_TYPE_ALIASES = new Map([
+  ['string', 'string'], ['varchar', 'string'], ['char', 'string'], ['text', 'string'], ['字符串', 'string'], ['文本', 'string'], ['字符', 'string'],
+  ['number', 'number'], ['decimal', 'number'], ['numeric', 'number'], ['float', 'number'], ['double', 'number'], ['数字', 'number'], ['数值', 'number'], ['小数', 'number'],
+  ['integer', 'integer'], ['int', 'integer'], ['bigint', 'integer'], ['smallint', 'integer'], ['整数', 'integer'], ['整型', 'integer'],
+  ['boolean', 'boolean'], ['bool', 'boolean'], ['bit', 'boolean'], ['布尔', 'boolean'], ['是否', 'boolean']
+]);
+const dictLowerKeys = (value) => Object.fromEntries(Object.entries(value || {}).map(([key, item]) => [key.toLowerCase().replace(/[^a-z0-9\p{Script=Han}]/gu, ''), item]));
+const dictFirstValue = (row, aliases) => {
+  const normalized = dictLowerKeys(row);
+  return aliases.map((key) => normalized[key]).find((value) => value !== undefined && value !== null && String(value).trim() !== '');
+};
+const dictTruthy = (value) => ['true', '1', 'yes', 'y', '是', '主键', 'pk'].includes(String(value || '').trim().toLowerCase());
+const dictionaryTablesFromDocument = (material) => {
+  const tables = parseOfficeTableRows(material.text);
+  if (!tables.length) return { issues: ['文档中未解析出任何表格行；数据字典文档需包含「首行表头（表名/字段/类型/主键…）+ 数据行」的工作表或表格。'] };
+  const records = tables.flatMap((table) => matrixToRecords(table.rows));
+  const groups = new Map();
+  for (const row of records) {
+    const name = dictFirstValue(row, ['table', 'tablename', 'entity', 'object', '对象', '表名']);
+    if (!name) continue;
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(row);
+  }
+  if (!groups.size) return { issues: ['文档表格缺少「表名」列（表名/table/entity/object/对象）；请按行式字典组织：首行表头，每行一个字段。'] };
+  const issues = [];
+  const mapped = [...groups.entries()].map(([name, rows]) => {
+    const fields = [];
+    for (const row of rows) {
+      const fieldName = dictFirstValue(row, ['field', 'fieldname', 'column', 'columnname', '字段', '字段名']);
+      if (!fieldName) continue;
+      const rawType = dictFirstValue(row, ['type', 'datatype', '字段类型', '数据类型', '类型']) || '';
+      const type = DICTIONARY_TYPE_ALIASES.get(rawType.toLowerCase().trim());
+      if (!type) {
+        issues.push(`${name}.${fieldName} 类型「${rawType || '(空)'}」不在 mock 契约（string/number/integer/boolean）内；文档字典的类型列须使用可映射的别名（如 varchar→string、int→integer）。`);
+        continue;
+      }
+      const referenceValue = dictFirstValue(row, ['reference', 'ref', 'foreignkey', 'fk', '关联对象', '外键']);
+      const field = {
+        name: fieldName,
+        type,
+        ...(dictTruthy(dictFirstValue(row, ['required', 'notnull', 'mandatory', '必填', '非空'])) ? { required: true } : {}),
+        ...(referenceValue ? { reference: String(referenceValue).split('.')[0], ...(String(referenceValue).includes('.') ? { referenceField: String(referenceValue).split('.')[1] } : {}) } : {})
+      };
+      fields.push(field);
+    }
+    if (!fields.length) issues.push(`${name} 表未解析出任何有效字段行（字段/field 列缺失或类型不可映射）。`);
+    return { name, system: dictFirstValue(rows[0], ['system', 'sourcesystem', '来源系统']) || '', primaryKey: null, fields };
+  });
+  // 主键取「主键别名 truthy」的字段（行式字典按行声明主键），供既有严格校验消费
+  for (const table of mapped) {
+    const group = groups.get(table.name) || [];
+    const pkField = group.find((row) => dictTruthy(dictFirstValue(row, ['primarykey', 'pk', 'isprimarykey', '主键'])));
+    const pkName = pkField ? dictFirstValue(pkField, ['field', 'fieldname', 'column', 'columnname', '字段', '字段名']) : null;
+    if (pkName) table.primaryKey = pkName;
+    delete table.primaryKeyIfMissing;
+  }
+  return { issues, tables: mapped };
+};
+
 function validateDictionary(material) {
   if (!material) return { issues: [], schemas: [] };
-  const parsed = parseJson(material, '数据字典');
-  if (parsed.issues.length) return { ...parsed, schemas: [] };
+  const sourceMime = String(material.source?.mimeType || '').toLowerCase();
+  const isDocumentForm = structuredDictionaryMimes.has(sourceMime);
+  let parsed;
+  let discoveryMime = 'application/json';
+  if (isDocumentForm) {
+    // 文档形态字典（ADR-029）：提取文本 → 行列矩阵 → {tables:[...]} 契约，与 JSON 字典同一条严格校验链
+    const mapped = dictionaryTablesFromDocument(material);
+    if (mapped.issues.length) return { issues: mapped.issues, schemas: [] };
+    parsed = { value: { tables: mapped.tables }, issues: [] };
+    discoveryMime = sourceMime;
+  } else {
+    parsed = parseJson(material, '数据字典');
+    if (parsed.issues.length) return { ...parsed, schemas: [] };
+  }
   const document = parsed.value;
   const issues = [];
-  if (!record(document) || !Array.isArray(document.tables) || !document.tables.length || document.tables.length > limits.tables) return { schemas: [], issues: [`数据字典仅支持 {tables:[...]} JSON，需提供 1–${limits.tables} 个表。`] };
+  if (!record(document) || !Array.isArray(document.tables) || !document.tables.length || document.tables.length > limits.tables) return { schemas: [], issues: [`数据字典需提供 1–${limits.tables} 个表：JSON 文本为 {tables:[...]}，文档形态为「表名/字段/类型/主键」行式表格（ADR-029）。`] };
   const names = new Set();
   for (const [index, table] of document.tables.entries()) {
     const label = `表 ${index + 1}`;
@@ -118,7 +202,7 @@ function validateDictionary(material) {
   if (issues.length) return { issues, schemas: [] };
   // This parser is deterministic. Material text is data, never executable
   // instructions. The stored digest ties the extraction back to exact text.
-  const discovery = discoverSchemasFromAttachments({ attachments: [{ id: material.digest, name: material.name, mimeType: 'application/json' }], reports: [{ attachmentId: material.digest, status: 'content_scanned', structuredSchemaCandidate: true }], documents: [{ attachmentId: material.digest, text: material.text }] });
+  const discovery = discoverSchemasFromAttachments({ attachments: [{ id: material.digest, name: material.name, mimeType: discoveryMime }], reports: [{ attachmentId: material.digest, status: 'content_scanned', structuredSchemaCandidate: true }], documents: [{ attachmentId: material.digest, text: material.text }] });
   issues.push(...discovery.warnings);
   if (discovery.schemas.length !== document.tables.length) issues.push('表名标准化后冲突或未完整提取，请使用彼此不同的英文表名。');
   for (const table of document.tables) for (const field of table.fields.filter(item => item.reference)) {
@@ -243,10 +327,12 @@ export async function saveMockOnboardingMaterial(options) {
     let text = rawText;
     let source = null;
     if (attachment) {
-      if (!attachmentKinds.has(body.kind)) return fail('MOCK_ONBOARDING_MATERIAL_FORM_UNSUPPORTED', '数据字典与合成样本仅接受 JSON 文本；文档附件仅支持业务需求、接口说明与业务规则。');
+      if (!attachmentKinds.has(body.kind)) return fail('MOCK_ONBOARDING_MATERIAL_FORM_UNSUPPORTED', '合成样本仅接受 JSON 文本；文档附件仅支持业务需求、接口说明、业务规则与数据字典（XLSX/DOCX）。');
       const mimeType = String(attachment.mimeType || '').toLowerCase();
       if (/^(?:image|audio|video)\//u.test(mimeType)) return fail('MOCK_ONBOARDING_MATERIAL_FORM_UNSUPPORTED', '图片、音频与视频材料需要视觉/语音模型通道（阶段 5b），当前一律整份拒绝登记。');
       if (!documentMime.has(mimeType)) return fail('MOCK_ONBOARDING_MATERIAL_FORM_UNSUPPORTED', '文档附件仅支持 PDF、DOCX 与 XLSX；结构化 JSON 请用纯文本登记。');
+      // 文档形态字典只收可解析出表格结构的 XLSX/DOCX；PDF 提取文本无行列结构（5a-2 边界），只走自然语言上下文
+      if (body.kind === 'dictionary' && !structuredDictionaryMimes.has(mimeType)) return fail('MOCK_ONBOARDING_MATERIAL_FORM_UNSUPPORTED', '文档形态数据字典仅支持 XLSX / DOCX（表格结构可确定性还原）；PDF 提取文本无行列结构，只走自然语言上下文，请改用 XLSX/DOCX 或 JSON 文本登记。');
       const extracted = await extractDocumentMaterial(attachment, scope.roleId);
       if (extracted.error) return extracted;
       text = extracted.text;

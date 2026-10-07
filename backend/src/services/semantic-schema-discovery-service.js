@@ -51,7 +51,8 @@ const parseCsv = (text) => {
 // first row is the header, later rows are records, both positionally aligned.
 // Sparse columns (cells that were never present in the worksheet) stay aligned
 // by index rather than shifting into a neighbouring header.
-const matrixToRecords = (rows) => {
+// 导出给 mock-onboarding-service 复用（文档形态字典走同一套行列还原语义，ADR-029）。
+export const matrixToRecords = (rows) => {
   const meaningful = rows.filter((row) => Array.isArray(row) && row.some((item) => String(item ?? '').trim()));
   if (meaningful.length < 2) return [];
   const width = Math.max(...meaningful.map((row) => row.length));

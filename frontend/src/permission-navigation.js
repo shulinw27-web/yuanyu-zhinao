@@ -10,8 +10,8 @@ export const PAGE_ACCESS_REQUIREMENTS = Object.freeze({
 });
 
 // 2026-09-28 阶段 6 第二段（4.3 决策 A）：「元模型」页移出管理 Web——
-// 模型相关只存在于元域智语端。page.world.view 权限条目在后端保留一个版本周期
-// （元域智语端语义页面/服务的访问载体），前端不再提供该页入口。
+// 模型相关只存在于元域智语端。2026-10-07 元域智语权限语义独立：
+// page.world.view 条目已删除，接替条目为 page.semantic-operations.view（元域智语端专用）。
 const primaryPageOrder = ['dashboard', 'intelligence', 'agent', 'risks', 'channels', 'config', 'permissions'];
 
 export function canAccessPage(pageId, effectiveAccess) {

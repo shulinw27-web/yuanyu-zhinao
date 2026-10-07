@@ -367,7 +367,7 @@ apps/semantic-operations-console/src/main.js -> ../../../frontend/src/styles/met
 **待确认决策点（执行前定，含建议）**：
 1. **材料存储语义**（建议随 ADR-027 记录）：提取文本 + 解析取证持久化，原文件不持久化。
 2. **限制口径**（建议：limits 只紧不松）：原文件按附件侧常量（4MB / 份、PDF ≤ 20 页、页 ≤ 6000 字符）；提取文本沿用材料侧 `materialBytes`（64KB），超限**整份拒绝并说明**，不静默截断——20 页满文本 PDF 可能超限，运营需拆分材料，此行为如实披露。
-3. **dictionary / samples 保持 JSON 契约**：文档形态字典只走 5a-2 候选，不直接进 mock 通道强校验链（连接 / 样本 / 对齐仍以 JSON 字典为准）。
+3. ~~**dictionary / samples 保持 JSON 契约**：文档形态字典只走 5a-2 候选，不直接进 mock 通道强校验链（连接 / 样本 / 对齐仍以 JSON 字典为准）。~~ **已推翻（2026-10-07，用户决策，[ADR-029](adr/ADR-029-document-dictionary-strong-chain.md)）**：dictionary 一侧的文档形态（XLSX/DOCX 行式字典）已进 mock 强校验链（与 JSON 字典同一条严格校验、类型严格别名不放宽）；samples 仍保持 JSON 契约（见 ADR-029 边界）。
 4. **对话面与登记通道共享 5a-2 路径**（一并生效）。
 
 > **实施结果（2026-10-05）**：5a-0 ~ 5a-4 全部完成，四个决策点按建议执行；存储语义与结构化候选路径决策入 [ADR-027](adr/ADR-027-document-material-registration.md)，明细与验收数字见文末台账「5a-1 ~ 5a-4 文档类材料接入」。
@@ -1402,3 +1402,14 @@ requestedSystems.length ? requestedSystems : connectorCatalog.filter(item => ite
 **验收（2026-10-07 本机实测）**：registry 15/15、heartbeat 15/15、worker 5/5、document-discovery 5/5、access（authSchemes 断言 5 项）全绿；`npm run quality` 端到端 **EXIT=0**；**真实模型评测 `evaluate:mention-linking` 补跑成功（云配额恢复）——变体轮 6/6 通过（A 3/3 linked-as-expected、B 3/3 abstained）、E2E 断言 5 项全 true，关闭 ADR-025 实施以来评测欠账**。
 
 **阶段 8 至此全部完成（8-0 ~ 8-7）**。
+
+### 权限语义独立兑现—— **已完成（2026-10-07，[ADR-030](adr/ADR-030-semantic-operations-permission-independence.md)）**
+
+阶段 6 第二段（4.3 决策 A）保留的 `page.world.view` 访问载体，保留期结束兑现删除（用户在边界项盘点中确认）：
+
+- **新权限条目**：`iam-seed.js` 权限目录新增 `menu.semantic-operations`（menuId `semantic-operations`，名称「元域智语」，页面权限 `page.semantic-operations.view`）；**单一页面权限粒度**（全端一致访问预期），细粒度拆分待真实需求触发再复审。
+- **删除旧条目**：`menu.world` / `page.world.view` 从权限目录删除；`quality_manager` menuIds `world → semantic-operations`（原本持有），其余角色零变化；executive 由 allMenuIds 自动包含。
+- **换码面**：8 处后端（`route-security` 语义 API 路由组与授权解释、`governance-routes` canReadWorldModel 与 denyButton、`knowledge-routes` semantic 页面门槛、`mock-onboarding-service` 页面 403、`mock-onboarding-ontology-adapter` 访问校验、`semantic-inspection-schedule-service` 巡检执行权限）+ 2 处元域智语前端 + 4 处测试；老前端 AppShell「语义层」死链导航项删除（图标顺移）。
+- **验收（本机实测）**：`test:permissions` **31/31**、`test:knowledge` **56/56**、`test:multitenant` **75/75**、`npm run quality` 端到端全绿；「持旧权限也不可进入已移除页面」用例保留（构造输入不再来自真实 seed，断言恒 false 语义不变）。
+
+**至此本方案的权限线（阶段 6 两段 + 4.3 决策 A 保留期兑现）全部收口；元域智语端权限不再挂靠元域智营菜单目录。**

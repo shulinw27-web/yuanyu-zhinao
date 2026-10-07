@@ -22,8 +22,9 @@ test('页面必须同时具有菜单和页面权限', () => {
 });
 
 test('「元模型」页已移出管理 Web（4.3 决策 A），持有旧权限也不可进入', () => {
-  // page.world.view 权限条目在后端保留一个版本周期（元域智语端语义页面/服务的访问载体），
-  // 但前端不再注册该页面：即使完整持有旧菜单与页面权限也无法导航到 world。
+  // 2026-10-07 元域智语权限语义独立：page.world.view 条目已删除，接替条目为
+  // page.semantic-operations.view（元域智语端专用）。前端从不注册 world 页面，
+  // 即使构造完整旧菜单与页面权限也无法导航到 world。
   assert.equal(canAccessPage('world', access(['world'], ['page.world.view'])), false);
   assert.equal(canAccessPage('world', access(['dashboard'], ['page.dashboard.view'])), false);
 });

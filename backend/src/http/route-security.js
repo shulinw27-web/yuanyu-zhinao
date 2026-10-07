@@ -7,8 +7,8 @@ const readPagePolicies = [
   { test: (path) => path === '/api/notifications', pagePermissionIds: ['page.dashboard.view', 'page.intelligence.view', 'page.channels.view'] },
   { test: (path) => path === '/api/alerting/workspace', pagePermissionIds: ['page.channels.view'] },
   { test: (path) => path === '/api/risk-cases' || /^\/api\/risk-cases\/[^/]+$/.test(path), pagePermissionIds: ['page.risks.view'] },
-  { test: (path) => path === '/api/world-model' || path === '/api/meta-objects' || path === '/api/semantic-context' || path === '/api/meta-models' || path.startsWith('/api/meta-models/') || path.startsWith('/api/world-model/') || path.startsWith('/api/semantic-operations/'), pagePermissionIds: ['page.world.view'] },
-  { test: (path) => path === '/api/authorization/explain', pagePermissionIds: ['page.risks.view', 'page.world.view'] },
+  { test: (path) => path === '/api/world-model' || path === '/api/meta-objects' || path === '/api/semantic-context' || path === '/api/meta-models' || path.startsWith('/api/meta-models/') || path.startsWith('/api/world-model/') || path.startsWith('/api/semantic-operations/'), pagePermissionIds: ['page.semantic-operations.view'] },
+  { test: (path) => path === '/api/authorization/explain', pagePermissionIds: ['page.risks.view', 'page.semantic-operations.view'] },
   { test: (path) => path === '/api/account-center' || path === '/api/configurations' || path === '/api/domain-events/outbox' || path === '/api/domain-events/contracts' || path === '/api/system-data/overview' || /^\/api\/system-data\/[^/]+\/records$/.test(path) || path === '/api/simulation/overview' || path === '/api/permission-center' || path === '/api/agent/model-config' || path === '/api/key-center/overview', pagePermissionIds: ['page.config.view'] },
   { test: (path) => path === '/api/permission-management', pagePermissionIds: ['page.permissions.view'] },
   { test: (path) => path.startsWith('/api/agent/') || path === '/api/procurement/scenario', pagePermissionIds: ['page.agent.view'] }

@@ -33,7 +33,7 @@
 
 可执行的只读绑定增加 `inputMapping: { id: "risk_id", severity: "severity", status: "status" }` 和可选 `parameters: { investigationSeverities: ["P0", "P1"], maxEvidenceAgeMinutes: 60 }`。映射仅引用对象字段，禁止脚本与嵌套路径；参数仅允许这两个键。`scenario.requireCaseReplay` 为可选布尔值。读取、保存、校验草稿返回 `draft.fingerprint`。
 
-`POST /api/meta-models/oa-governance/case-replay` 接收 `{candidateFingerprint,cases}`；`GET` 同路径读取当前租户/主体的最近报告。要求 `page.world.view` 和 `meta_model.draft.validate`。样本准入使用服务端身份上下文；上传失败返回 `status: failed`，不是业务动作失败，且没有业务执行。草稿过期返回 409 / `REPLAY_DRAFT_STALE`。样本格式见操作指南，OpenAPI 已纳入此接口。
+`POST /api/meta-models/oa-governance/case-replay` 接收 `{candidateFingerprint,cases}`；`GET` 同路径读取当前租户/主体的最近报告。要求 `page.semantic-operations.view` 和 `meta_model.draft.validate`。样本准入使用服务端身份上下文；上传失败返回 `status: failed`，不是业务动作失败，且没有业务执行。草稿过期返回 409 / `REPLAY_DRAFT_STALE`。样本格式见操作指南，OpenAPI 已纳入此接口。
 
 发布入口先校验可选回放门禁，再保留固定操作版本，核对独立服务的版本和指纹并对本地草稿执行比较后提交。`PUBLICATION_BUSY`、`PUBLICATION_REPLAY_REQUIRED`、`PUBLICATION_ALREADY_COMPLETED`、`PUBLICATION_RECEIPT_UNCONFIRMED`、`PUBLICATION_OUTCOME_UNKNOWN`、`PUBLICATION_RECONCILIATION_REQUIRED` 和 `ONTOLOGY_PUBLICATION_STALE` 均返回 409；结果不确定后只读查询，不重复调用外部发布。不得将其显示为已完成或自动补偿成功。
 

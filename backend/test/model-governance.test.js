@@ -10,6 +10,21 @@ test('model governance requires an exact provider and model version allowlist ma
   assert.equal(validateModelSelection('unknown', 'model', env).code, 'MODEL_PROVIDER_NOT_ALLOWED');
 });
 
+test('local channel admission matches by model file basename, not the machine mount path', () => {
+  // local 的 model 字段是模型文件路径；文件名即受控工件的精确版本，挂载路径是机器差异
+  const env = { MODEL_ALLOWLIST_JSON: JSON.stringify({ local: ['Qwen3-8B-Q4_K_M.gguf'] }) };
+  const windowsPath = validateModelSelection('local', 'D:\\LLM\\Models\\Qwen\\Qwen3-8B-Q4_K_M.gguf', env);
+  assert.equal(windowsPath.allowed, true, '完整路径按 basename 比对准入');
+  assert.equal(windowsPath.versionPinned, true);
+  assert.equal(validateModelSelection('local', '/opt/models/Qwen3-8B-Q4_K_M.gguf', env).allowed, true, 'POSIX 路径同样准入');
+  assert.equal(validateModelSelection('local', 'Qwen3-8B-Q4_K_M.gguf', env).allowed, true, '裸文件名仍直接准入');
+  assert.equal(validateModelSelection('local', 'D:\\LLM\\Models\\Other-8B.gguf', env).code, 'MODEL_VERSION_NOT_ALLOWED', '文件名不匹配仍拒绝');
+  assert.equal(validateModelSelection('local', 'D:\\LLM\\Models\\Qwen3-8B-Q4_K_M.gguf.bak', env).code, 'MODEL_VERSION_NOT_ALLOWED', '后缀变体不冒充精确版本');
+  // 非 local provider 不受 basename 语义影响
+  const openaiEnv = { MODEL_ALLOWLIST_JSON: JSON.stringify({ openai: ['gpt-5.6-sol'] }) };
+  assert.equal(validateModelSelection('openai', 'some/path/gpt-5.6-sol', openaiEnv).code, 'MODEL_VERSION_NOT_ALLOWED', 'openai 仍按完整字符串精确匹配');
+});
+
 test('model governance enforces concurrency and releases capacity deterministically', () => {
   resetModelGovernanceForTest();
   const env = { MODEL_MAX_CONCURRENT: '1', MODEL_DAILY_CALL_LIMIT: '10', MODEL_DAILY_TOKEN_LIMIT: '100000', MODEL_MAX_RESERVED_OUTPUT_TOKENS: '64' };

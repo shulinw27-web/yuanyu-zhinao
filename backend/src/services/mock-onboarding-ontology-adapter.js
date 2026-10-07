@@ -20,7 +20,7 @@ export function createMockOnboardingOntologyAdapter({ source, draft, scope, role
   const querySnapshot = query => {
     if (process.env.NODE_ENV === 'production') fail('MOCK_ONTOLOGY_SANDBOX_ONLY');
     const access = getEffectiveAccess(roleId, captured.scope);
-    if (!access.principalResolved || !access.roleIds.includes(roleId) || !access.pagePermissionIds.includes('page.world.view')) fail('MOCK_ONTOLOGY_ACCESS_DENIED');
+    if (!access.principalResolved || !access.roleIds.includes(roleId) || !access.pagePermissionIds.includes('page.semantic-operations.view')) fail('MOCK_ONTOLOGY_ACCESS_DENIED');
     if (!keysOnly(query, ['schemaVersion', 'objectType', 'fields', 'filter', 'limit'])
       || query.schemaVersion !== 'ontology-query.v1' || typeof query.objectType !== 'string'
       || !Array.isArray(query.fields) || !query.fields.length || query.fields.length > 80 || new Set(query.fields).size !== query.fields.length

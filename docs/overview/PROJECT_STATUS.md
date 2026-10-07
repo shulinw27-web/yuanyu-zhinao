@@ -1,5 +1,13 @@
 # 当前项目状态
 
+2026-10-07（第二段）**边界项四连完成（[ADR-029](../architecture/adr/ADR-029-document-dictionary-strong-chain.md) / [ADR-030](../architecture/adr/ADR-030-semantic-operations-permission-independence.md)）**——未完成清单盘点后用户确认四项全做，按风险从小到大执行：
+
+- **C-3 审计文档补前端三层判据**（纯文档）：模块化审计第 6 项关闭——三层判据（`components/` 无业务语义展示组件 / `packages/agent-ui` 跨端共享业务组件 / `features/<domain>/` 单端页面级组件）写进 [模块化审计](../architecture/MODULARIZATION_AUDIT.md)；第 4 项剩余（risk-service → domains/alerting 分层反转）属架构债务按棘轮基线收敛，不在本轮。
+- **C-4① local 模型通道版本准入修复**：`validateModelSelection` 的 local 白名单存裸文件名、运行时配置是完整路径，精确匹配恒失败——local 通道按**文件名 basename** 比对（文件名即受控工件的精确版本，路径是机器挂载差异），其余 provider 语义不变。model-governance 测试 4/4（新增 basename 用例）。
+- **C-1 文档字典进 mock 强校验链**（[ADR-029](../architecture/adr/ADR-029-document-dictionary-strong-chain.md)，推翻 5a 决策点 3）：XLSX/DOCX 文档字典经 `parseOfficeTableRows` 还原后直接进 mock 强校验链（samples 仍限 JSON）；`validateDictionary` 加文档形态分支与行式别名映射；前端 dictionary 类别开放 XLSX/DOCX（不开放 PDF）。mock-onboarding-document **9/9**、console **63/63**。
+- **C-2 元域智语权限语义独立**（[ADR-030](../architecture/adr/ADR-030-semantic-operations-permission-independence.md)）：4.3 决策 A 的「保留一个版本周期」兑现——权限目录新增 `menu.semantic-operations`（元域智语），删除 `menu.world`/`page.world.view`；quality_manager 菜单同步；8 处后端 + 2 处前端换码；老前端 AppShell「语义层」死链导航项删除。**单一页面权限粒度**（全端一致访问预期），细粒度拆分待真实需求触发。
+- **验收（本机实测）**：`test:permissions` **31/31**、`test:knowledge` **56/56**、`test:multitenant` **75/75**、`npm run quality` 端到端全绿（multitenant/mock-onboarding 链尾执行=全链成功）、console **63/63**、lint 干净。
+
 2026-10-07 **阶段 8 收官：8-5 ~ 8-7 边界项完成（[ADR-028 补充实施](../architecture/adr/ADR-028-system-onboarding-connection-config.md)）**——用户确认「做这三个」后实施，阶段 8（系统接入连接配置段）至此全部完成（8-0 ~ 8-7）：
 
 - **8-5 文档 → schema 发现消费链**：`storeSystemDocumentTexts` / `getAllSystemDocumentTexts`（DOCS_KEY 状态）把登记文档提取文本串入 `discoverWorkspaceSchemas`——文档物料从「仅持久化与披露」升级为「进 schema 发现候选消费链」（候选路径边界不变、不进 mock 强校验链）；`registerSystemOnboarding` 随文档解析由同步转 async。新增 `system-access-document-discovery.test.js` **5/5**；架构棘轮登记新跨域边 `semantic-material-workspace-service → system-access-service`（净收敛性质）。

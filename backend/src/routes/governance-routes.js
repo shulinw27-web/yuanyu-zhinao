@@ -111,7 +111,7 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
   const systemAccessRootMatch = url.pathname.match(/^\/api\/semantic-operations\/systems(?:\/([^/]+))?$/u);
   const systemAccessActionMatch = url.pathname.match(/^\/api\/semantic-operations\/systems\/([^/]+)\/(probe|mapping-drafts|lifecycle)$/u);
   const systemAccessDraftMatch = url.pathname.match(/^\/api\/semantic-operations\/systems\/([^/]+)\/mapping-drafts\/([^/]+)\/(validate|publish)$/u);
-  const canReadWorldModel = Boolean(effectiveAccess?.pagePermissionIds?.includes('page.world.view'));
+  const canReadWorldModel = Boolean(effectiveAccess?.pagePermissionIds?.includes('page.semantic-operations.view'));
   const templateFor = (code) => getWorldModelTemplates().find((template) => template.targets.includes(String(code || '').toLowerCase()));
   if (systemAccessRootMatch && ['GET', 'POST'].includes(req.method)) {
     const segment = systemAccessRootMatch[1] ? decodeURIComponent(systemAccessRootMatch[1]) : null;
@@ -120,7 +120,7 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
       return true;
     }
     if (req.method === 'GET' && (segment === 'mapping-templates' || segment === 'connection-targets' || segment === 'mapping-drafts')) {
-      if (!canReadWorldModel) { denyButton('page.world.view'); return true; }
+      if (!canReadWorldModel) { denyButton('page.semantic-operations.view'); return true; }
       const payload = segment === 'mapping-templates' ? { templates: getWorldModelTemplates() }
         : segment === 'connection-targets' ? { targets: getWorldModelConnectionTargets() }
           : { drafts: getWorldModelDrafts(role) };

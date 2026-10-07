@@ -373,6 +373,16 @@ semantic-*（3 个）   → 都属于"语义建模"链路
 2. `packages/agent-ui`（新建）—— **跨端共享**的业务组件（见 2.4 方案 A）；
 3. `features/<domain>/` —— **单端专用**的页面级组件。
 
+> **已完成（2026-10-07，关闭第 6 项）**：三层判据随 2.6（`packages/agent-ui` 上提）与阶段 6 第二段（world 页删除）已实际成立，现记录为唯一判据：
+>
+> | 层 | 判据 | 现状（2026-10-07 实测） |
+> | --- | --- | --- |
+> | `frontend/src/components/` | **无业务语义**的展示组件：只受 props、不取数据、不含领域动作 | 3 个（`AppShell` / `MetricCard` / `RiskDrawer`） |
+> | `packages/agent-ui` | **跨端共享**的业务组件：被 ≥2 端（web/desktop/mobile/dingtalk/语义运营端）引用，或承载平台级领域概念（meta-model / knowledge / agent / system-access） | 5 目录 + 具名 `index.js`（9 个具名 exports 入口，无通配） |
+> | `frontend/src/features/<domain>/` | **单端专用**的页面级组件：只被本端一个页面引用 | 9 目录（actions/agent/assistant/channels/config/dashboard/intelligence/permission/risk；meta-model / knowledge / world-model 已于 2026-09-25 上提 `packages/agent-ui`） |
+>
+> **判据的使用规则**：新组件先问「被几个端引用」——0 端→本端 feature；≥2 端→`packages/agent-ui`（走具名 exports，禁止相对路径穿透，跨包棘轮锁死）；「无业务语义且只受 props」→`components/`。**升级方向单向**（feature → agent-ui → components 不回退），下沉属破坏性变更需 ADR。**第 6 项至此关闭**；原 6.1 表格保留 2026-09-24 审计时点口径，不回溯改写。
+
 ---
 
 ## 7. P3：后端 services 扁平 137 文件

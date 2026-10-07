@@ -209,7 +209,7 @@ onMounted(async () => {
           :client="client" :role="role" :button-permission-ids="buttonPermissionIds"
           :can-probe="buttonPermissionIds.includes('meta_model.draft.save')"
           :can-configure-mapping="buttonPermissionIds.includes('meta_model.draft.save')"
-          :can-read-mapping="buttonPermissionIds.includes('page.world.view')"
+          :can-read-mapping="buttonPermissionIds.includes('page.semantic-operations.view')"
           @open-agent="openSystemInAgent" />
         <SemanticOnboardingWorkspace
           v-if="onboardingMounted" v-show="accessTab === 'materials'"

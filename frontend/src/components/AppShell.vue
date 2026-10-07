@@ -9,10 +9,9 @@ const navItems = [
   { id: 'intelligence', label: '智能中枢', icon: '02', hint: '7 × 24 运行大屏' },
   { id: 'agent', label: '智脑运营', icon: '03', hint: '私有 Agent 控制面' },
   { id: 'risks', label: '风险中心', icon: '04', hint: '风险闭环与人工确认' },
-  { id: 'world', label: '语义层', icon: '05', hint: '语义建模、上下文与溯源' },
-  { id: 'channels', label: '通知渠道', icon: '06', hint: '告警送达与升级策略' },
-  { id: 'config', label: '配置与治理', icon: '07', hint: '连接、密钥与模型治理' },
-  { id: 'permissions', label: '权限管理', icon: '08', hint: '人员、按钮与组织数据域' }
+  { id: 'channels', label: '通知渠道', icon: '05', hint: '告警送达与升级策略' },
+  { id: 'config', label: '配置与治理', icon: '06', hint: '连接、密钥与模型治理' },
+  { id: 'permissions', label: '权限管理', icon: '07', hint: '人员、按钮与组织数据域' }
 ];
 const visibleNavItems = computed(() => {
   const effectiveAccess = props.workspace?.effectiveAccess;

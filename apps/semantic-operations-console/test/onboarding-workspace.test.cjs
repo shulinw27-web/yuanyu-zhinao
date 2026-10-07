@@ -194,9 +194,9 @@ test('document attachments stage without text, save through the document channel
   });
   const ui = await mount(t, { saveOnboardingMaterial: async (id, payload) => { calls.push(payload); return { project: registered }; } });
   const read = file => ui.find('material-file').props.onChange({ target: { files: [file], value: file.name } });
-  // 字典类别不接受文档形态：必须先在客户端拦下，不发起请求。
+  // 数据字典接受 XLSX/DOCX 行式字典（ADR-029）；PDF 无表格结构在客户端先拦下，不发起请求。
   await ui.input('material-kind', 'dictionary'); await read({ name: '字典.pdf', size: 2048, arrayBuffer: async () => new ArrayBuffer(8) }); await flush();
-  assert.match(content(ui.find('form-error')), /仅接受 JSON 文本/);
+  assert.match(content(ui.find('form-error')), /XLSX \/ DOCX/);
   assert.deepEqual(calls, []);
   await ui.input('material-kind', 'requirements');
   await read({ name: '需求说明.pdf', size: 2048, arrayBuffer: async () => new ArrayBuffer(8) }); await flush();

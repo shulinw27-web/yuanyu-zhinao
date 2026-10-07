@@ -86,7 +86,7 @@ export async function runSemanticInspectionCycle({ workerId = `semantic-worker-$
     const schedule = await claimDueSemanticInspection({ workerId });
     if (!schedule) break;
     const lease = { id: schedule.id, workerId, leaseToken: schedule.lease.token };
-    try { await completeSemanticInspection({ ...lease, result: await runWithTenantExecution({ identity: schedule.identityScope, roleId: schedule.roleId, feature: 'semantic', permission: 'page.world.view' }, async () => {
+    try { await completeSemanticInspection({ ...lease, result: await runWithTenantExecution({ identity: schedule.identityScope, roleId: schedule.roleId, feature: 'semantic', permission: 'page.semantic-operations.view' }, async () => {
       const current = (await readIndex())[schedule.id];
       if (!ownsLease(current, workerId, lease.leaseToken, Date.now())) throw new Error('SEMANTIC_INSPECTION_LEASE_MISMATCH');
       return executeInspection(schedule);

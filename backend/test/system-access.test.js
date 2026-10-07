@@ -252,7 +252,7 @@ test('探测：六种故障模式必须显式失败或被显式标为结构漂�
 
 // ── 5. 路由与权限闸门 ───────────────────────────────────────────────────────
 
-async function callRoute({ method, path, tenant = 'demo-enterprise', role = 'executive', actionRole = executiveRole, body = null, pagePermissionIds = ['page.world.view'] }) {
+async function callRoute({ method, path, tenant = 'demo-enterprise', role = 'executive', actionRole = executiveRole, body = null, pagePermissionIds = ['page.semantic-operations.view'] }) {
   let response;
   const handled = await handleGovernanceRoutes({
     req: { method }, res: {}, url: new URL(`http://test${path}`), role,
@@ -282,7 +282,7 @@ test('路由：接入读取沿用页面权限，接入写入仍需 meta_model.dr
 
   const deniedRead = await callRoute({ method: 'GET', path: '/api/semantic-operations/systems/mapping-templates', pagePermissionIds: [] });
   assert.equal(deniedRead.status, 403);
-  assert.equal(deniedRead.value.denied, 'page.world.view');
+  assert.equal(deniedRead.value.denied, 'page.semantic-operations.view');
 
   const probe = await callRoute({ method: 'POST', path: '/api/semantic-operations/systems/ERP/probe', body: { faultMode: 'none' } });
   assert.equal(probe.status, 200);

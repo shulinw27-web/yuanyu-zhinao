@@ -20,7 +20,7 @@
    - 提取文本（落 `materials[kind].text`，`digest` 与之绑定）；
    - 解析取证 `source`（形态、mimeType、页数 / 总页数、内容扫描状态、脱敏信号、原文件字节数）。
 2. **限制口径分两侧**：原文件按附件侧（4MB、PDF≤20 页）；提取文本按材料侧 `materialBytes` 64KB。**超限整份拒绝、不做静默截断**——为区分解析器级截断与模型上下文预算截断，多模态报告新增 `parserTruncated` 字段（后者只影响展示与模型上下文，不影响登记完整性判据）。
-3. **类别边界**：`requirements / api / rules` 三类接受文档形态；`dictionary / samples` 保持 JSON 契约（文档形态字典走对话面候选路径）；图片 / 音频 / 视频一律整份拒绝（专用错误码 `MOCK_ONBOARDING_MATERIAL_FORM_UNSUPPORTED`，指向 5b）。
+3. **类别边界**：`requirements / api / rules` 三类接受文档形态；`dictionary / samples` 保持 JSON 契约（文档形态字典走对话面候选路径）；图片 / 音频 / 视频一律整份拒绝（专用错误码 `MOCK_ONBOARDING_MATERIAL_FORM_UNSUPPORTED`，指向 5b）。**2026-10-07 更新**：dictionary 一侧已被 [ADR-029](ADR-029-document-dictionary-strong-chain.md) 推翻——XLSX/DOCX 行式字典进 mock 强校验链（与 JSON 字典同一条严格校验、类型严格别名不放宽、PDF 仍不进文档字典）；samples 仍保持 JSON 契约。
 4. **结构化候选路径共享**：XLSX / DOCX 字典与 CSV 走同一条确定性候选路径——`office-material-parser` 新增 `parseOfficeTableRows` 把序列化行文本确定性还原为行列矩阵（单元格坐标对齐、稀疏列不移位），发现服务按表头行 + 别名列构造候选；证据等级与 CSV 同级，仍需 Critic 与人工校对。PDF 提取文本不进结构化候选，必须点名披露「仅进入自然语言上下文」。
 5. **中文表头别名修复**：`lowerKeys` 保留汉字（`[^a-z0-9\p{Script=Han}]`），使既有中文别名判据真正生效。
 

@@ -53,7 +53,7 @@ export const permissionCatalog = [
     ]
   },
   {
-    id: 'menu.world', menuId: 'world', name: '元模型', pagePermissionId: 'page.world.view', description: '已迁出元域智营（2026-09-28 阶段 6 / 4.3 决策 A，模型相关只在元域智语端）；权限条目保留一个版本周期——page.world.view 是元域智语端语义页面与巡检服务的访问载体',
+    id: 'menu.semantic-operations', menuId: 'semantic-operations', name: '元域智语', pagePermissionId: 'page.semantic-operations.view', description: '语义运营端（元域智语）工作台：语义建模、系统接入、知识库与巡检（2026-10-07 权限语义独立，接替已删除的 page.world.view——元域智语端权限不再挂靠元域智营菜单）',
     buttons: []
   },
   {
@@ -114,7 +114,7 @@ export const initialRolePolicies = {
     dataScope: { mode: 'all', organizationIds: [] }, version: 1
   },
   quality_manager: {
-    roleId: 'quality_manager', menuIds: ['dashboard', 'intelligence', 'agent', 'risks', 'world', 'channels', 'config'],
+    roleId: 'quality_manager', menuIds: ['dashboard', 'intelligence', 'agent', 'risks', 'semantic-operations', 'channels', 'config'],
     buttonPermissionIds: ['dashboard.refresh', 'intelligence.drilldown', 'agent.prompt.run', 'agent.command.execute', 'risk.detail.view', 'risk.acknowledge', 'simulation.approval.decide', 'meta_model.draft.save', 'meta_model.draft.validate', 'meta_model.simulate'],
     dataScope: { mode: 'selected_orgs', organizationIds: ['org-quality-dept', 'org-market-dept'] }, version: 1
   },

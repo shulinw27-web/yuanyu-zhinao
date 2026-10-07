@@ -7,7 +7,7 @@ export async function handleKnowledgeRoutes({ req, res, url, role, agentIdentity
     .find(path => url.pathname === path || url.pathname.startsWith(`${path}/`));
   if (!base) return false;
   const semantic = base.startsWith('/api/semantic-operations/');
-  const page = semantic ? 'page.world.view' : 'page.agent.view';
+  const page = semantic ? 'page.semantic-operations.view' : 'page.agent.view';
   const writePermission = semantic ? 'meta_model.draft.save' : 'agent.prompt.run';
   const context = { identityScope: agentIdentity, roleId: role };
   const canRead = () => getEffectiveAccess(role, agentIdentity).pagePermissionIds.includes(page);

@@ -10,7 +10,7 @@ import { WorldModelTemplateConfig } from '@healthcare-ai/agent-ui/system-access'
 // 权限分界（与后端一致，不在此处放宽；阶段 6 等价合并后 world.draft.* 已删）：
 //   canProbe          → meta_model.draft.save：连通性探测是接入侧写入
 //   canConfigureMapping → meta_model.draft.save：映射草稿与接入侧写入同一把闸门
-//   canReadMapping    → page.world.view：读取连接模板/目标/草稿的页面门槛
+//   canReadMapping    → page.semantic-operations.view：读取连接模板/目标/草稿的页面门槛（2026-10-07 权限语义独立，接替已删除的 page.world.view）
 const props = defineProps({
   client: { type: Object, required: true },
   role: { type: String, default: '' },

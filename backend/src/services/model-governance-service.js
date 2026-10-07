@@ -51,13 +51,26 @@ export function getModelGovernancePolicy(env = process.env) {
   };
 }
 
+// local 通道的 model 字段是模型文件路径（gguf 等）；精确版本判据是「文件名」而非完整路径——
+// 同一份受控工件在不同机器上的挂载路径不同，按完整路径精确匹配会让 local 通道永远无法准入
+// （实测：运行时管理员配置 model='D:\LLM\Models\Qwen\Qwen3-8B-Q4_K_M.gguf'，白名单存裸文件名）。
+// 提取 basename（兼容 / 与 \ 分隔符）后与白名单精确比对——文件名即受控工件的精确版本，仍是精确固定。
+const localModelBasename = (value) => String(value || '').trim().split(/[\\/]/).pop() || '';
+
 export function validateModelSelection(provider, model, env = process.env) {
   const normalizedProvider = String(provider || '').trim().toLowerCase();
   const normalizedModel = String(model || '').trim();
   const policy = getModelGovernancePolicy(env);
   const allowedModels = policy.allowlist[normalizedProvider];
   if (!allowedModels) return { allowed: false, code: 'MODEL_PROVIDER_NOT_ALLOWED', message: '模型提供方不在准入范围内。' };
-  if (!normalizedModel || !allowedModels.includes(normalizedModel)) return { allowed: false, code: 'MODEL_VERSION_NOT_ALLOWED', message: `模型 ${normalizedModel || '(empty)'} 未在 ${normalizedProvider} 的精确版本白名单中。`, allowedModels };
+  // local 通道按文件名比对（model 字段是模型文件路径，basename 才是受控工件的精确版本）；
+  // 其余 provider 仍按完整字符串精确匹配，版本准入语义不变。
+  const candidates = normalizedProvider === 'local'
+    ? [...new Set([normalizedModel, localModelBasename(normalizedModel)].filter(Boolean))]
+    : [normalizedModel];
+  if (!candidates.some((candidate) => allowedModels.includes(candidate))) {
+    return { allowed: false, code: 'MODEL_VERSION_NOT_ALLOWED', message: `模型 ${normalizedModel || '(empty)'} 未在 ${normalizedProvider} 的精确版本白名单中。`, allowedModels };
+  }
   return { allowed: true, provider: normalizedProvider, model: normalizedModel, versionPinned: true };
 }
 

@@ -58,7 +58,7 @@ npm.cmd run preview:mock-onboarding -- --reviewed-calculation-fixture
 
 ## 在界面使用
 
-1. 使用已授权账号登录元域智语端，打开“企业接入”。创建和保存需要 `meta_model.draft.save`，读取需要 `page.world.view`。
+1. 使用已授权账号登录元域智语端，打开“企业接入”。创建和保存需要 `meta_model.draft.save`，读取需要 `page.semantic-operations.view`。
 2. 选择场景、输入项目名称，点击“建立空白项目”。企业名称只是描述，不能改变登录身份的租户归属。
 3. 查看五类材料的缺项原因。在“登记 / 替换材料”选择类别，读取 UTF-8 的 JSON/TXT 文件，或粘贴正文。
 4. 文件读入编辑区后，点击保存才提交。格式错误的材料可以保存以便修订，但会明确显示问题，不计入准备完成。

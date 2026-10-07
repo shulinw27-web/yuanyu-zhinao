@@ -222,7 +222,7 @@ test('HTTP capability gate prevents shared business/desktop execution and consum
 
 test('worker restores tenant context; revocation in flight discards result; blocked work never starts', async () => {
   const f = fixture(); f.install(); await f.approve(); let executed = false;
-  const args = { identity: f.identity, roleId: 'executive', feature: 'semantic', permission: 'page.world.view' };
+  const args = { identity: f.identity, roleId: 'executive', feature: 'semantic', permission: 'page.semantic-operations.view' };
   await assert.rejects(runWithTenantExecution({ ...args, feature: 'background-agent' }, async () => { executed = true; }), { code: 'RUNTIME_FEATURE_NOT_ENTITLED' });
   assert.equal(executed, false);
   await assert.rejects(runWithTenantExecution(args, async () => { assert.equal(getIAMUsers()[0].account, f.identity.subjectId); await f.control.revoke(f.identity.tenantId, 1); return 'must not accept'; }), { code: 'RUNTIME_ENROLLMENT_REVOKED' });
@@ -239,7 +239,7 @@ test('managed HTTP withholds a prepared response when portal permission changes 
 
 test('worker rejects an IAM permission version changed during the operation', async () => {
   const f = fixture(); f.install(); await f.approve();
-  await assert.rejects(runWithTenantExecution({ identity: f.identity, roleId: 'executive', feature: 'semantic', permission: 'page.world.view' }, async () => {
+  await assert.rejects(runWithTenantExecution({ identity: f.identity, roleId: 'executive', feature: 'semantic', permission: 'page.semantic-operations.view' }, async () => {
     const policy = getIAMRolePolicy('executive'); await updateIAMRolePolicy('executive', policy, policy.version); return 'stale result';
   }), { code: 'RUNTIME_PERMISSION_REVOKED' });
 });

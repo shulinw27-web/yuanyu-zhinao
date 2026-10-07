@@ -98,11 +98,10 @@ test('xlsx and pdf attachments register through the same document channel', asyn
   assert.equal((await get(project.id)).project.readiness.completed, 2);
 });
 
-test('document form is rejected for json kinds, images, audio, unsupported types and dual input without revision changes', async () => {
+test('document form is rejected for samples, images, audio, unsupported types and dual input without revision changes', async () => {
   const { project } = await create();
   const bytes = await archive({ 'word/document.xml': docxBody(['数据字典的表结构说明。']) });
   const results = [
-    await save(project, { kind: 'dictionary', name: '字典.docx', attachment: attachment('字典.docx', docx, bytes) }),
     await save(project, { kind: 'samples', name: '样本.docx', attachment: attachment('样本.docx', docx, bytes) }),
     await save(project, { kind: 'requirements', name: '截图.png', attachment: attachment('截图.png', 'image/png', Buffer.concat([Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]), Buffer.alloc(64)])) }),
     await save(project, { kind: 'requirements', name: '录音.mp3', attachment: attachment('录音.mp3', 'audio/mpeg', Buffer.alloc(64)) }),
@@ -114,10 +113,76 @@ test('document form is rejected for json kinds, images, audio, unsupported types
     assert.equal(result.code, result.code === 'MOCK_ONBOARDING_MATERIAL_INVALID' ? 'MOCK_ONBOARDING_MATERIAL_INVALID' : 'MOCK_ONBOARDING_MATERIAL_FORM_UNSUPPORTED');
     assert.equal(result.status, 400);
   }
-  assert.equal(results.filter(item => item.code === 'MOCK_ONBOARDING_MATERIAL_FORM_UNSUPPORTED').length, 5);
+  // ADR-029：dictionary 文档形态已转接受（见下方用例），samples 仍拒绝；其余反例不变
+  assert.equal(results.filter(item => item.code === 'MOCK_ONBOARDING_MATERIAL_FORM_UNSUPPORTED').length, 4);
   assert.equal(results.filter(item => item.code === 'MOCK_ONBOARDING_MATERIAL_INVALID').length, 2);
-  assert.match(results[2].error, /阶段 5b/);
+  assert.match(results[1].error, /阶段 5b/);
   assert.equal((await get(project.id)).project.revision, 1);
+});
+
+// ── 文档形态字典进 mock 强校验链（ADR-029）────────────────────────────────
+
+const dictionaryHeader = '<row r="1"><c r="A1" t="inlineStr"><is><t>表名</t></is></c><c r="B1" t="inlineStr"><is><t>字段</t></is></c><c r="C1" t="inlineStr"><is><t>类型</t></is></c><c r="D1" t="inlineStr"><is><t>主键</t></is></c><c r="E1" t="inlineStr"><is><t>必填</t></is></c><c r="F1" t="inlineStr"><is><t>来源系统</t></is></c></row>';
+const dictionaryRow = (row, table, field, type, pk, required, system) => `<row r="${row}"><c r="A${row}" t="inlineStr"><is><t>${table}</t></is></c><c r="B${row}" t="inlineStr"><is><t>${field}</t></is></c><c r="C${row}" t="inlineStr"><is><t>${type}</t></is></c><c r="D${row}" t="inlineStr"><is><t>${pk}</t></is></c><c r="E${row}" t="inlineStr"><is><t>${required}</t></is></c><c r="F${row}" t="inlineStr"><is><t>${system}</t></is></c></row>`;
+
+test('document dictionary (xlsx) registers and passes the strong validation chain like a JSON dictionary', async () => {
+  const xlsxBytes = await archive({
+    'xl/workbook.xml': '<workbook><sheets><sheet name="数据字典" r:id="r1"/></sheets></workbook>',
+    'xl/_rels/workbook.xml.rels': '<Relationships><Relationship Id="r1" Target="worksheets/sheet1.xml"/></Relationships>',
+    'xl/worksheets/sheet1.xml': sheet([
+      dictionaryHeader,
+      dictionaryRow(2, 'SalesOrder', 'order_id', 'integer', '主键', '是', 'OMS'),
+      dictionaryRow(3, 'SalesOrder', 'quantity', 'integer', '', '是', 'OMS'),
+      dictionaryRow(4, 'Fulfillment', 'fulfillment_id', 'integer', '主键', '是', 'OMS'),
+      dictionaryRow(5, 'Fulfillment', 'order_id', 'integer', '', '', 'OMS')
+    ].join(''))
+  });
+  let { project } = await create();
+  project = (await save(project, { kind: 'dictionary', name: '字典.xlsx', attachment: attachment('字典.xlsx', xlsx, xlsxBytes) })).project;
+  assert.ok(project, JSON.stringify(project));
+  // 提取文本持久化 + 解析取证（原文件不落地）
+  const material = project.materials.find(item => item.kind === 'dictionary');
+  assert.equal(material.source.form, 'document');
+  assert.equal(material.source.mimeType, xlsx);
+  // readiness 消费文档字典：与 JSON 字典同一条强校验链
+  const view = (await get(project.id)).project;
+  const dictionaryMaterial = view.materials.find(item => item.kind === 'dictionary');
+  assert.equal(dictionaryMaterial.issues.length, 0, JSON.stringify(dictionaryMaterial.issues));
+  // 落库的 tables 与 JSON 字典同构：表名/系统/主键/类型
+  const stored = listState('mock_onboarding_v1').find(entry => entry.value[project.id]).value[project.id];
+  const storedMaterial = stored.materials.dictionary;
+  assert.match(storedMaterial.text, /行 2: A2="SalesOrder" \| B2="order_id" \| C2="integer" \| D2="主键"/);
+  // 文档字典在 readiness 中零 issue 即强校验链通过（与 JSON 字典同一条严格校验链）
+  assert.equal(dictionaryMaterial.issues.length, 0);
+});
+
+test('document dictionary with unmappable type is rejected whole at the strong validation chain', async () => {
+  const xlsxBytes = await archive({
+    'xl/workbook.xml': '<workbook><sheets><sheet name="数据字典" r:id="r1"/></sheets></workbook>',
+    'xl/_rels/workbook.xml.rels': '<Relationships><Relationship Id="r1" Target="worksheets/sheet1.xml"/></Relationships>',
+    'xl/worksheets/sheet1.xml': sheet([
+      dictionaryHeader,
+      dictionaryRow(2, 'SalesOrder', 'order_id', 'VARCHAR(64)', '主键', '是', 'OMS'),
+      dictionaryRow(3, 'SalesOrder', 'quantity', 'integer', '', '是', 'OMS')
+    ].join(''))
+  });
+  let { project } = await create();
+  project = (await save(project, { kind: 'dictionary', name: '字典.xlsx', attachment: attachment('字典.xlsx', xlsx, xlsxBytes) })).project;
+  assert.ok(project, '登记接受（登记只做提取与持久化）');
+  // 强校验链在 readiness 消费时整份拒绝：类型别名不可映射不静默默认
+  const view = (await get(project.id)).project;
+  const dictionaryMaterial = view.materials.find(item => item.kind === 'dictionary');
+  assert.ok(dictionaryMaterial.issues.length, '不可映射类型应产生 issue');
+  assert.match(dictionaryMaterial.issues.join(' '), /VARCHAR\(64\).*mock 契约/);
+});
+
+test('pdf dictionary attachment is rejected with a dedicated message (no table structure)', async () => {
+  const { project } = await create();
+  const pdfBytes = buildPdf('表名,字段,类型');
+  const rejected = await save(project, { kind: 'dictionary', name: '字典.pdf', attachment: attachment('字典.pdf', 'application/pdf', pdfBytes) });
+  assert.equal(rejected.code, 'MOCK_ONBOARDING_MATERIAL_FORM_UNSUPPORTED');
+  assert.match(rejected.error, /XLSX \/ DOCX/);
+  assert.match(rejected.error, /无行列结构/);
 });
 
 test('pdf without extractable text and hidden injection both fail closed as a whole', async () => {
