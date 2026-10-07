@@ -39,7 +39,32 @@ import { resolveHeartbeatCredential } from './heartbeat-credential-resolver.js';
 
 const NAMESPACE = 'system_access_runtime';
 const PROBES_KEY = 'probes';
+const SYSTEM_DOCUMENTS_KEY = 'system_documents';
 const MAX_PROBE_HISTORY = 24;
+
+// 阶段 8-5：系统登记文档物料的提取文本存储。按租户 + 系统码隔离。
+// 原文件不落地，只存提取文本 + 取证（与 5a 边界一致）。
+function storeSystemDocumentTexts(code, documents, warnings = []) {
+  mutateState(NAMESPACE, semanticTenantStateKey(SYSTEM_DOCUMENTS_KEY), {}, (state) => {
+    if (!state[code]) state[code] = { documents: [], warnings: [] };
+    state[code].documents = documents;
+    state[code].warnings = warnings;
+    return { value: state, result: { code, documentCount: documents.length, warningCount: warnings.length } };
+  });
+}
+
+/** 获取指定系统码的登记文档提取文本（供 schema 发现候选消费，8-5）。 */
+export function getSystemDocumentTexts(code) {
+  const normalized = String(code || '').toUpperCase();
+  const state = readState(NAMESPACE, semanticTenantStateKey(SYSTEM_DOCUMENTS_KEY), {});
+  return state[normalized] || { documents: [], warnings: [] };
+}
+
+/** 获取当前租户所有自定义系统的登记文档提取文本（供 schema 发现候选批量消费，8-5）。 */
+export function getAllSystemDocumentTexts() {
+  const state = readState(NAMESPACE, semanticTenantStateKey(SYSTEM_DOCUMENTS_KEY), {});
+  return state;
+}
 
 // 心跳探测的默认 fetcher：生产用 globalThis.fetch；测试通过 executeHeartbeatProbe 的
 // fetcher 参数注入 mock。这层间接让心跳探测可测、不在测试里发真实网络请求。
@@ -357,8 +382,10 @@ function lifecycleView(code) {
 /**
  * 登记一个自定义接入系统（ADR-024）：物料校验与状态机都在注册表，本函数只做
  * 操作主体解析与 HTTP 状态码映射。登记成功即生命周期 registered（已登记）。
+ * 阶段 8-5（ADR-028）：登记成功后异步解析文档物料，提取文本存入系统记录，
+ * 供 schema 发现候选消费。原文件不持久化，只存提取文本 + 取证。
  */
-export function registerSystemOnboarding({ materials, identityScope } = {}) {
+export async function registerSystemOnboarding({ materials, identityScope } = {}) {
   const actor = String(identityScope?.subjectId || identityScope?.tenantId || '').trim();
   if (!actor) return { error: '缺少操作主体，拒绝登记接入系统。', code: 'SYSTEM_ACTOR_REQUIRED', status: 400 };
   const outcome = registerTenantCustomSystem({ materials, actor });
@@ -369,12 +396,39 @@ export function registerSystemOnboarding({ materials, identityScope } = {}) {
     };
     return { ...outcome, status: statusByCode[outcome.code] || 400 };
   }
+  // 8-5：登记成功后异步解析文档物料（attachmentDocuments），提取文本 + 取证存库。
+  // 解析失败不阻塞登记（文档是可选物料），但记录 warning 供披露。
+  const documentWarnings = [];
+  if (materials?.attachmentDocuments?.length) {
+    const { inspectMultimodalInput, extractMultimodalEvidence } = await import('./multimodal-input-service.js');
+    const extractedDocuments = [];
+    for (const doc of materials.attachmentDocuments) {
+      try {
+        const attachment = { id: `sysdoc-${outcome.code}-${extractedDocuments.length}`, mimeType: doc.mimeType, dataUrl: doc.dataUrl, name: `system-${outcome.code}-doc${extractedDocuments.length}` };
+        const multimodal = inspectMultimodalInput({ attachments: [attachment] }, { id: 'system_registration' });
+        if (multimodal.error) { documentWarnings.push(`文档 ${extractedDocuments.length + 1} 安全闸门拒绝：${multimodal.error}`); continue; }
+        const extraction = await extractMultimodalEvidence(multimodal.attachments);
+        const report = extraction.reports[0] || {};
+        if (report.status !== 'content_scanned') { documentWarnings.push(`文档 ${extractedDocuments.length + 1} 未通过受控内容检查：${report.reason || '未知原因'}`); continue; }
+        const document = extraction.documents?.[0];
+        if (!document?.text) { documentWarnings.push(`文档 ${extractedDocuments.length + 1} 受控解析未产出可登记文本。`); continue; }
+        extractedDocuments.push({ attachmentId: attachment.id, name: attachment.name, mimeType: doc.mimeType, text: document.text, extractedCharacters: document.text.length, securityScan: report.securityScan || null, dlpSignals: [...(report.dlpSignals || [])] });
+      } catch (error) {
+        documentWarnings.push(`文档 ${extractedDocuments.length + 1} 解析异常：${error.message}`);
+      }
+    }
+    // 将提取文本存入系统记录（替换 raw dataUrl，只留提取文本 + 取证）
+    if (extractedDocuments.length || documentWarnings.length) {
+      storeSystemDocumentTexts(outcome.code, extractedDocuments, documentWarnings);
+    }
+  }
   return {
     code: outcome.code,
     id: outcome.id,
     name: outcome.name,
     lifecycle: lifecycleView(outcome.code),
-    registration: { registeredAt: outcome.registeredAt, registeredBy: outcome.registeredBy, materialsSchema: getSystemRegistrationSchema().fields.map((field) => field.key) }
+    registration: { registeredAt: outcome.registeredAt, registeredBy: outcome.registeredBy, materialsSchema: getSystemRegistrationSchema().fields.map((field) => field.key) },
+    ...(documentWarnings.length ? { documentWarnings } : {})
   };
 }
 
@@ -451,12 +505,23 @@ export async function executeHeartbeatProbe(definition, {
   }
   const auth = definition.auth || { scheme: 'user_token_passthrough' };
   const headers = { Accept: 'application/json, text/plain, */*' };
-  if (auth.scheme === 'service_principal') {
+  if (auth.scheme === 'service_principal' || auth.scheme === 'oauth_authorization_code') {
+    // service_principal / oauth_authorization_code：从 Key Center 取凭据，请求头带 Authorization: Bearer
     const credential = await credentialResolver({ credentialRef: auth.credentialRef, scope: auth.scope, identityScope, definition });
     if (credential?.error) {
       return { status: 'failed', issue: { code: 'HEARTBEAT_CREDENTIAL_UNRESOLVED', message: credential.error } };
     }
     if (credential?.authorizationHeader) headers.Authorization = credential.authorizationHeader;
+  } else if (auth.scheme === 'api_key') {
+    // api_key：从 Key Center 取 API Key，请求头带 X-API-Key
+    const credential = await credentialResolver({ credentialRef: auth.credentialRef, scope: auth.scope, identityScope, definition });
+    if (credential?.error) {
+      return { status: 'failed', issue: { code: 'HEARTBEAT_CREDENTIAL_UNRESOLVED', message: credential.error } };
+    }
+    if (credential?.apiKey) headers['X-API-Key'] = credential.apiKey;
+  } else if (auth.scheme === 'mTLS') {
+    // mTLS：客户端证书由 Key Center 保管，TLS 层签名；心跳只验证可达，不需要特殊请求头
+    // 真实 mTLS 需在 fetcher 层注入客户端证书（触发式复审），本阶段跳过
   } else if (identityScope?.subjectId) {
     // 用户令牌透传：智脑不持有凭据，转发当前用户身份。目标系统与智脑共用 IdP 时，
     // 目标系统应自己校验用户令牌权限——智脑不替它做权限决策。

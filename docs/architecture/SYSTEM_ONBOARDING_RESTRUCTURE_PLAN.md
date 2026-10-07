@@ -1302,7 +1302,7 @@ requestedSystems.length ? requestedSystems : connectorCatalog.filter(item => ite
 
 **验收（本机实测）**：`npm run docs:check` **188 份 Markdown / 1223 个本地链接**（第一段 1207 → 本段 +16，含路线图口径对齐段、本台账与状态文档的新增链接）；纯文档增量，不涉代码与测试。
 
-**至此本方案阶段 0 ~ 4h、6、7 全部完成；阶段 5a（文档类材料接入）已于 2026-10-05 完成实现（见上方 5a-1 ~ 5a-4 台账）；阶段 8（系统接入连接配置段，[ADR-028](adr/ADR-028-system-onboarding-connection-config.md)）于 2026-10-06 完成 8-1~8-3 实现（见下方 8-1 ~ 8-3 台账）；5b 图片 / 扫描页 / 音频仍被视觉模型硬前置卡死，独立排期（见上文阶段 5 小节）。**
+**至此本方案阶段 0 ~ 4h、6、7、8 全部完成（阶段 8 含 2026-10-07 的 8-5 ~ 8-7 边界项，见文末台账）；阶段 5a（文档类材料接入）已于 2026-10-05 完成实现（见上方 5a-1 ~ 5a-4 台账）；5b 图片 / 扫描页 / 音频仍被视觉模型硬前置卡死，独立排期（见上文阶段 5 小节）。**
 
 ---
 
@@ -1336,7 +1336,7 @@ requestedSystems.length ? requestedSystems : connectorCatalog.filter(item => ite
 
 ---
 
-### 阶段 8：系统接入连接配置段（ADR-028）—— **进行中（2026-10-06，用户决策）**
+### 阶段 8：系统接入连接配置段（ADR-028）—— **已完成（2026-10-06 ~ 10-07，用户决策）**
 
 **触发点**：ADR-024 触发式复审第 1 条「若引入真实企业连接器，登记物料需扩展连接配置段（端点 / 凭据引用 / 协议）」被用户三点需求提前触发：① 系统登记时应可选附加文档型物料（数据字典 / 接口文档）；② 系统登记时必选填写心跳接口做连通性测试；③ 系统登记时要考虑授权方式（智脑侧如何访问到目标系统）。ADR-024 边界第 3 条「登记物料是业务描述性物料，不是连接配置」由本阶段兑现升级。
 
@@ -1390,3 +1390,15 @@ requestedSystems.length ? requestedSystems : connectorCatalog.filter(item => ite
 - **8-3 前端登记表单扩展**：`SystemAccessWorkspace.vue` 登记表单按 schema 新增 format 渲染——`heartbeat`（endpoint/method/expectedStatus/expectedBody/timeoutMs 多字段）、`auth`（scheme 下拉 + 条件渲染 service_principal 的 credentialRef/scope + 写操作审批开关）、`documentAttachments`（文件上传 + 文档清单 + 移除）；`registrationAuthSchemes` 由服务端 schema 下发（前端不本地硬编码）；接通门禁文案升级为「心跳 verified」；`readRegistrationDocuments` 分块 base64 避免 4MB 爆栈。
 
 **验收（2026-10-06 本机实测）**：新增 `backend/test/system-registry.test.js` 7 用例（8→**15**）、`backend/test/system-access-heartbeat.test.js` **11** 用例（新增）、`workspace-layout.test.js` 8→**9**；回归 `test:access` **24/24**（13 原有 + 11 新心跳）、`test:registry` **15/15**、`test:mock-onboarding` **75/75**、`test:semantic` **105/105**、console **63/63** + 构建（vite 2.39s）、lint 干净。**边界**：真实 HTTP 探测只在沙箱内验证；Key Center 凭据保管最小化（不完整实现 lease 签发）；a+b 之外的授权方式属触发式复审；文档物料复用 5a 边界不进 mock 强校验链。
+
+### 8-5 ~ 8-7 边界项—— **已完成（2026-10-07，[ADR-028 补充实施](adr/ADR-028-system-onboarding-connection-config.md)）**
+
+三个边界项按用户确认（「做这三个」）实施，均不改变 ADR-028 核心决策：
+
+- **8-5 文档 → schema 发现消费链**：`storeSystemDocumentTexts` / `getSystemDocumentTexts` / `getAllSystemDocumentTexts`（DOCS_KEY 状态）把登记文档提取文本串入 `semantic-material-workspace-service.js#discoverWorkspaceSchemas`——文档物料从「仅持久化与披露」升级为「进 schema 发现候选消费链」（候选路径边界不变）；`registerSystemOnboarding` 随文档解析由同步转 async（路由层 `await`）。新增 `backend/test/system-access-document-discovery.test.js` **5/5**。架构棘轮登记新跨域边 `semantic-material-workspace-service → system-access-service`（共享消费而非复制清单，净收敛性质）。
+- **8-6 心跳定时探测 Worker**：新增 `backend/src/workers/heartbeat-probe-worker.js`——可配周期（默认 5min）、连续 N 次失败（默认 3）自动把连接状态降级为 `degraded`；fetcher / credentialResolver 可注入。**状态机扩展**：`SYSTEM_CONNECTION_STATES` 新增 `degraded`（`connected ⇄ degraded`）——降级可恢复，非接通撤销；接通门禁不变。新增 `backend/test/heartbeat-probe-worker.test.js` **5/5**。
+- **8-7 授权方案扩展**：`AUTH_SCHEME_OPTIONS` 2 → 5（+`api_key` / `oauth_authorization_code` / `mTLS`）；校验（api_key/mTLS 需 credentialRef、oauth 需 credentialRef + redirectUri https）；凭据策略注册扩展到全部 4 种凭据持有方案；`executeHeartbeatProbe` 按 scheme 分支（api_key→`X-API-Key`、oauth→Bearer、mTLS→无特殊头）；`heartbeat-credential-resolver` 按 scheme 返回 `apiKey`/`authorizationHeader`。心跳测试 11→**15**。**边界**：真实 KMS 签发、mTLS fetcher 层证书注入、OAuth 真实换 token 仍属触发式复审（opaque handle 占位不变）。
+
+**验收（2026-10-07 本机实测）**：registry 15/15、heartbeat 15/15、worker 5/5、document-discovery 5/5、access（authSchemes 断言 5 项）全绿；`npm run quality` 端到端 **EXIT=0**；**真实模型评测 `evaluate:mention-linking` 补跑成功（云配额恢复）——变体轮 6/6 通过（A 3/3 linked-as-expected、B 3/3 abstained）、E2E 断言 5 项全 true，关闭 ADR-025 实施以来评测欠账**。
+
+**阶段 8 至此全部完成（8-0 ~ 8-7）**。

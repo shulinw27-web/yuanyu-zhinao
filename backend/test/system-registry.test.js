@@ -220,7 +220,7 @@ test('登记物料 schema 下发连接配置段：heartbeat/auth 必填、attach
   assert.ok(requiredKeys.includes('heartbeat'), 'heartbeat 必填');
   assert.ok(requiredKeys.includes('auth'), 'auth 必填');
   assert.ok(!requiredKeys.includes('attachmentDocuments'), 'attachmentDocuments 可选');
-  assert.deepEqual(schema.authSchemes.map((option) => option.id), ['user_token_passthrough', 'service_principal']);
+  assert.deepEqual(schema.authSchemes.map((option) => option.id), ['user_token_passthrough', 'service_principal', 'api_key', 'oauth_authorization_code', 'mTLS']);
   // service_principal 必须要求 credentialRef
   const sp = schema.authSchemes.find((option) => option.id === 'service_principal');
   assert.equal(sp.requiresCredentialRef, true);
@@ -270,7 +270,7 @@ test('反例：授权方式缺失、未知 scheme、service_principal 缺 creden
   const noAuth = within('conn-d', () => registerTenantCustomSystem({ materials: registrationMaterials({ code: 'SCMD', heartbeat: validHeartbeat, auth: null }), actor: { id: 'a' } }));
   assert.equal(noAuth.code, 'SYSTEM_MATERIALS_INVALID');
   assert.ok(noAuth.issues.some((issue) => issue.field === 'auth' && /必填项/.test(issue.message)));
-  const unknownScheme = within('conn-d', () => registerTenantCustomSystem({ materials: registrationMaterials({ code: 'SCMD2', heartbeat: validHeartbeat, auth: { scheme: 'api_key' } }), actor: { id: 'a' } }));
+  const unknownScheme = within('conn-d', () => registerTenantCustomSystem({ materials: registrationMaterials({ code: 'SCMD2', heartbeat: validHeartbeat, auth: { scheme: 'basic_auth' } }), actor: { id: 'a' } }));
   assert.equal(unknownScheme.code, 'SYSTEM_MATERIALS_INVALID');
   assert.ok(unknownScheme.issues.some((issue) => /未知的授权方式/.test(issue.message)));
   const noCred = within('conn-d', () => registerTenantCustomSystem({ materials: registrationMaterials({ code: 'SCMD3', heartbeat: validHeartbeat, auth: { scheme: 'service_principal', scope: ['read:x'] } }), actor: { id: 'a' } }));

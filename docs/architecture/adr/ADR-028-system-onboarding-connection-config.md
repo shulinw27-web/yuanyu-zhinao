@@ -53,7 +53,7 @@ ADR-024 边界第 3 条明确写了「登记物料是**业务描述性物料**�
 
 **凭据永不进登记物料**，只存 `credentialRef`（Key Center 引用），与平台系统 `connector.credentialRef` 一致。登记 service_principal 系统时自动在 Key Center 注册凭据策略（`registerCustomSystemCredentialPolicy`，按租户隔离、版本递增）。
 
-**不实现的方式**（属触发式复审）：OAuth 授权码（d）、mTLS（e）、Token Exchange（f）、API Key（c）。`auth.scheme` 枚举需扩展时复审本 ADR。
+**不实现的方式**（属触发式复审）：~~OAuth 授权码（d）、mTLS（e）、Token Exchange（f）、API Key（c）~~。`auth.scheme` 枚举需扩展时复审本 ADR。**2026-10-07 兑现（8-7）**：API Key（c）、OAuth 授权码（d）、mTLS（e）已实现（见下方补充实施）；Token Exchange（f）仍属触发式复审。
 
 ### 4. 心跳凭据解析（heartbeat-credential-resolver）
 
@@ -79,7 +79,25 @@ user_token_passthrough 路径不取凭据，由 `executeHeartbeatProbe` 直接�
 
 ## 触发式复审
 
-- 若引入 OAuth 授权码（d）、mTLS（e）、Token Exchange（f）、API Key（c）授权方式，`auth.scheme` 枚举需扩展、Key Center 需支持对应凭据类型；本阶段只实现 a + b。
-- 若心跳契约需扩展（如定时探测、告警阈值、探测历史可视化），属独立增量；本阶段只做手动探测。
+- ~~若引入 OAuth 授权码（d）、mTLS（e）、Token Exchange（f）、API Key（c）授权方式，`auth.scheme` 枚举需扩展、Key Center 需支持对应凭据类型；本阶段只实现 a + b。~~ **已兑现（8-7，2026-10-07）**：c/d/e 三种已实现（凭据解析 + 请求头装配层面）；Token Exchange（f）仍保留。
+- ~~若心跳契约需扩展（如定时探测、告警阈值、探测历史可视化），属独立增量；本阶段只做手动探测。~~ **部分兑现（8-6，2026-10-07）**：定时探测 Worker 已落地（可配周期 + 连续失败自动降级 degraded）；告警阈值与探测历史可视化仍属独立增量。
 - 若文档型物料需进入 mock 强校验链（dictionary/samples），[ADR-027](ADR-027-document-material-registration.md) 边界需复审；本阶段保持 5a 边界不变。
 - 若真实 KMS 适配器对接（kms:// 协议解析、HSM 密钥操作）落地，`heartbeat-credential-resolver` 的 opaque handle 占位需替换为真实凭据；本阶段标注 `source: 'tenant_registration'`。
+
+## 补充实施（2026-10-07）：授权方案扩展、心跳定时 Worker 与文档发现链（8-5 ~ 8-7）
+
+三个边界项按用户确认（「做这三个」）实施，均不改变上文核心决策：
+
+- **8-5 文档 → schema 发现消费链**：`storeSystemDocumentTexts` / `getSystemDocumentTexts` / `getAllSystemDocumentTexts`（DOCS_KEY 状态）把登记文档提取文本串入 `semantic-material-workspace-service.js` 的 `discoverWorkspaceSchemas`——文档物料从「仅持久化与披露」升级为「进 schema 发现候选消费链」（候选路径边界不变，仍不进 mock 强校验链）；`registerSystemOnboarding` 随文档解析由同步转 async（路由层加 `await`）。**架构棘轮**：新增跨域边 `semantic-material-workspace-service → system-access-service` 已登记基线（同性质先例：共享消费而非复制清单）。
+- **8-6 心跳定时探测 Worker**：新增 `backend/src/workers/heartbeat-probe-worker.js`——可配周期（默认 5min）、遍历已接通系统对有心跳的执行 `executeHeartbeatProbe`、连续 N 次失败（默认 3）自动把连接状态降级为 `degraded`；fetcher / credentialResolver 可注入。**状态机扩展**：`SYSTEM_CONNECTION_STATES` 新增 `degraded`（`connected ⇄ degraded`，合法迁移由 system-registry-service 执行）——降级是可恢复状态，非接通撤销。**边界**：定时探测只改生命周期状态与披露，不改接通门禁（人工签字语义不变）；degraded 系统的心跳恢复成功即自动回到 connected。
+- **8-7 授权方案扩展**：`AUTH_SCHEME_OPTIONS` 2 → 5（新增 `api_key` / `oauth_authorization_code` / `mTLS`）；登记校验——api_key / oauth_authorization_code / mTLS 均需 `credentialRef`（kms://），oauth_authorization_code 另需 `redirectUri`（https:// 开头），scope 对非 service_principal 方案可选（有则校验格式）；凭据策略注册从 service_principal 扩展到**全部凭据持有方案**（4 种）；`executeHeartbeatProbe` 按 scheme 分支——service_principal / oauth_authorization_code 走 `Authorization: Bearer`、api_key 走 `X-API-Key` 头、mTLS 不设特殊请求头（TLS 层签名，证书注入属触发式复审）、user_token_passthrough 仍转发 `X-On-Behalf-Of`；`heartbeat-credential-resolver` 按 scheme 区分返回 `apiKey` 或 `authorizationHeader`。**边界**：三种新方案均为「凭据解析 + 请求头装配」层面的实现——真实 KMS 凭据签发、mTLS 客户端证书在 fetcher 层注入、OAuth 授权码换 token 的完整流程仍属触发式复审，本阶段 opaque handle 占位不变。
+
+**实测口径（2026-10-07 补充）**：
+
+- `backend/test/system-registry.test.js` 15/15（authSchemes 断言 2 → 5 项；未知 scheme 反例改用 `basic_auth`——`api_key` 从反例转正例）。
+- `backend/test/system-access-heartbeat.test.js` 11 → **15**：新增 4 项——api_key（X-API-Key 头 + 不设 Authorization）、oauth_authorization_code（Bearer 头）、mTLS（无特殊请求头）、三种新方案凭据策略自动注册。
+- `backend/test/system-access.test.js`：authSchemes 断言同步 5 项。
+- `backend/test/heartbeat-probe-worker.test.js` **5/5**（新增）：调度（配置周期 / 立即触发）、连续失败降级 degraded、恢复回 connected、无心跳系统跳过、注入 fetcher 不发真实请求。
+- `backend/test/system-access-document-discovery.test.js` **5/5**（新增）：文档登记 → 提取文本落库 → schema 发现候选消费链。
+- `npm run quality` 端到端 **EXIT=0** 全绿（架构棘轮通过）。
+- **真实模型评测 `evaluate:mention-linking` 补跑成功（2026-10-07，云配额恢复）**：变体轮 **6/6 通过、0 失败**——变体 A 3/3 `linked-as-expected`、变体 B 3/3 `abstained`（弃权不硬凑）；E2E 断言 5 项全 true（候选来自链接 / 兜底抑制 / 缺口点名 / 映射仍 pending）；Critic 仅剩既有「字段来源映射」（候选 pending 待人工确认，非缺陷）。**关闭 ADR-025 实施以来「真实模型评测未取得数字」的欠账**。

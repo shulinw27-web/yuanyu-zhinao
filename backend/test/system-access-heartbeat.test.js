@@ -168,9 +168,11 @@ test('接通门禁：心跳 verified 后可接通（不放宽 reason 必填）',
   // 接通仍需 reason 必填（人工签字语义，ADR-023 第 4 条）
   const noReason = within('hb-h', () => transitionTenantSystemConnection({ code: 'SHBH', to: 'connected', reason: '', identityScope: identity('hb-h') }));
   assert.equal(noReason.code, 'SYSTEM_TRANSITION_REASON_REQUIRED');
-  // 带理由可接通
+  // 带理由可接通（需先 authorized 再 connected）
+  within('hb-h', () => transitionTenantSystemConnection({ code: 'SHBH', to: 'authorized', reason: '授权通过', identityScope: identity('hb-h') }));
   const connected = within('hb-h', () => transitionTenantSystemConnection({ code: 'SHBH', to: 'connected', reason: '心跳探测通过，业务确认接入', identityScope: identity('hb-h') }));
   assert.equal(connected.to, 'connected');
+  assert.equal(connected.from, 'authorized', '接通前状态为 authorized');
   // 心跳未通过时不可接通
   within('hb-h2', () => registerTenantCustomSystem({ materials: baseMaterials({ code: 'SHBI' }), actor: { id: 'tester' } }));
   const failedProbe = await within('hb-h2', () => probeSystemConnection({ code: 'SHBI', roleId: 'executive', identityScope: identity('hb-h2'), fetcher: mockFetcher({ status: 503 }) }));
@@ -209,4 +211,87 @@ test('凭据策略注册：service_principal 自动注册，可重复登记版�
   const updated = within('hb-k', () => getCustomSystemCredentialPolicy(registered.id));
   assert.equal(updated.version, 2);
   assert.deepEqual(updated.operations, ['read:x', 'read:y']);
+});
+
+// ── 5. 新授权方式（ADR-028 8-7）─────────────────────────────────────────────
+
+test('心跳探测正例：api_key + 凭据解析成功 + 200 → verified，请求头带 X-API-Key', async () => {
+  const registered = within('hb-l', () => registerTenantCustomSystem({
+    materials: baseMaterials({
+      code: 'SHBM',
+      auth: { scheme: 'api_key', credentialRef: 'kms://integration/supplier-apikey', writeApprovalRequired: true }
+    }),
+    actor: { id: 'tester' }
+  }));
+  assert.equal(registered.code, 'SHBM');
+  const { getTenantSystemDefinitions } = await import('../src/services/system-registry-service.js');
+  const def = within('hb-l', () => getTenantSystemDefinitions().find((d) => d.code === 'SHBM'));
+  const record = {};
+  const fetcher = mockFetcher({ status: 200, body: '{"status":"ok"}' }, record);
+  const result = await within('hb-l', () => executeHeartbeatProbe(def, { identityScope: identity('hb-l'), fetcher }));
+  assert.equal(result.status, 'verified');
+  assert.match(record.headers['X-API-Key'], /^hb-/, 'api_key：请求头带 X-API-Key（opaque handle）');
+  assert.equal(record.headers.Authorization, undefined, 'api_key：不设 Authorization 头');
+  assert.equal(record.headers['X-On-Behalf-Of'], undefined, 'api_key：不转发用户身份');
+});
+
+test('心跳探测正例：oauth_authorization_code + 凭据解析成功 + 200 → verified，请求头带 Authorization Bearer', async () => {
+  const registered = within('hb-m', () => registerTenantCustomSystem({
+    materials: baseMaterials({
+      code: 'SHBN',
+      auth: { scheme: 'oauth_authorization_code', credentialRef: 'kms://integration/supplier-oauth', redirectUri: 'https://app.example.com/callback', writeApprovalRequired: true }
+    }),
+    actor: { id: 'tester' }
+  }));
+  assert.equal(registered.code, 'SHBN');
+  const { getTenantSystemDefinitions } = await import('../src/services/system-registry-service.js');
+  const def = within('hb-m', () => getTenantSystemDefinitions().find((d) => d.code === 'SHBN'));
+  const record = {};
+  const fetcher = mockFetcher({ status: 200, body: '{"status":"ok"}' }, record);
+  const result = await within('hb-m', () => executeHeartbeatProbe(def, { identityScope: identity('hb-m'), fetcher }));
+  assert.equal(result.status, 'verified');
+  assert.match(record.headers.Authorization, /^Bearer hb-/, 'oauth_authorization_code：请求头带 Bearer token');
+  assert.equal(record.headers['X-On-Behalf-Of'], undefined, 'oauth_authorization_code：不转发用户身份');
+});
+
+test('心跳探测正例：mTLS + 200 → verified，无特殊请求头（TLS 层签名）', async () => {
+  const registered = within('hb-n', () => registerTenantCustomSystem({
+    materials: baseMaterials({
+      code: 'SHBO',
+      auth: { scheme: 'mTLS', credentialRef: 'kms://integration/supplier-mtls', writeApprovalRequired: true }
+    }),
+    actor: { id: 'tester' }
+  }));
+  assert.equal(registered.code, 'SHBO');
+  const { getTenantSystemDefinitions } = await import('../src/services/system-registry-service.js');
+  const def = within('hb-n', () => getTenantSystemDefinitions().find((d) => d.code === 'SHBO'));
+  const record = {};
+  const fetcher = mockFetcher({ status: 200, body: '{"status":"ok"}' }, record);
+  const result = await within('hb-n', () => executeHeartbeatProbe(def, { identityScope: identity('hb-n'), fetcher }));
+  assert.equal(result.status, 'verified');
+  assert.equal(record.headers.Authorization, undefined, 'mTLS：不设 Authorization 头（TLS 层签名）');
+  assert.equal(record.headers['X-API-Key'], undefined, 'mTLS：不设 X-API-Key 头');
+  assert.equal(record.headers['X-On-Behalf-Of'], undefined, 'mTLS：不转发用户身份');
+});
+
+test('凭据策略注册：api_key / oauth_authorization_code / mTLS 均自动注册凭据策略', () => {
+  const schemes = [
+    { scheme: 'api_key', credentialRef: 'kms://test/ak1', label: 'api_key' },
+    { scheme: 'oauth_authorization_code', credentialRef: 'kms://test/oauth1', redirectUri: 'https://app.example.com/cb', label: 'oauth' },
+    { scheme: 'mTLS', credentialRef: 'kms://test/mtls1', label: 'mTLS' }
+  ];
+  for (const { scheme, credentialRef, redirectUri, label } of schemes) {
+    const tenant = `hb-p-${label}`;
+    const code = `SHBP${label.charAt(0).toUpperCase()}`;
+    const authBase = { scheme, credentialRef, writeApprovalRequired: true };
+    if (redirectUri) authBase.redirectUri = redirectUri;
+    const registered = within(tenant, () => registerTenantCustomSystem({
+      materials: baseMaterials({ code, auth: authBase }),
+      actor: { id: 'tester' }
+    }));
+    assert.equal(registered.code, code, `${label} 登记成功`);
+    const policy = within(tenant, () => getCustomSystemCredentialPolicy(registered.id));
+    assert.ok(policy, `${label} 应自动注册凭据策略`);
+    assert.equal(policy.secretRef, credentialRef, `${label} 凭据策略 secretRef 匹配`);
+  }
 });

@@ -140,7 +140,7 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
       const actionRole = selectActionRole('meta_model.draft.save');
       if (!actionRole) { denyButton('meta_model.draft.save'); return true; }
       const body = await readBody(req);
-      const result = registerSystemOnboarding({ materials: body, identityScope: agentIdentity });
+      const result = await registerSystemOnboarding({ materials: body, identityScope: agentIdentity });
       send(res, result.error ? result.status || 400 : 201, result.error ? { message: result.error, code: result.code, issues: result.issues } : result);
       return true;
     }

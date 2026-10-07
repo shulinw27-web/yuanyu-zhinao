@@ -275,7 +275,10 @@ export const CROSS_DOMAIN_EDGE_BASELINE = new Set([
   'weknora-knowledge-provider.js -> prompt-security-service.js',
   'weknora-runtime-config.js -> knowledge-evidence-service.js',
   'world-model-template-service.js -> semantic-tenant-context.js',
-  'world-model-template-service.js -> system-registry-service.js'
+  'world-model-template-service.js -> system-registry-service.js',
+  // 阶段 8-5（ADR-028）：schema 发现候选消费系统登记文档提取文本，与
+  // mock-onboarding-service -> semantic-material-workspace-service 同性质（组装依赖，非新领域耦合）。
+  'semantic-material-workspace-service.js -> system-access-service.js'
 ]);
 
 // 服务文件按前缀归域的判定依据（与仓库既有命名一致）。

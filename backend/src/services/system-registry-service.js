@@ -247,21 +247,28 @@ function validateRegistrationMaterials(materials) {
   } else {
     const scheme = asTrimmedString(authRaw.scheme);
     if (!scheme) {
-      issues.push({ field: 'auth', message: '授权方式 scheme 为必填项（user_token_passthrough / service_principal）。' });
+      issues.push({ field: 'auth', message: '授权方式 scheme 为必填项（user_token_passthrough / service_principal / api_key / oauth_authorization_code / mTLS）。' });
     } else if (!AUTH_SCHEME_IDS.has(scheme)) {
-      issues.push({ field: 'auth', message: `未知的授权方式：${scheme}（只支持 user_token_passthrough / service_principal）。` });
+      issues.push({ field: 'auth', message: `未知的授权方式：${scheme}（只支持 user_token_passthrough / service_principal / api_key / oauth_authorization_code / mTLS）。` });
     } else {
       auth.scheme = scheme;
     }
     const credentialRef = asTrimmedString(authRaw.credentialRef);
-    if (scheme === 'service_principal') {
+    // 所有凭据持有方案（非 user_token_passthrough）均需 credentialRef
+    const CREDENTIAL_SCHEMES = new Set(['service_principal', 'api_key', 'oauth_authorization_code', 'mTLS']);
+    if (CREDENTIAL_SCHEMES.has(scheme)) {
       if (!credentialRef) {
-        issues.push({ field: 'auth', message: '服务主体凭据方式必须提供 credentialRef（kms:// 引用，Key Center 保管）。' });
+        issues.push({ field: 'auth', message: `${scheme} 方式必须提供 credentialRef（kms:// 引用，Key Center 保管）。` });
       } else if (!CREDENTIAL_REF_PATTERN.test(credentialRef)) {
         issues.push({ field: 'auth', message: 'credentialRef 必须是 kms:// 开头的 Key Center 引用。' });
       } else {
         auth.credentialRef = credentialRef;
       }
+    } else if (credentialRef) {
+      issues.push({ field: 'auth', message: '用户令牌透传方式不需要 credentialRef（智脑不持有凭据）；如需后台执行请改用 service_principal。' });
+    }
+    // service_principal 必填 scope；api_key / mTLS / oauth_authorization_code 可选 scope
+    if (scheme === 'service_principal') {
       const scope = Array.isArray(authRaw.scope) ? authRaw.scope.map(asTrimmedString).filter(Boolean) : [];
       if (!scope.length) {
         issues.push({ field: 'auth', message: '服务主体凭据方式必须声明 scope（至少 1 个，如 read:inventory）。' });
@@ -269,8 +276,22 @@ function validateRegistrationMaterials(materials) {
         for (const item of scope) if (!SCOPE_PATTERN.test(item)) issues.push({ field: 'auth', message: `scope 项「${item}」格式不合法（须以字母开头、字母数字下划线冒号、≤64 字符）。` });
         auth.scope = [...new Set(scope)];
       }
-    } else if (credentialRef) {
-      issues.push({ field: 'auth', message: '用户令牌透传方式不需要 credentialRef（智脑不持有凭据）；如需后台执行请改用 service_principal。' });
+    } else if (CREDENTIAL_SCHEMES.has(scheme) && Array.isArray(authRaw.scope) && authRaw.scope.length) {
+      // 可选 scope，校验格式但不强制
+      const scope = authRaw.scope.map(asTrimmedString).filter(Boolean);
+      for (const item of scope) if (!SCOPE_PATTERN.test(item)) issues.push({ field: 'auth', message: `scope 项「${item}」格式不合法。` });
+      if (scope.length) auth.scope = [...new Set(scope)];
+    }
+    // oauth_authorization_code 必填 redirectUri
+    if (scheme === 'oauth_authorization_code') {
+      const redirectUri = asTrimmedString(authRaw.redirectUri);
+      if (!redirectUri) {
+        issues.push({ field: 'auth', message: 'OAuth 授权码方式必须提供 redirectUri（回调地址，https:// 开头）。' });
+      } else if (!redirectUri.startsWith('https://')) {
+        issues.push({ field: 'auth', message: 'redirectUri 必须以 https:// 开头。' });
+      } else {
+        auth.redirectUri = redirectUri;
+      }
     }
     auth.writeApprovalRequired = authRaw.writeApprovalRequired === false ? false : true;
   }
@@ -354,13 +375,15 @@ export function registerTenantCustomSystem({ materials, actor } = {}) {
     return { values, result: { code, id: record.id, name: record.name, state: 'registered', registeredAt, registeredBy: operator } };
   });
 
-  // 登记成功后注册凭据策略（ADR-028）：service_principal 方式需在 Key Center 保管凭据引用；
-  // user_token_passthrough 方式不持有凭据，跳过。凭据明文不入库，只存 secretRef（kms:// 引用）。
-  if (result.code && !result.error && normalized.auth?.scheme === 'service_principal') {
+  // 登记成功后注册凭据策略（ADR-028）：凭据持有方案（service_principal / api_key / oauth_authorization_code / mTLS）
+  // 需在 Key Center 保管凭据引用；user_token_passthrough 方式不持有凭据，跳过。
+  // 凭据明文不入库，只存 secretRef（kms:// 引用）。
+  const CREDENTIAL_HOLDING_SCHEMES = new Set(['service_principal', 'api_key', 'oauth_authorization_code', 'mTLS']);
+  if (result.code && !result.error && CREDENTIAL_HOLDING_SCHEMES.has(normalized.auth?.scheme)) {
     registerCustomSystemCredentialPolicy({
       connectorId: result.id,
       secretRef: normalized.auth.credentialRef,
-      scope: normalized.auth.scope,
+      scope: normalized.auth.scope || [],
       classification: `${normalized.domain} 受限（租户登记）`
     });
   }

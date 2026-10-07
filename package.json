@@ -78,7 +78,7 @@
     "test:nonfunctional": "node --test backend/test/nonfunctional-baseline.test.js",
     "test:architecture": "node --test backend/test/architecture-boundaries.test.js",
     "test:registry": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/system-registry.test.js",
-    "test:access": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/system-access.test.js backend/test/system-access-heartbeat.test.js",
+    "test:access": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/system-access.test.js backend/test/system-access-heartbeat.test.js backend/test/system-access-document-discovery.test.js backend/test/heartbeat-probe-worker.test.js",
     "test:scope": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/semantic-system-scope.test.js",
     "test:identity": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/semantic-identity-link.test.js",
     "test:attribution": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/semantic-source-attribution.test.js",

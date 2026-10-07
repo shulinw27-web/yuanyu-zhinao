@@ -1,5 +1,13 @@
 # 当前项目状态
 
+2026-10-07 **阶段 8 收官：8-5 ~ 8-7 边界项完成（[ADR-028 补充实施](../architecture/adr/ADR-028-system-onboarding-connection-config.md)）**——用户确认「做这三个」后实施，阶段 8（系统接入连接配置段）至此全部完成（8-0 ~ 8-7）：
+
+- **8-5 文档 → schema 发现消费链**：`storeSystemDocumentTexts` / `getAllSystemDocumentTexts`（DOCS_KEY 状态）把登记文档提取文本串入 `discoverWorkspaceSchemas`——文档物料从「仅持久化与披露」升级为「进 schema 发现候选消费链」（候选路径边界不变、不进 mock 强校验链）；`registerSystemOnboarding` 随文档解析由同步转 async。新增 `system-access-document-discovery.test.js` **5/5**；架构棘轮登记新跨域边 `semantic-material-workspace-service → system-access-service`（净收敛性质）。
+- **8-6 心跳定时探测 Worker**：新增 `heartbeat-probe-worker.js`（可配周期默认 5min、连续 3 次失败自动降级、fetcher/credentialResolver 可注入）；状态机新增 `degraded` 状态（`connected ⇄ degraded`，降级可恢复、非接通撤销；接通门禁不变）。新增 `heartbeat-probe-worker.test.js` **5/5**。
+- **8-7 授权方案扩展**：`AUTH_SCHEME_OPTIONS` 2 → 5（+`api_key` / `oauth_authorization_code` / `mTLS`）；校验（api_key/mTLS 需 credentialRef、oauth 另需 redirectUri https）；凭据策略注册扩展到全部 4 种凭据持有方案；`executeHeartbeatProbe` 按 scheme 分支（api_key→`X-API-Key` 头、oauth→Bearer、mTLS→无特殊请求头 TLS 层签名）；`heartbeat-credential-resolver` 按 scheme 返回 `apiKey`/`authorizationHeader`。心跳测试 11→**15**。**边界**：真实 KMS 签发、mTLS 证书注入、OAuth 真实换 token 仍属触发式复审（opaque handle 占位不变）；Token Exchange（f）保留。
+- **真实模型评测补跑成功**：`evaluate:mention-linking`（ADR-025）因云限流欠账自 2026-09-28，2026-10-07 云配额恢复后补跑——变体轮 **6/6 通过、0 失败**（A 3/3 `linked-as-expected`：收货单→InboundReceipt 结构化候选 + 发运单→OutboundShipment 缺口点名；B 3/3 `abstained` 弃权不硬凑）；E2E 断言 5 项全 true。**「quality 全绿」自此起含真实模型评测数字**。
+- **验收（本机实测）**：registry **15/15**、heartbeat **15/15**、worker **5/5**、document-discovery **5/5**；`npm run quality` 端到端 **EXIT=0**（架构棘轮通过）。**剩余（不可完成项如实）**：5b（图片/扫描页/音频）仍被视觉模型硬前置卡死；真实企业连接器、生产多租户、完整 NL 接入问答属生产化范围；文档字典进 mock 强校验链需复审 5a 边界。
+
 2026-10-06 **阶段 8：系统接入连接配置段（[ADR-028](../architecture/adr/ADR-028-system-onboarding-connection-config.md)）**——用户三点需求（文档型物料 / 心跳接口 / 授权方式）触发 ADR-024 复审条件 1，登记物料从「业务描述性」扩展到「连接配置段」：
 
 - **8-1 后端登记物料扩展三段**：`SYSTEM_REGISTRATION_FIELDS` 新增 `attachmentDocuments`（可选，复用 5a 文档解析）、`heartbeat`（必填：endpoint + 可选 method/expectedStatus/expectedBody/timeoutMs）、`auth`（必填：scheme 枚举 `user_token_passthrough` | `service_principal` + credentialRef + scope + writeApprovalRequired）；`validateRegistrationMaterials` 全套校验；`registerTenantCustomSystem` 落库 + service_principal 自动注册 Key Center 凭据策略（按租户隔离、版本递增）。**凭据永不进登记物料，只存 credentialRef（kms:// 引用）**。

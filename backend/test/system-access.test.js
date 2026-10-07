@@ -73,7 +73,7 @@ test('总览：接入清单＝6 个 Mock 演示样例，不预设备任何待接
   assert.deepEqual(overview.registration.dataDomains.map((option) => option.id), ['production', 'marketing', 'internal']);
   assert.ok(overview.registration.mockScenarios.length >= 1);
   // 授权方式选项下发（ADR-028：a + b 组合）
-  assert.deepEqual(overview.registration.authSchemes.map((option) => option.id), ['user_token_passthrough', 'service_principal']);
+  assert.deepEqual(overview.registration.authSchemes.map((option) => option.id), ['user_token_passthrough', 'service_principal', 'api_key', 'oauth_authorization_code', 'mTLS']);
 });
 
 test('详情：字段目录来自合成数据字典，未挂接场景的自定义系统显式说明原因而非留空占位', async () => {

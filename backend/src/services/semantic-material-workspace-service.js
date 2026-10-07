@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readSemanticGovernanceState, mutateSemanticGovernanceState } from './semantic-governance-store.js';
 import { discoverSchemasFromAttachments } from './semantic-schema-discovery-service.js';
 import { semanticOperationsOwnerMatches, semanticOperationsPrincipalKey } from './semantic-operations-identity.js';
+import { getAllSystemDocumentTexts } from './system-access-service.js';
 
 const namespace = 'semantic_material_artifacts';
 const maxBytes = 2 * 1024 * 1024;
@@ -42,9 +43,14 @@ export async function extendSemanticMaterials({ previousRefs = [], content, iden
 }
 
 export function discoverWorkspaceSchemas(documents, input) {
-  return discoverSchemasFromAttachments({ input, documents,
-    attachments: documents.map(document => ({ id: document.attachmentId, name: document.name, mimeType: document.mimeType })),
-    reports: documents.map(document => ({ attachmentId: document.attachmentId, status: 'content_scanned', structuredSchemaCandidate: true })) });
+  // 8-5：合并系统级文档物料（登记时的 attachmentDocuments 提取文本）进入候选。
+  // 系统文档与工作台文档走同一条确定性候选路径；证据等级同级。
+  const systemDocState = getAllSystemDocumentTexts();
+  const systemDocuments = Object.values(systemDocState).flatMap((entry) => entry.documents || []);
+  const allDocuments = [...documents, ...systemDocuments];
+  return discoverSchemasFromAttachments({ input, documents: allDocuments,
+    attachments: allDocuments.map(document => ({ id: document.attachmentId, name: document.name, mimeType: document.mimeType })),
+    reports: allDocuments.map(document => ({ attachmentId: document.attachmentId, status: 'content_scanned', structuredSchemaCandidate: true })) });
 }
 
 export function materialSchemaIndex(discovery) {

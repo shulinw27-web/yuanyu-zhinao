@@ -236,13 +236,21 @@ export const SYSTEM_REGISTRATION_FIELDS = Object.freeze([
 ]);
 
 // ── 授权方式选项（ADR-028）──────────────────────────────────────────────
-// a. user_token_passthrough —— 智脑不持有凭据，转发当前用户 SSO 令牌；服从「智脑不提权」纪律。
-// b. service_principal       —— 智脑持有服务主体凭据（client_credentials），可后台执行；
-//                               必须声明 scope + 写操作仍需用户审批。
-// 其余方式（OAuth 授权码 / mTLS / Token Exchange / API Key）属触发式复审，本阶段不实现。
+// a. user_token_passthrough      —— 智脑不持有凭据，转发当前用户 SSO 令牌；服从「智脑不提权」纪律。
+// b. service_principal            —— 智脑持有服务主体凭据（client_credentials），可后台执行；
+//                                    必须声明 scope + 写操作仍需用户审批。
+// c. api_key                      —— 静态 API Key，Key Center 保管，请求头带 X-API-Key；
+//                                    适用于无 OAuth 的 SaaS 接口，写操作仍需用户审批。
+// d. oauth_authorization_code     —— OAuth 2.0 授权码流：用户授权后换 token；
+//                                    需 credentialRef（存 client_secret）+ redirectUri。
+// e. mTLS                         —— 双向 TLS：客户端证书由 Key Center 保管，
+//                                    请求不用 Authorization 头、用 TLS 层签名；心跳只验证可达。
 export const AUTH_SCHEME_OPTIONS = Object.freeze([
   { id: 'user_token_passthrough', label: '用户令牌透传', description: '智脑不持有凭据，调用时转发当前用户 SSO 令牌；目标系统与智脑共用 IdP。服从「智脑不提权」——智脑能调用的，当前用户自己也能调用。', requiresCredentialRef: false },
-  { id: 'service_principal', label: '服务主体凭据', description: '智脑在目标系统注册为受信应用，凭据存 Key Center；与用户会话解耦，可后台执行。必须声明 scope + 写操作仍需用户审批。', requiresCredentialRef: true }
+  { id: 'service_principal', label: '服务主体凭据', description: '智脑在目标系统注册为受信应用，凭据存 Key Center；与用户会话解耦，可后台执行。必须声明 scope + 写操作仍需用户审批。', requiresCredentialRef: true },
+  { id: 'api_key', label: 'API Key', description: '静态 API Key 存 Key Center，请求头带 X-API-Key；适用于无 OAuth 的 SaaS 接口。写操作仍需用户审批。', requiresCredentialRef: true },
+  { id: 'oauth_authorization_code', label: 'OAuth 授权码', description: 'OAuth 2.0 授权码流：用户在目标系统授权后，智脑用 authorization_code 换 access_token；需 credentialRef（存 client_secret）+ redirectUri。', requiresCredentialRef: true },
+  { id: 'mTLS', label: '双向 TLS', description: '客户端证书由 Key Center 保管，TLS 握手时签名；心跳只验证网络可达，不需要 Authorization 头。', requiresCredentialRef: true }
 ]);
 
 
@@ -280,15 +288,18 @@ export const ROLE_RECORD_SYSTEMS = Object.freeze({
 // 每个租户对每个系统的接入是一条独立生命周期。状态只能沿着下列边迁移，
 // 非法跃迁必须被拒绝（由 system-registry-service.js 执行）。
 //   draft → registered → authorized → connected ⇄ suspended
+//   connected → degraded（心跳连续失败自动降级，ADR-028）
+//   degraded → connected（人工裁定恢复）/ degraded → suspended（人工停用）
 //   registered/authorized/connected 均可回退到 draft（重新登记）
-export const SYSTEM_CONNECTION_STATES = Object.freeze(['draft', 'registered', 'authorized', 'connected', 'suspended']);
+export const SYSTEM_CONNECTION_STATES = Object.freeze(['draft', 'registered', 'authorized', 'connected', 'suspended', 'degraded']);
 
 export const SYSTEM_CONNECTION_TRANSITIONS = Object.freeze({
   draft: ['registered'],
   registered: ['authorized', 'draft'],
   authorized: ['connected', 'draft'],
-  connected: ['suspended'],
-  suspended: ['connected', 'draft']
+  connected: ['suspended', 'degraded'],
+  suspended: ['connected', 'draft'],
+  degraded: ['connected', 'suspended']
 });
 
 // 接通状态 ↔ onboardingStatus 的映射：onboardingStatus 描述「目录侧登记程度」，
