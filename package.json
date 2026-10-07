@@ -20,6 +20,7 @@
     "test:anomaly": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/anomaly-assistant.test.js",
     "evaluate:anomaly": "node scripts/evaluate-anomaly-assistant.mjs",
     "docs:check": "node scripts/check-docs.mjs",
+    "e2e:flow": "node scripts/e2e-normal-flow.mjs",
     "evaluate:mock-onboarding": "node scripts/evaluate-mock-onboarding.mjs",
     "evaluate:mock-calculation": "node scripts/evaluate-mock-calculation.mjs",
     "evaluate:mock-lifecycle": "node scripts/evaluate-mock-lifecycle.mjs",
