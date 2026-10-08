@@ -1,15 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resetRuntimeState } from '../src/repositories/runtime-state-repository.js';
+import { resetRuntimeState, writeState } from '../src/repositories/runtime-state-repository.js';
 import { getRole } from '../src/services/authorization-service.js';
 import { applySemanticOperationsProposal, createSemanticOperationsProposal, createSemanticOperationsProposalFromRequest, listSemanticOperationsSnapshots, rollbackSemanticOperationsSnapshot, updateSemanticOperationsProposal } from '../src/services/semantic-operations-agent-service.js';
-import { archiveSemanticOperationsTask, classifySemanticOperationsIntent, createSemanticOperationsTask, executeSemanticOperationsTask, getSemanticOperationsTaskTrace, issueSemanticOperationsTaskConfirmation, listSemanticOperationsTasks, reviseSemanticOperationsTaskProposal } from '../src/services/semantic-operations-task-service.js';
+import { archiveSemanticOperationsTask, classifySemanticOperationsIntent, createSemanticOperationsTask, executeSemanticOperationsTask, getSemanticOperationsTask, getSemanticOperationsTaskTrace, issueSemanticOperationsTaskConfirmation, listSemanticOperationsTasks, reviseSemanticOperationsTaskProposal } from '../src/services/semantic-operations-task-service.js';
 import { getOAMetaModelDraft, saveOAMetaModelDraft, validateOAMetaModelDraft } from '../src/services/meta-model-service.js';
 import { detectRequestedSemanticSystems, discoverSemanticSources } from '../src/services/semantic-source-discovery-service.js';
 import { getMockConnectorCatalog, getMockSystemRecords } from '../src/services/mock-scenario-service.js';
 import { buildSemanticMappingContract, validateSemanticMappingContract, validateGovernedSemanticSamples } from '../src/services/semantic-mapping-validation-service.js';
 import { resolveSemanticOperationsPlanSystems } from '../src/services/semantic-operations-planner-service.js';
 import { naturalSchemaSkipReason, NATURAL_SCHEMA_SKIP_REASONS } from '../src/services/semantic-natural-schema-service.js';
+import { semanticOperationsPrincipalKey } from '../src/services/semantic-operations-identity.js';
 import { CANDIDATE_CATALOG, CANDIDATE_CATALOG_SIZE, listCatalogGaps, listUncoveredMentions, matchCandidateCatalog, UNCOVERED_MENTION_LIMIT } from '../src/services/semantic-candidate-catalog-service.js';
 
 const identity = { tenantId: 'semantic-test', subjectId: 'architect-01', deviceId: 'device-01' };
@@ -154,12 +155,14 @@ test('semantic operations agent turns natural language into a reviewable draft w
   assert.ok(proposal.diff.summary.addedObjects >= 4);
 });
 
-test('semantic operations proposal can only be applied by its owner and remains a draft', () => {
+test('semantic operations proposal can be applied by its owner or a same-tenant designated reviewer', () => {
   resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_snapshots', 'semantic_operations_agent_tasks', 'oa_meta_model_runtime']);
   const proposal = createSemanticOperationsProposal({ input: '建立供应商和原料批次的语义模型。', multimodalContent: { modelContext: '', evidence: [] }, attachments: [], identityScope: identity });
   const denied = applySemanticOperationsProposal({ proposalId: proposal.id, role: getRole('executive'), identityScope: { ...identity, subjectId: 'other-user' } });
   assert.equal(denied.code, 'SEMANTIC_PROPOSAL_NOT_FOUND');
-  const applied = applySemanticOperationsProposal({ proposalId: proposal.id, role: getRole('executive'), identityScope: identity });
+  const noReviewPermission = applySemanticOperationsProposal({ proposalId: proposal.id, role: getRole('quality_manager'), identityScope: { ...identity, subjectId: 'reviewer' }, accessContext: { buttonPermissionIds: ['meta_model.draft.save'] } });
+  assert.equal(noReviewPermission.code, 'SEMANTIC_PROPOSAL_NOT_FOUND');
+  const applied = applySemanticOperationsProposal({ proposalId: proposal.id, role: getRole('quality_manager'), identityScope: { ...identity, subjectId: 'reviewer' }, accessContext: { buttonPermissionIds: ['meta_model.draft.save', 'meta_model.draft.review'] } });
   assert.equal(applied.proposal.status, 'applied_to_draft');
   assert.ok(applied.draft.objectTypes.some((item) => item.id === 'Supplier'));
   assert.equal(applied.draft.validation, null);
@@ -168,6 +171,28 @@ test('semantic operations proposal can only be applied by its owner and remains 
   const rolledBack = rollbackSemanticOperationsSnapshot({ snapshotId: applied.snapshot.id, role: getRole('executive'), identityScope: identity });
   assert.equal(rolledBack.snapshot.status, 'rolled_back');
   assert.ok(!rolledBack.draft.objectTypes.some((item) => item.id === 'Supplier'));
+});
+
+test('semantic reviewer work queue is tenant- and permission-scoped', () => {
+  resetRuntimeState(['semantic_operations_agent_tasks']);
+  const task = {
+    id: 'semantic-review-queue-fixture', owner: semanticOperationsPrincipalKey(identity), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    status: 'waiting_confirmation', intent: 'build_model', title: '待审核采购模型', request: '建立采购语义模型', command: 'apply_proposal',
+    requiredPermission: 'meta_model.draft.save', reviewPermission: 'meta_model.draft.review', confirmationRequired: true,
+    proposal: { id: 'proposal-fixture', revision: 1, objectTypes: [], relationshipTypes: [] }, messages: [], events: []
+  };
+  const olderTask = { ...task, createdAt: new Date(Date.now() - 60_000).toISOString(), title: '较早的待审核采购模型' };
+  const newerTask = { ...task, id: 'semantic-review-queue-fixture-newer', createdAt: new Date(Date.now() + 60_000).toISOString(), title: '较新的待审核采购模型' };
+  writeState('semantic_operations_agent_tasks', 'index', { [olderTask.id]: olderTask, [newerTask.id]: newerTask });
+  const reviewer = { tenantId: identity.tenantId, subjectId: 'quality-reviewer' };
+  const reviewAccess = { buttonPermissionIds: ['meta_model.draft.review', 'meta_model.draft.save'] };
+  const visible = listSemanticOperationsTasks({ identityScope: reviewer, accessContext: reviewAccess });
+  assert.equal(visible.length, 2);
+  assert.equal(listSemanticOperationsTasks({ identityScope: reviewer, accessContext: reviewAccess, limit: 1, offset: 1 })[0].id, olderTask.id);
+  assert.equal(visible[0].reviewerAccess, true);
+  assert.equal(getSemanticOperationsTask({ taskId: task.id, identityScope: reviewer, accessContext: reviewAccess }).id, task.id);
+  assert.equal(listSemanticOperationsTasks({ identityScope: reviewer, accessContext: { buttonPermissionIds: ['meta_model.draft.save'] } }).length, 0);
+  assert.equal(listSemanticOperationsTasks({ identityScope: { tenantId: 'another-tenant', subjectId: 'quality-reviewer' }, accessContext: reviewAccess }).length, 0);
 });
 
 test('semantic operations task binds natural-language intent to one reviewable server-side command', async () => {

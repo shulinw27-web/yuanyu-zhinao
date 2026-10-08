@@ -1,12 +1,13 @@
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { canExecuteSemanticTask } from '../task-guards.js';
 import { resolveSemanticTaskSelection } from '../task-selection.js';
 
-const props = defineProps({ client: { type: Object, required: true }, initialTaskId: { type: String, default: '' } });
+const props = defineProps({ client: { type: Object, required: true }, initialTaskId: { type: String, default: '' }, canReview: { type: Boolean, default: false } });
 const desktopBridge = globalThis.semanticOperationsDesktop || null;
-const emit = defineEmits(['applied']);
+const emit = defineEmits(['applied', 'review-created']);
 const tasks = ref([]);
+const reviewTasks = ref([]);
 const selected = ref(null);
 const selectedTrace = ref(null);
 const exportedReport = ref(null);
@@ -279,6 +280,12 @@ const selectedGraphObjectId = ref('');
 const taskQuery = ref('');
 const taskStatus = ref('');
 const showArchived = ref(false);
+const taskList = ref(null);
+const taskPageSize = 30;
+const taskHasMore = ref(false);
+const taskListLoading = ref(false);
+const taskLoadingMore = ref(false);
+let taskOffset = 0;
 // ── 建模来源范围（阶段 3）────────────────────────────────────────────────────
 // 范围只能由运营人员显式勾选。面板数据来自 /semantic-operations/sources?scope=all_registered
 // （系统注册表 + 连接器就绪度），与后端范围门禁使用同一份判定，避免「面板可选、后端越权」。
@@ -305,7 +312,10 @@ const mentionedNotSelected = computed(() => {
 });
 const canSubmit = computed(() => Boolean(input.value.trim() || files.value.length) && !busy.value && !scopeRequiredReason.value);
 const canEditProposal = computed(() => selected.value?.status === 'waiting_confirmation' && selected.value?.command === 'apply_proposal' && Boolean(proposalEditor.value));
-const canExecute = computed(() => canExecuteSemanticTask({ task: selected.value, editorDirty: editorDirty.value, busy: busy.value }));
+const canExecute = computed(() => canExecuteSemanticTask({ task: selected.value, editorDirty: editorDirty.value, busy: busy.value })
+  && (selected.value?.command !== 'apply_proposal' || props.canReview));
+const pendingReviewTasks = computed(() => reviewTasks.value.filter(task => task.status === 'waiting_confirmation'
+  && task.command === 'apply_proposal' && task.proposal && task.reviewPermission === 'meta_model.draft.review'));
 const graphNodes = computed(() => (proposalEditor.value?.objectTypes || []).map((item, index) => {
   const fieldDefinitions = item.fieldDefinitions || [];
   const pendingMappings = fieldDefinitions.filter((field) => field.mappingStatus === 'pending' || (!field.sourceField && !['derived', 'ignored'].includes(field.mappingStatus))).length;
@@ -314,6 +324,12 @@ const graphNodes = computed(() => (proposalEditor.value?.objectTypes || []).map(
 }));
 const graphHeight = computed(() => Math.max(210, 145 + Math.floor(Math.max(0, graphNodes.value.length - 1) / 3) * 118));
 const graphEdges = computed(() => (proposalEditor.value?.relationshipTypes || []).map((item, index) => ({ ...item, key: `${item.from}-${item.predicate}-${item.to}-${index}`, fromNode: graphNodes.value.find((node) => node.id === item.from), toNode: graphNodes.value.find((node) => node.id === item.to) })).filter((item) => item.fromNode && item.toNode));
+const reviewSystemLinks = computed(() => graphEdges.value.map((edge) => {
+  const fromSystems = edge.fromNode.sourceSystems || [];
+  const toSystems = edge.toNode.sourceSystems || [];
+  const handoffs = [...new Set(fromSystems.flatMap(from => toSystems.map(to => `${from} → ${to}`)))];
+  return { key: edge.key, from: edge.fromNode.label, to: edge.toNode.label, relation: edge.label || edge.predicate, cardinality: edge.cardinality, handoffs };
+}));
 const mappingSummary = computed(() => {
   const fields = graphNodes.value.flatMap((item) => item.fieldDefinitions || []);
   const pending = fields.filter((field) => field.mappingStatus === 'pending' || (!field.sourceField && !['derived', 'ignored'].includes(field.mappingStatus))).length;
@@ -329,7 +345,7 @@ const intentLabel = { build_model: '建设模型', discover_sources: '来源预�
 const formatTaskTime = value => new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai' });
 
 const setInput = (value) => { input.value = String(value || ''); };
-defineExpose({ setInput });
+defineExpose({ setInput, openTask });
 
 const readAsDataUrl = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader();
@@ -387,20 +403,62 @@ function toggleSystem(code) {
 async function loadTasks(preferredId) {
   const generation = ++taskLoadGeneration;
   const client = props.client;
+  taskListLoading.value = true;
+  taskLoadingMore.value = false;
+  taskOffset = 0;
   if (preferredId) selected.value = null;
   try {
-    const result = await client.tasks({ query: taskQuery.value, status: taskStatus.value, archived: showArchived.value || undefined, limit: 100 });
+    const result = await client.tasks({ query: taskQuery.value, status: taskStatus.value, archived: showArchived.value || undefined, limit: taskPageSize, offset: 0 });
     if (generation !== taskLoadGeneration) return;
     const next = await resolveSemanticTaskSelection({ client, tasks: result.tasks || [], preferredId, selectedId: selected.value?.id });
     if (generation !== taskLoadGeneration) return;
     tasks.value = next.tasks; selected.value = next.selected;
+    taskOffset = (result.tasks || []).length;
+    taskHasMore.value = taskOffset === taskPageSize;
+    if (taskList.value) taskList.value.scrollTop = 0;
     if (preferredId) message.value = '';
   } catch (error) {
     if (generation !== taskLoadGeneration) return;
     if (preferredId) { selected.value = null; message.value = '目标任务不可见或加载失败，请返回接入项目核对后重试。'; }
     else throw error;
+  } finally {
+    if (generation === taskLoadGeneration) taskListLoading.value = false;
   }
 }
+
+async function loadMoreTasks() {
+  if (taskListLoading.value || taskLoadingMore.value || !taskHasMore.value) return;
+  taskLoadingMore.value = true;
+  const generation = taskLoadGeneration;
+  try {
+    const result = await props.client.tasks({ query: taskQuery.value, status: taskStatus.value, archived: showArchived.value || undefined, limit: taskPageSize, offset: taskOffset });
+    if (generation !== taskLoadGeneration) return;
+    const next = result.tasks || [];
+    const known = new Set(tasks.value.map((task) => task.id));
+    tasks.value = [...tasks.value, ...next.filter((task) => !known.has(task.id))];
+    taskOffset += next.length;
+    taskHasMore.value = next.length === taskPageSize;
+  } catch (error) {
+    if (generation === taskLoadGeneration) message.value = error.message || '更多任务加载失败，请稍后重试。';
+  } finally {
+    if (generation === taskLoadGeneration) taskLoadingMore.value = false;
+  }
+}
+
+function onTaskListScroll(event) {
+  const element = event.currentTarget;
+  if (element.scrollTop + element.clientHeight >= element.scrollHeight - 72) loadMoreTasks();
+}
+
+async function refreshReviewTasks() {
+  if (!props.canReview || busy.value) return;
+  try {
+    const result = await props.client.tasks({ limit: 100 });
+    reviewTasks.value = (result.tasks || []).filter(task => task.reviewPermission === 'meta_model.draft.review');
+  } catch { /* 任务列表主流程仍可用；下次轮询重试，不覆盖当前对话错误。 */ }
+}
+
+async function openTask(taskId) { await loadTasks(taskId); }
 
 async function archiveTask() {
   if (!selected.value || selected.value.status === 'executing') return;
@@ -649,7 +707,8 @@ async function createTask() {
     await loadTasks(task.id);
     input.value = ''; files.value = [];
     if (selected.value?.id !== task.id) { selected.value = task; tasks.value = [task, ...tasks.value.filter(item => item.id !== task.id)]; }
-    message.value = ['conversation', 'needs_clarification', 'unsupported_operation', 'permission_denied'].includes(task.intent)
+    if (task.proposal && task.status === 'waiting_confirmation') emit('review-created', task.id);
+    message.value = task.status === 'completed' ? task.response : ['conversation', 'needs_clarification', 'unsupported_operation', 'permission_denied'].includes(task.intent)
       ? ''
       : task.confirmationRequired ? 'Agent已形成受控执行计划，请检查计划、Critic和Diff后再确认。' : '只读运营任务已完成。';
   } catch (error) {
@@ -707,6 +766,15 @@ async function exportReport() {
 onMounted(() => {
   loadSystemScopeOptions();
   loadTasks(props.initialTaskId || undefined).catch((error) => { message.value = error.message; });
+  refreshReviewTasks();
+  if (props.canReview) reviewQueueTimer = setInterval(refreshReviewTasks, 20000);
+});
+let reviewQueueTimer = null;
+onBeforeUnmount(() => { if (reviewQueueTimer) clearInterval(reviewQueueTimer); });
+watch(() => props.canReview, enabled => {
+  if (reviewQueueTimer) clearInterval(reviewQueueTimer);
+  reviewQueueTimer = enabled ? setInterval(refreshReviewTasks, 20000) : null;
+  if (enabled) refreshReviewTasks(); else reviewTasks.value = [];
 });
 watch(() => props.initialTaskId, id => loadTasks(id || undefined).catch(error => { message.value = error.message; }));
 watch([taskStatus, showArchived], () => loadTasks().catch((error) => { message.value = error.message; }));
@@ -719,17 +787,48 @@ watch(() => selected.value?.id, () => nextTick(() => {
 
 <template>
   <section class="agent-task-workspace">
+    <section v-if="canReview" class="semantic-review-workarea" aria-label="待审核语义模型">
+      <header><div><span>MODEL REVIEW QUEUE</span><h2>待审核语义模型</h2><p>只展示顶层对象、对象关系和来源系统摘要；字段与映射细节不作为审核入口。</p></div><b>{{ pendingReviewTasks.length }} 项待处理</b></header>
+      <div v-if="pendingReviewTasks.length" class="semantic-review-cards">
+        <article v-for="task in pendingReviewTasks" :key="task.id">
+          <div><b>{{ task.title }}</b><small>{{ task.proposal.objectTypes.length }} 个对象 · {{ task.proposal.relationshipTypes.length }} 条关系 · 第 {{ task.proposal.revision }} 版</small><p>{{ task.proposal.objectTypes.map(item => item.label || item.id).join('、') }}</p></div>
+          <button @click="openTask(task.id)">打开模型图并审核</button>
+        </article>
+      </div>
+      <p v-else class="semantic-review-empty">目前没有分配给当前审核权限范围的待审模型。收到新提案后会自动出现在这里。</p>
+    </section>
     <aside class="task-history">
-      <header><div><span>任务窗口</span><b>{{ tasks.length }}</b></div><button @click="newTask">＋ 新任务</button></header>
+      <header><div><span>任务窗口</span><b>{{ tasks.length }}{{ taskHasMore ? '+' : '' }}</b></div><button @click="newTask">＋ 新任务</button></header>
       <div class="task-filters"><input v-model="taskQuery" placeholder="搜索任务" @keyup.enter="loadTasks()"><select v-model="taskStatus"><option value="">全部状态</option><option value="waiting_confirmation">等待确认</option><option value="needs_input">等待补充</option><option value="denied">权限不足</option><option value="failed">回答失败</option><option value="executing">执行中</option><option value="retryable">可重试</option><option value="completed">已回应 / 已完成</option><option value="blocked">已阻止</option></select><label><input v-model="showArchived" type="checkbox">含归档</label><button @click="loadTasks()">查询</button></div>
-      <button v-for="task in tasks" :key="task.id" :class="['task-history-item', { active: selected?.id === task.id }]" @click="selected = task"><span>{{ intentLabel[task.intent] }}</span><b>{{ task.title }}</b><small>{{ taskStatusLabel(task) }} · {{ formatTaskTime(task.createdAt) }}</small></button>
-      <p v-if="!tasks.length">尚无运营任务。输入自然语言目标后，Agent会建立独立任务窗口。</p>
+      <div ref="taskList" class="task-history-list" @scroll.passive="onTaskListScroll">
+        <button v-for="task in tasks" :key="task.id" :class="['task-history-item', { active: selected?.id === task.id }]" @click="selected = task"><span>{{ intentLabel[task.intent] }}</span><b>{{ task.title }}</b><small>{{ taskStatusLabel(task) }} · {{ formatTaskTime(task.createdAt) }}</small></button>
+        <p v-if="!tasks.length">尚无运营任务。输入自然语言目标后，Agent会建立独立任务窗口。</p>
+        <p v-else-if="taskLoadingMore" class="task-list-status">正在加载更多任务…</p>
+        <p v-else-if="!taskHasMore" class="task-list-status">已显示全部任务</p>
+      </div>
     </aside>
 
     <div class="task-conversation">
       <div ref="transcript" class="task-transcript">
         <template v-if="selected">
         <article v-for="(item, index) in selected.messages" :key="`${item.time}-${index}`" :class="['task-message', item.role === 'user' ? 'user' : 'agent']"><span>{{ item.role === 'user' ? '运营人员' : '元域智语 Agent' }} · 第 {{ Math.floor(index / 2) + 1 }} 轮</span><p>{{ item.content }}</p></article>
+        <section v-if="selected.proposal" class="semantic-model-review-card">
+          <header><div><span>待审核语义模型 · 第 {{ selected.proposal.revision }} 版</span><small>{{ selected.proposal.objectTypes.length }} 个业务对象 · {{ selected.proposal.relationshipTypes.length }} 条对象关系 · 来源 {{ [...new Set(selected.proposal.objectTypes.flatMap(item => item.sourceSystems || []).filter(system => system && system !== 'UNASSIGNED'))].join(' / ') || '待确认' }}</small></div><b :class="selected.proposal.critic.status">{{ selected.proposal.critic.status === 'passed' ? '结构检查通过' : '需要修改' }}</b></header>
+          <div class="review-graph-wrap" role="img" aria-label="待审核语义模型对象关系图">
+            <svg :viewBox="`0 0 820 ${graphHeight}`" preserveAspectRatio="xMidYMid meet">
+              <defs><marker id="review-arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z"/></marker></defs>
+              <line v-for="edge in graphEdges" :key="edge.key" :x1="edge.fromNode.x" :y1="edge.fromNode.y" :x2="edge.toNode.x" :y2="edge.toNode.y" marker-end="url(#review-arrow)"/>
+              <text v-for="edge in graphEdges" :key="`${edge.key}-label`" :x="(edge.fromNode.x + edge.toNode.x) / 2" :y="(edge.fromNode.y + edge.toNode.y) / 2 - 8" text-anchor="middle">{{ edge.label || edge.predicate }} · {{ edge.cardinality }}</text>
+              <g v-for="node in graphNodes" :key="node.id">
+                <rect :x="node.x - 100" :y="node.y - 34" width="200" height="68" rx="10"/>
+                <text :x="node.x" :y="node.y - 8" text-anchor="middle" class="review-node-title">{{ node.label }}</text>
+                <text :x="node.x" :y="node.y + 12" text-anchor="middle" class="review-node-source">{{ node.sourceSystems?.join(' / ') || '来源待确认' }}</text>
+              </g>
+            </svg>
+          </div>
+          <div class="review-system-chain"><b>底层系统关联</b><article v-for="item in reviewSystemLinks" :key="item.key"><span>{{ item.from }} {{ item.relation }} {{ item.to }} · {{ item.cardinality }}</span><small>{{ item.handoffs.length ? item.handoffs.join('　·　') : '对象关系已识别，系统来源尚待确认' }}</small></article><p v-if="!reviewSystemLinks.length">当前模型没有候选关系，无法形成系统链路。</p></div>
+          <footer><span>{{ selected.proposal.mappingValidation?.blocked ? '样本映射存在阻断，修改后再审核。' : selected.proposal.critic.status !== 'passed' ? '请先用自然语言指出需要调整的对象或关系。' : canReview ? '可直接用自然语言审核通过，也可以描述关系修改。' : '模型已进入审核队列；当前角色没有审核权限。' }}</span><button v-if="canReview && selected.status === 'waiting_confirmation' && selected.proposal.critic.status === 'passed' && !selected.proposal.mappingValidation?.blocked" @click="input = '审核通过'; nextTick(() => transcript?.scrollTo({ top: transcript.scrollHeight, behavior: 'smooth' }))">输入“审核通过”</button></footer>
+        </section>
         <details v-if="selected.materialReview" class="task-message agent">
           <summary>附件读取范围 · {{ selected.materialReview.summary }}</summary>
           <div v-for="report in selected.materialReview.reports" :key="report.attachmentId">
@@ -792,8 +891,8 @@ watch(() => selected.value?.id, () => nextTick(() => {
           <details v-if="selected.sourceDiscovery.sources?.length"><summary>查看真实接入所需物料</summary><ul><li v-for="item in selected.sourceDiscovery.sources[0].requiredAssets" :key="item">{{ item }}</li></ul></details>
         </section>
 
-        <details v-if="selected.proposal" class="task-proposal" open>
-          <summary>模型提案审阅 · {{ selected.proposal.objectTypes.length }} 个对象 · 第 {{ selected.proposal.revision }} 版</summary>
+        <details v-if="selected.proposal && !selected.reviewerAccess" class="task-proposal">
+          <summary>高级技术细节 · 字段映射、主键、来源证据与逐项校验</summary>
           <p v-if="selected.onboardingSource">来源：模拟接入项目 {{ selected.onboardingSource.projectId }}，材料修订 {{ selected.onboardingSource.materialRevision }}。{{ selected.onboardingSource.boundary }}</p>
           <header><div><span>SCHEMA CRITIC</span><b :class="selected.proposal.critic.status">{{ selected.proposal.critic.status === 'passed' ? '结构校验通过' : '存在阻断问题' }}</b></div><small>相对于当前草稿：新增对象 {{ selected.proposal.diff.summary.addedObjects }} · 更新对象 {{ selected.proposal.diff.summary.updatedObjects }} · 新增关系 {{ selected.proposal.diff.summary.addedRelationships }}</small></header>
           <div v-if="selected.proposal.schemaDiscovery?.files?.length" class="schema-discovery-summary"><div><b>结构化材料发现</b><span>{{ selected.proposal.schemaDiscovery.summary }}</span></div><span v-for="file in selected.proposal.schemaDiscovery.files" :key="file.attachmentId">{{ file.name }} · {{ file.format }} · {{ file.sourceSystem }} · {{ file.schemaCount }} 对象</span><small v-for="warning in selected.proposal.schemaDiscovery.warnings" :key="warning">{{ warning }}</small></div>
@@ -1065,7 +1164,7 @@ watch(() => selected.value?.id, () => nextTick(() => {
         </section>
         <label class="adoption-mode">建模采纳方式 <select v-model="adoptionMode" :disabled="busy" aria-label="建模采纳方式"><option value="merge">合并到当前草稿（保留既有对象）</option><option value="replace">替换当前草稿（确认后保留回滚快照）</option></select><small>当前工作区只有一个活动模型；此选项不创建并行模型。</small></label>
         <p v-if="message" class="task-message-bar">{{ message }}</p>
-        <div class="task-composer"><div v-if="files.length" class="task-files"><span v-for="(file, index) in files" :key="`${file.name}-${index}`">{{ file.name }}<button @click="files.splice(index, 1)">×</button></span></div><textarea v-model="input" :disabled="busy" aria-label="向元域智语 Agent 提交任务" :placeholder="selected ? '继续当前语义任务，例如：再补充WMS库位对象，并检查映射。' : '例如：检查当前语义模型状态；或者上传WMS数据字典建设采购到入库模型。'" @keydown.ctrl.enter="createTask"/><footer><div><button class="attach" :disabled="busy" @click="fileInput?.click()">＋ 添加材料</button><small>最多5份、合计12MB；支持 PDF / 图片 / DOCX / XLSX / JSON / YAML / CSV</small></div><div class="composer-actions"><small>{{ selected ? '将承接当前任务上下文' : 'Ctrl + Enter 发送' }}</small><button class="send" :disabled="!canSubmit" @click="createTask">{{ busy ? 'Agent处理中…' : selected ? '继续任务' : '交给Agent' }}</button></div></footer><input ref="fileInput" type="file" hidden multiple accept="image/jpeg,image/png,image/webp,application/pdf,application/json,.json,.yaml,.yml,text/csv,.csv,.docx,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" @change="chooseFiles"/></div>
+        <div class="task-composer"><div v-if="files.length" class="task-files"><span v-for="(file, index) in files" :key="`${file.name}-${index}`">{{ file.name }}<button @click="files.splice(index, 1)">×</button></span></div><textarea v-model="input" :disabled="busy" aria-label="向元域智语 Agent 提交任务" :placeholder="selected?.proposal ? '例如：审核通过；把采购订单与供应商改成多对一；补充物流系统间的关系；发布当前语义模型。' : selected ? '继续当前语义任务，例如：再补充WMS库位对象，并检查映射。' : '例如：检查当前语义模型状态；或者上传WMS数据字典建设采购到入库模型。'" @keydown.ctrl.enter="createTask"/><footer><div><button class="attach" :disabled="busy" @click="fileInput?.click()">＋ 添加材料</button><small>最多5份、合计12MB；支持 PDF / 图片 / DOCX / XLSX / JSON / YAML / CSV</small></div><div class="composer-actions"><small>{{ selected ? '将承接当前任务上下文' : 'Ctrl + Enter 发送' }}</small><button class="send" :disabled="!canSubmit" @click="createTask">{{ busy ? 'Agent处理中…' : selected ? '发送审核意见' : '交给Agent' }}</button></div></footer><input ref="fileInput" type="file" hidden multiple accept="image/jpeg,image/png,image/webp,application/pdf,application/json,.json,.yaml,.yml,text/csv,.csv,.docx,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" @change="chooseFiles"/></div>
       </div>
     </div>
   </section>
@@ -1074,6 +1173,11 @@ watch(() => selected.value?.id, () => nextTick(() => {
 <style scoped>
 .adoption-mode{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#aacbd5;font-size:12px;margin-bottom:8px}.adoption-mode select{max-width:100%;padding:7px;background:#0a2634;color:#d3edf1;border:1px solid #315b6b;border-radius:6px}.adoption-mode small{color:#91adb7}.adoption-mode :focus-visible{outline:2px solid #65d3ba;outline-offset:2px}
 .world-model-review{margin:12px 0;padding:14px;border:1px solid #345565;border-radius:8px;color:#b9d2de;overflow-wrap:anywhere;font-size:12px;line-height:1.6}.world-model-review h4{margin:0;color:#69d9c2}.world-model-review summary{cursor:pointer;color:#69d9c2}.world-model-review article{padding:10px 0;border-top:1px solid #294553}.world-model-review p{margin:6px 0}.world-model-review b{font-size:11px}
+.semantic-model-review-card{display:grid;gap:13px;margin:12px 0;padding:16px;border:1px solid #31716c;border-radius:11px;background:linear-gradient(145deg,#0d292f,#091d29);box-shadow:0 10px 26px #020a0e55}
+.semantic-model-review-card>header{display:flex;align-items:center;justify-content:space-between;gap:10px}.semantic-model-review-card>header>div{display:grid;gap:5px}.semantic-model-review-card>header span{color:#d9eeee;font-size:13px;font-weight:750}.semantic-model-review-card>header small{color:#86a9b4;font-size:10px}.semantic-model-review-card>header>b{padding:5px 8px;border-radius:999px;color:#65d4ba;background:#103b35;font-size:9px}.semantic-model-review-card>header>b.failed{color:#f2a9a9;background:#40252d}
+.review-graph-wrap{width:100%;overflow-x:auto;border:1px solid #234958;border-radius:9px;background:#071923}.review-graph-wrap svg{display:block;width:100%;min-width:540px;height:auto;max-height:420px}.review-graph-wrap line{stroke:#4cb7a8;stroke-width:2;marker-end:url(#review-arrow)}.review-graph-wrap marker path{fill:#65d6c3}.review-graph-wrap rect{fill:#103140;stroke:#377889;stroke-width:1.3}.review-graph-wrap .review-node-title{fill:#d3edf0;font-size:13px;font-weight:700}.review-graph-wrap .review-node-source{fill:#67cdb9;font-size:10px}.review-graph-wrap text:not(.review-node-title):not(.review-node-source){fill:#9ac3ce;font-size:9px}
+.review-system-chain{display:grid;gap:6px}.review-system-chain>b{color:#75cabd;font-size:10px}.review-system-chain article{display:grid;gap:4px;padding:8px 10px;border:1px solid #234858;border-radius:7px;background:#081b27}.review-system-chain article span{color:#c6e0e4;font-size:10px}.review-system-chain article small{color:#68bfae;font-size:9px}.review-system-chain p{color:#829da8;font-size:10px}
+.semantic-model-review-card>footer{display:flex;justify-content:space-between;align-items:center;gap:8px}.semantic-model-review-card>footer span{color:#8aabb5;font-size:9px}.semantic-model-review-card>footer button{padding:7px 10px;border:1px solid #3f8b80;border-radius:6px;color:#a4eee0;background:#123b39;font-size:9px;cursor:pointer}
 .agent-task-workspace{display:grid;grid-template-columns:218px minmax(0,1fr);height:clamp(600px,calc(100vh - 280px),820px);min-height:0;border:1px solid #285064;border-radius:10px;overflow:hidden;background:#081925;box-shadow:0 18px 48px #020a0f59}.task-history{min-height:0;padding:0 12px 12px;overflow-y:auto;overscroll-behavior:contain;border-right:1px solid #274353;background:#071520;scrollbar-gutter:stable}.task-history>header{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:12px 0 10px;background:linear-gradient(180deg,#071520 78%,#07152000)}.task-history header div{display:flex;gap:5px;align-items:center;color:#7193a5;font-size:9px}.task-history header div b{color:#71d3c6}.task-history header button{border:1px solid #31586b;border-radius:5px;padding:5px 7px;color:#8fd7d5;background:#0c2634;font-size:9px}.task-history-item{display:grid;gap:4px;width:100%;margin-bottom:6px;padding:10px;border:1px solid transparent;border-radius:7px;color:#7896a6;background:transparent;text-align:left;transition:border-color .15s ease,background .15s ease,transform .15s ease}.task-history-item:hover{border-color:#2c5e72;background:#0b2432;transform:translateX(2px)}.task-history-item.active{border-color:#3c788c;background:#0e3040;box-shadow:inset 3px 0 #56cdb9}.task-history-item:focus-visible,.task-history header button:focus-visible,.task-composer button:focus-visible,.task-confirm:focus-visible{outline:2px solid #68d7c4;outline-offset:2px}.task-history-item span{color:#54b8bf;font-size:8px;letter-spacing:.08em}.task-history-item b{overflow:hidden;color:#c2dbe3;font-size:10px;white-space:nowrap;text-overflow:ellipsis}.task-history-item small,.task-history>p{color:#627f90;font-size:8px;line-height:1.5}.task-conversation{display:grid;grid-template-rows:minmax(0,1fr) auto;min-width:0;min-height:0;overflow:hidden;background:radial-gradient(circle at 88% 8%,#12334466,transparent 34%)}.task-transcript{min-width:0;min-height:0;padding:18px;overflow-y:auto;overscroll-behavior:contain;scroll-behavior:smooth;scrollbar-gutter:stable}.task-history,.task-transcript{scrollbar-color:#31586b #081925;scrollbar-width:thin}.task-history::-webkit-scrollbar,.task-transcript::-webkit-scrollbar{width:8px}.task-history::-webkit-scrollbar-thumb,.task-transcript::-webkit-scrollbar-thumb{border:2px solid #081925;border-radius:8px;background:#31586b}.task-message{display:grid;gap:6px;margin-bottom:10px;padding:12px 14px;border:1px solid #29495a;border-radius:8px;background:#0b2030}.task-message.user{margin-left:12%;border-color:#335367;background:#102738}.task-message span{color:#5eb9c2;font-size:8px;letter-spacing:.08em}.task-message p{margin:0;color:#c6dce4;font-size:11px;line-height:1.65}.task-badges{display:flex;flex-wrap:wrap;gap:5px}.task-badges b{padding:3px 5px;border-radius:3px;color:#7fb6c5;background:#102f40;font-size:8px}.agent-plan,.task-proposal,.task-events{margin:10px 0;padding:12px;border:1px solid #29495a;border-radius:8px;background:#091c29}.agent-plan header,.task-proposal>header{display:flex;justify-content:space-between;gap:12px}.agent-plan header b,.task-proposal header span{color:#bcd9e1;font-size:10px}.agent-plan header span,.task-proposal header small{color:#6d8e9f;font-size:8px}.agent-plan ol{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:10px 0 0;padding:0;list-style:none}.agent-plan li{display:flex;align-items:center;gap:7px;color:#8da9b6;font-size:9px}.agent-plan li i{width:19px;height:19px;display:grid;place-items:center;border:1px solid #386477;border-radius:50%;color:#69c7c6;font-style:normal;font-size:8px}.task-proposal>header>div{display:grid;gap:3px}.task-proposal header b{font-size:10px}.task-proposal header b.passed{color:#55d5ae}.task-proposal header b.failed{color:#ed8993}.task-critic-checks{display:flex;flex-wrap:wrap;gap:5px;margin:10px 0}.task-critic-checks span{padding:5px;border:1px solid #28495a;border-radius:4px;color:#7d9cab;font-size:8px}.task-critic-checks b{margin-right:4px;color:#5ed1b4}.task-model-diff{display:grid;grid-template-columns:1fr 1fr;gap:8px}.task-model-diff article{display:grid;align-content:start;gap:5px;padding:9px;border:1px solid #233f4f;border-radius:6px;background:#071722}.task-model-diff article>b{color:#8ac4d0;font-size:9px}.task-model-diff article>span{display:grid;gap:2px;padding:5px;border-radius:3px;color:#acc8d2;background:#0d2735;font-size:8px}.task-model-diff small{color:#5f8597;font-size:7px}.task-status-result{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:10px 0}.task-status-result article{display:grid;gap:4px;padding:12px;border:1px solid #294a5b;border-radius:7px;background:#0a202d}.task-status-result b{color:#61d4c0;font-size:14px}.task-status-result span{color:#66899a;font-size:8px}.task-events>span{color:#7195a5;font-size:8px;letter-spacing:.08em}.task-events>div{display:grid;grid-template-columns:55px 120px 1fr;gap:8px;margin-top:7px;padding-top:7px;border-top:1px solid #1e3948}.task-events time,.task-events b,.task-events small{font-size:8px}.task-events time{color:#527b8e}.task-events b{color:#75bac5}.task-events small{color:#75909e}.task-confirm{width:100%;margin-top:10px;padding:10px;border:1px solid #49c3a5;border-radius:7px;color:#06231c;background:#58d6b5;font-size:10px;font-weight:800}.task-blocked,.task-message-bar{padding:8px;border:1px solid #74434b;border-radius:5px;color:#e29aa4;background:#2b1720;font-size:9px}
 .task-system-scope{margin-bottom:9px;padding:9px 10px;border:1px solid #2d5567;border-radius:8px;background:#0a1f2c}
 .task-system-scope>header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}
@@ -1235,4 +1339,17 @@ watch(() => selected.value?.id, () => nextTick(() => {
 @media(max-height:800px) and (max-width:1180px){.agent-task-workspace{height:clamp(300px,calc(100dvh - 390px),460px)}.task-transcript{padding:12px}.task-input-dock{padding:7px 12px 10px}.task-composer textarea{min-height:44px}}
 .task-filters{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:9px}.task-filters input,.task-filters select,.task-filters button{min-width:0;border:1px solid #294d60;border-radius:4px;padding:6px;color:#a9c7d0;background:#0a2230;font-size:8px}.task-filters label{display:flex;align-items:center;gap:4px;color:#7898a7;font-size:8px}.task-filters label input{width:auto}.task-archive{margin-top:8px;border:1px solid #31586b;border-radius:5px;padding:6px 9px;color:#7e9eac;background:#0a2230;font-size:8px}
 .task-proposal>summary{cursor:pointer;margin:-3px 0 10px;padding:7px;border-bottom:1px solid #244656;color:#76cfc4;font-size:9px;list-style-position:inside}
+.semantic-review-workarea{grid-column:1/-1;display:grid;gap:10px;padding:14px 16px;border:1px solid #745d32;border-radius:10px;background:linear-gradient(110deg,#292315,#10242a)}.semantic-review-workarea>header{display:flex;justify-content:space-between;align-items:center;gap:14px}.semantic-review-workarea>header span{color:#e4bb68;font-size:8px;letter-spacing:.12em}.semantic-review-workarea>header h2{margin:3px 0;color:#f2e7ca;font-size:15px}.semantic-review-workarea>header p{margin:0;color:#b8a779;font-size:9px}.semantic-review-workarea>header>b{padding:7px 10px;border:1px solid #826833;border-radius:999px;color:#f0cf82;background:#352b19;font-size:10px;white-space:nowrap}.semantic-review-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:8px}.semantic-review-cards article{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px;border:1px solid #574a2e;border-radius:7px;background:#171f20}.semantic-review-cards article>div{min-width:0}.semantic-review-cards article b{display:block;overflow:hidden;color:#e7e1c9;font-size:10px;text-overflow:ellipsis;white-space:nowrap}.semantic-review-cards article small{display:block;margin-top:4px;color:#b6a875;font-size:8px}.semantic-review-cards article p{overflow:hidden;margin:5px 0 0;color:#a8c5c7;font-size:9px;text-overflow:ellipsis;white-space:nowrap}.semantic-review-cards button{flex:0 0 auto;border:1px solid #4d8c7a;border-radius:5px;padding:7px 9px;color:#d7f5e8;background:#153c35;font-size:9px;cursor:pointer}.semantic-review-cards button:hover{border-color:#79d7b7;background:#1d5145}.semantic-review-empty{margin:0;padding:8px 10px;border:1px dashed #62583e;border-radius:6px;color:#c0b58e;font-size:9px}
+.agent-task-workspace{grid-template-rows:auto minmax(0,1fr)}
+@media(max-width:760px){.agent-task-workspace{grid-template-rows:auto auto minmax(430px,1fr)}}
+.agent-task-workspace{min-height:0;overflow:hidden}
+.task-history{display:grid;grid-template-rows:auto auto minmax(0,1fr);height:100%;min-height:0;padding:0;overflow:hidden;background:#081925}
+.task-history>header{position:static;margin:0;padding:12px;border-bottom:1px solid #183443;background:#081925}
+.task-filters{margin:0;padding:8px 10px;border-bottom:1px solid #183443;background:#081925}
+.task-history-list{min-height:0;overflow-y:auto;padding:8px 10px 12px;overscroll-behavior:contain;scrollbar-gutter:stable;scrollbar-color:#31586b #081925;scrollbar-width:thin;background:#081925}
+.task-history-list::-webkit-scrollbar{width:8px}.task-history-list::-webkit-scrollbar-thumb{border:2px solid #081925;border-radius:8px;background:#31586b}
+.task-history-list .task-history-item{margin-bottom:6px}
+.task-history-list>p{margin:12px 4px}.task-history-list>p.task-list-status{padding:7px 4px;text-align:center}
+.task-conversation{min-height:0}.task-transcript{min-height:0}.task-input-dock{flex:none}
+@media(max-width:760px){.agent-task-workspace{height:auto;min-height:610px;grid-template-rows:auto 180px minmax(430px,1fr)}.task-history{height:180px;max-height:none;min-height:0;border-right:0;border-bottom:1px solid #274353}.task-history-list{padding-block:6px}.task-conversation{min-height:430px}}
 </style>

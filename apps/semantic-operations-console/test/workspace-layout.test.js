@@ -19,6 +19,16 @@ test('composer stays docked instead of following long transcript content', () =>
   assert.match(workspaceSource, /\.task-input-dock\{position:relative;/);
 });
 
+test('agent workbench fills the viewport below the header and keeps task history as an infinite-scroll pane', async () => {
+  const appSource = await readFile(new URL('../src/App.vue', import.meta.url), 'utf8');
+  assert.match(appSource, /'ops-agent-workspace': activeView === 'agent'/);
+  assert.match(shellStyles, /\.ops-workspace\.ops-agent-workspace\s*\{[^}]*height:\s*calc\(100dvh - 92px\)/s);
+  assert.match(workspaceSource, /class="task-history-list" @scroll\.passive="onTaskListScroll"/);
+  assert.match(workspaceSource, /limit: taskPageSize, offset: taskOffset/);
+  assert.match(workspaceSource, /\.task-history-list\{[^}]*overflow-y:auto;/);
+  assert.match(workspaceSource, /\.task-history\{[^}]*background:#081925/);
+});
+
 test('ordinary conversation does not duplicate its response in the bottom status bar', () => {
   assert.match(workspaceSource, /\['conversation', 'needs_clarification', 'unsupported_operation', 'permission_denied'\]\.includes\(task\.intent\)\s*\? ''/);
 });

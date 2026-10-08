@@ -10,7 +10,7 @@ import { asyncRuntimeStateRepository } from '../src/repositories/async-runtime-s
 import { configureSemanticGovernanceRepository } from '../src/services/semantic-governance-store.js';
 import { getRole } from '../src/services/authorization-service.js';
 import { claimDueSemanticInspection, completeSemanticInspection, controlSemanticInspectionSchedule, createSemanticInspectionSchedule, listSemanticInspectionSchedules, runSemanticInspectionCycle } from '../src/services/semantic-inspection-schedule-service.js';
-import { createSemanticOperationsNotification, listSemanticOperationsNotifications } from '../src/services/semantic-operations-notification-service.js';
+import { createSemanticOperationsNotification, listSemanticOperationsNotifications, readSemanticOperationsNotification } from '../src/services/semantic-operations-notification-service.js';
 import { semanticOperationsPrincipalKey, semanticOperationsOwnerMatches } from '../src/services/semantic-operations-identity.js';
 import { extendSemanticMaterials, loadSemanticMaterials } from '../src/services/semantic-material-workspace-service.js';
 
@@ -25,6 +25,25 @@ test('delimiter-bearing tenants and subjects cannot share notices or schedule ow
   assert.equal((await listSemanticOperationsNotifications({ identityScope: b })).length, 0);
   assert.equal((await listSemanticInspectionSchedules({ identityScope: b })).length, 0);
   assert.equal((await controlSemanticInspectionSchedule({ id: created.schedule.id, action: 'cancel', identityScope: b })).code, 'SEMANTIC_INSPECTION_NOT_FOUND');
+});
+
+test('semantic review notifications reach same-tenant reviewers and reject other tenants or roles', async () => {
+  resetRuntimeState(['semantic_operations_notifications']);
+  const author = { tenantId: 'review-tenant', subjectId: 'author' };
+  const reviewer = { tenantId: 'review-tenant', subjectId: 'reviewer' };
+  const outsider = { tenantId: 'other-tenant', subjectId: 'reviewer' };
+  const notice = await createSemanticOperationsNotification({
+    identityScope: author,
+    audiencePermissionId: 'meta_model.draft.review',
+    title: '语义模型待审核',
+    action: { type: 'open_semantic_task', taskId: 'task-1' }
+  });
+  const reviewerAccess = { buttonPermissionIds: ['meta_model.draft.review', 'meta_model.draft.save'] };
+  assert.equal((await listSemanticOperationsNotifications({ identityScope: reviewer, accessContext: reviewerAccess })).length, 1);
+  assert.equal((await listSemanticOperationsNotifications({ identityScope: reviewer, accessContext: { buttonPermissionIds: ['meta_model.draft.save'] } })).length, 0);
+  assert.equal((await listSemanticOperationsNotifications({ identityScope: outsider, accessContext: reviewerAccess })).length, 0);
+  assert.equal((await readSemanticOperationsNotification({ id: notice.id, identityScope: outsider, accessContext: reviewerAccess })).code, 'SEMANTIC_NOTIFICATION_NOT_FOUND');
+  assert.ok((await readSemanticOperationsNotification({ id: notice.id, identityScope: reviewer, accessContext: reviewerAccess })).readAt);
 });
 
 test('legacy unambiguous owners remain readable; ambiguous and device owners fail closed', () => {

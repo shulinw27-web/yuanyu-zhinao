@@ -251,11 +251,11 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
     send(res, result?.error ? 404 : 200, result?.error ? { message: result.error, code: result.code } : result); return true;
   }
   if (req.method === 'GET' && url.pathname === '/api/semantic-operations/notifications') {
-    send(res, 200, { notifications: await listSemanticOperationsNotifications({ identityScope: agentIdentity, limit: url.searchParams.get('limit') }) }); return true;
+    send(res, 200, { notifications: await listSemanticOperationsNotifications({ identityScope: agentIdentity, accessContext: effectiveAccess, limit: url.searchParams.get('limit') }) }); return true;
   }
   const semanticNotificationReadMatch = url.pathname.match(/^\/api\/semantic-operations\/notifications\/([^/]+)\/read$/);
   if (req.method === 'POST' && semanticNotificationReadMatch) {
-    const result = await readSemanticOperationsNotification({ id: decodeURIComponent(semanticNotificationReadMatch[1]), identityScope: agentIdentity });
+    const result = await readSemanticOperationsNotification({ id: decodeURIComponent(semanticNotificationReadMatch[1]), identityScope: agentIdentity, accessContext: effectiveAccess });
     send(res, result?.error ? 404 : 200, result?.error ? { message: result.error, code: result.code } : result); return true;
   }
   if (req.method === 'GET' && url.pathname === '/api/semantic-operations/sources') {
@@ -277,12 +277,13 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
       status: url.searchParams.get('status') || '',
       query: url.searchParams.get('query') || '',
       includeArchived: url.searchParams.get('archived') === 'true',
-      limit: url.searchParams.get('limit') || 30
+      limit: url.searchParams.get('limit') || 30,
+      offset: url.searchParams.get('offset') || 0
     }) });
     return true;
   }
   if (req.method === 'POST' && url.pathname === '/api/semantic-operations/tasks') {
-    const result = await createSemanticOperationsTask({ body: await readBody(req), role: getRole(role), identityScope: agentIdentity });
+    const result = await createSemanticOperationsTask({ body: await readBody(req), role: getRole(role), identityScope: agentIdentity, accessContext: effectiveAccess });
     // code 必须透出：范围门禁（空选择 / 未登记 / 越权）要能被客户端与审计区分，
     // 只返回一句中文提示会让前端只能靠文本匹配来决定怎么补救。
     send(res, result.error ? (result.status || 400) : 201, result.error ? { message: result.error, ...(result.code ? { code: result.code } : {}) } : result);
@@ -311,9 +312,11 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
     const taskId = decodeURIComponent(semanticTaskConfirmationMatch[1]);
     const task = await getSemanticOperationsTask({ taskId, identityScope: agentIdentity, accessContext: effectiveAccess });
     if (!task) { send(res, 404, { message: '未找到属于当前身份的元域智语任务。', code: 'SEMANTIC_TASK_NOT_FOUND' }); return true; }
+    const reviewRole = task.proposal ? selectActionRole(task.reviewPermission) : null;
     const actionRole = selectActionRole(task.requiredPermission);
+    if (task.proposal && !reviewRole) { denyButton(task.reviewPermission); return true; }
     if (!actionRole) { denyButton(task.requiredPermission); return true; }
-    const result = await issueSemanticOperationsTaskConfirmation({ taskId, identityScope: agentIdentity });
+    const result = await issueSemanticOperationsTaskConfirmation({ taskId, identityScope: agentIdentity, accessContext: effectiveAccess });
     send(res, result.error ? 409 : 200, result.error ? { message: result.error, code: result.code } : result);
     return true;
   }
@@ -328,10 +331,12 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
     const taskId = decodeURIComponent(semanticTaskExecuteMatch[1]);
     const task = await getSemanticOperationsTask({ taskId, identityScope: agentIdentity, accessContext: effectiveAccess });
     if (!task) { send(res, 404, { message: '未找到属于当前身份的元域智语任务。', code: 'SEMANTIC_TASK_NOT_FOUND' }); return true; }
+    const reviewRole = task.proposal ? selectActionRole(task.reviewPermission) : null;
     const actionRole = selectActionRole(task.requiredPermission);
+    if (task.proposal && !reviewRole) { denyButton(task.reviewPermission); return true; }
     if (!actionRole) { denyButton(task.requiredPermission); return true; }
     const body = await readBody(req);
-    const result = await executeSemanticOperationsTask({ taskId, role: actionRole, identityScope: agentIdentity, confirmationToken: body?.confirmationToken });
+    const result = await executeSemanticOperationsTask({ taskId, role: actionRole, identityScope: agentIdentity, accessContext: effectiveAccess, confirmationToken: body?.confirmationToken });
     send(res, result.error ? 409 : 200, result.error ? { message: result.error, code: result.code, task: result.task } : result);
     return true;
   }

@@ -29,6 +29,7 @@ const snapshots = ref([]);
 const rollbackTarget = ref(null);
 const rollbackPhrase = ref('');
 const agentPanel = ref(null);
+const operationsCenter = ref(null);
 const activeView = ref('agent');
 const accessTab = ref('systems');
 const onboardingMounted = ref(false);
@@ -44,6 +45,7 @@ const canModel = computed(() => profile.value?.canModel === true && buttonPermis
 const canValidate = computed(() => profile.value?.canModel === true && buttonPermissionIds.value.includes('meta_model.draft.validate'));
 const canSimulate = computed(() => profile.value?.canModel === true && buttonPermissionIds.value.includes('meta_model.simulate'));
 const canPublish = computed(() => profile.value?.canPublish === true && buttonPermissionIds.value.includes('meta_model.publish'));
+const canReviewSemanticModels = computed(() => buttonPermissionIds.value.includes('meta_model.draft.review') && buttonPermissionIds.value.includes('meta_model.draft.save'));
 const model = computed(() => metaModels.value[0] || null);
 const semanticaStatus = computed(() => profile.value?.semanticDeployment?.status || profile.value?.semanticDiscovery?.status || '等待连接');
 const deploymentDrift = computed(() => profile.value?.semanticDeployment?.drift || 'unknown');
@@ -117,6 +119,14 @@ async function prepareKnowledgeModelCandidate(input) {
   message.value = '业务理解草稿已填入输入框，请核对后自行发送；尚未建模或发布。';
 }
 
+async function openSemanticReviewTask(taskId) {
+  onboardingTaskId.value = taskId;
+  activeView.value = 'agent';
+  await nextTick();
+  await agentPanel.value?.openTask?.(taskId);
+}
+async function refreshSemanticNotifications() { await operationsCenter.value?.refresh?.(); }
+
 async function runAction(action, successText) {
   try {
     const result = await action();
@@ -186,7 +196,7 @@ onMounted(async () => {
         <button :class="{ active: activeView === 'system-access' }" @click="activeView = 'system-access'"><span>＋</span><div><b>系统接入</b><small>系统清单、连接配置与接入准备</small></div></button>
         <button :class="{ active: activeView === 'workflows' }" @click="activeView = 'workflows'"><span>↗</span><div><b>流程语义</b><small>钉钉与 OA 流程读取、版本同步</small></div></button>
         <button :class="{ active: activeView === 'agent' }" @click="activeView = 'agent'"><span>01</span><div><b>Agent 工作台</b><small>自然语言与多模态建模</small></div></button>
-        <button :class="{ active: activeView === 'model' }" @click="activeView = 'model'"><span>02</span><div><b>模型校对</b><small>人工可视化精调</small></div></button>
+        <button :class="{ active: activeView === 'model' }" @click="activeView = 'model'"><span>02</span><div><b>模型关系图</b><small>查看顶层对象与系统关联</small></div></button>
         <button :class="{ active: activeView === 'versions' }" @click="activeView = 'versions'"><span>03</span><div><b>版本与回滚</b><small>Diff、快照和恢复</small></div></button>
         <button :class="{ active: activeView === 'knowledge' }" @click="activeView = 'knowledge'"><span>04</span><div><b>知识资料</b><small>原文校对与证据检索</small></div></button>
       </nav>
@@ -195,7 +205,7 @@ onMounted(async () => {
     </aside>
 
     <main>
-      <header class="ops-topbar"><div><span>SEMANTIC CONTROL PLANE</span><h1>{{ activeView === 'system-access' ? (accessTab === 'systems' ? '系统接入与生命周期' : '接入材料与场景准备') : activeView === 'workflows' ? '流程语义接入中心' : activeView === 'knowledge' ? '知识资料与来源校对' : activeView === 'agent' ? '元域智语 Agent 工作台' : activeView === 'model' ? '语义模型人工校对' : '模型版本与恢复' }}</h1></div><div class="ops-top-actions"><div v-if="!['system-access','workflows'].includes(activeView)" :class="['ops-live', deploymentDrift]"><i/>Semantica · {{ semanticaStatus }} · {{ deploymentDriftLabel }}</div><button v-if="!['system-access','workflows'].includes(activeView)" class="ops-logout" :disabled="refreshingStatus" @click="refreshSemanticStatus">{{ refreshingStatus ? '刷新中…' : '刷新服务状态' }}</button><label>已认证运营身份<strong>{{ currentUser?.name || currentUser?.account }}</strong><small>{{ roles.find(item => item.id === role)?.name || role }} · {{ client.deviceId.slice(-8) }}</small></label><button class="ops-logout" @click="logout">退出</button></div></header>
+      <header class="ops-topbar"><div><span>SEMANTIC CONTROL PLANE</span><h1>{{ activeView === 'system-access' ? (accessTab === 'systems' ? '系统接入与生命周期' : '接入材料与场景准备') : activeView === 'workflows' ? '流程语义接入中心' : activeView === 'knowledge' ? '知识资料与来源校对' : activeView === 'agent' ? '元域智语 Agent 工作台' : activeView === 'model' ? '语义模型关系图' : '模型版本与恢复' }}</h1></div><div class="ops-top-actions"><div v-if="!['system-access','workflows'].includes(activeView)" :class="['ops-live', deploymentDrift]"><i/>Semantica · {{ semanticaStatus }} · {{ deploymentDriftLabel }}</div><button v-if="!['system-access','workflows'].includes(activeView)" class="ops-logout" :disabled="refreshingStatus" @click="refreshSemanticStatus">{{ refreshingStatus ? '刷新中…' : '刷新服务状态' }}</button><label>已认证运营身份<strong>{{ currentUser?.name || currentUser?.account }}</strong><small>{{ roles.find(item => item.id === role)?.name || role }} · {{ client.deviceId.slice(-8) }}</small></label><button class="ops-logout" @click="logout">退出</button></div></header>
 
       <div v-if="error && activeView !== 'system-access'" class="ops-error">{{ error }}<button @click="loadWorkspace">重新加载</button></div>
       <div v-if="message && activeView !== 'system-access'" class="ops-message">{{ message }}</div>
@@ -221,17 +231,22 @@ onMounted(async () => {
       <div v-else-if="activeView === 'workflows'" class="ops-onboarding-pane">
         <WorkflowSemanticCenter :client="client" :can-sync="buttonPermissionIds.includes('meta_model.draft.save')" :can-publish="buttonPermissionIds.includes('meta_model.publish')" :can-replay="buttonPermissionIds.includes('event.outbox.replay')" />
       </div>
-      <div v-else-if="!error && !loading" class="ops-workspace">
+      <div v-else-if="!error && !loading" :class="['ops-workspace', { 'ops-agent-workspace': activeView === 'agent' }]">
         <section class="ops-main-pane">
           <template v-if="activeView === 'agent'">
-            <div class="ops-intro"><div><span>AGENT-FIRST AUTHORING</span><h2>告诉 Agent 想建设什么，不需要先理解配置表单</h2><p>Agent会读取自然语言和受控材料，形成计划、对象、关系及来源映射；Schema Critic通过并经你确认后，才会写入未发布草稿。</p></div><div><b>{{ canModel ? '可执行建模' : '只读模式' }}</b><small>{{ profile?.role || role }}</small></div></div>
+            <div class="ops-intro"><div><span>AGENT-FIRST AUTHORING</span><h2>告诉 Agent 想建设什么，不需要先理解配置表单</h2><p>Agent会读取自然语言和受控材料，形成语义对象关系图，并说明各对象来自哪些系统、系统间如何衔接。你可以直接说“修改关系”“审核通过”或“发布模型”。</p></div><div><b>{{ canModel ? '可执行建模' : '只读模式' }}</b><small>{{ profile?.role || role }}</small></div></div>
             <div class="ops-prompts"><span>可以这样提出任务</span><button v-for="prompt in suggestedPrompts" :key="prompt" @click="agentPanel?.setInput(prompt)">{{ prompt }}</button></div>
-            <SemanticAgentWorkspace ref="agentPanel" :client="client" :initial-task-id="onboardingTaskId" @applied="refreshAfterAgent"/>
+            <SemanticAgentWorkspace ref="agentPanel" :client="client" :initial-task-id="onboardingTaskId" :can-review="canReviewSemanticModels" @applied="refreshAfterAgent" @review-created="refreshSemanticNotifications"/>
           </template>
 
           <template v-else-if="activeView === 'model'">
-            <div class="ops-section-head"><div><span>HUMAN REVIEW SURFACE</span><h2>Agent生成，运营人员精调</h2><p>画布不是主要入口，而是处理命名、字段、关系和核心元对象映射的精细校对面。</p></div></div>
-            <OAMetaModelStudio :meta-model="model" :draft="draft" :authoring-profile="profile" :simulation="simulation" :semantic-context="semanticContext" :role="role" :message="message" :replay-cases="client.replayOntologyCases" :knowledge-client="client.knowledge" :button-permission-ids="buttonPermissionIds" @save-draft="saveDraft" @validate-draft="validateDraft" @simulate-build="simulateBuild" @publish="publishModel"/>
+            <div class="ops-section-head"><div><span>SEMANTIC MODEL OVERVIEW</span><h2>语义模型关系总览</h2><p>这里先看业务对象和对象关系。字段映射、主键、回放与 Semantica 细节保留在下方高级校验区。</p></div><button class="outline-button" @click="activeView = 'agent'">在 Agent 工作台审核与修改</button></div>
+            <section class="model-overview-card">
+              <header><div><span>{{ model?.name || '当前语义模型' }}</span><small>{{ model?.code || '模型草稿' }} · {{ draft?.objectTypes?.length || 0 }} 个对象 · {{ draft?.relationshipTypes?.length || 0 }} 条关系</small></div><b>{{ deploymentDriftLabel }}</b></header>
+              <div class="model-object-list"><article v-for="object in draft?.objectTypes || []" :key="object.id"><b>{{ object.label || object.id }}</b><small>{{ object.sourceSystems?.join(' / ') || '来源待核对' }}</small></article></div>
+              <div class="model-relationship-list"><article v-for="(relationship, index) in draft?.relationshipTypes || []" :key="`${relationship.from}-${relationship.predicate}-${relationship.to}-${index}`"><b>{{ draft.objectTypes?.find(item => item.id === relationship.from)?.label || relationship.from }}</b><span>— {{ relationship.label || relationship.predicate }} · {{ relationship.cardinality || '基数待核对' }} →</span><b>{{ draft.objectTypes?.find(item => item.id === relationship.to)?.label || relationship.to }}</b><small>{{ draft.objectTypes?.find(item => item.id === relationship.from)?.sourceSystems?.join('/') || '来源待核对' }} → {{ draft.objectTypes?.find(item => item.id === relationship.to)?.sourceSystems?.join('/') || '来源待核对' }}</small></article><p v-if="!draft?.relationshipTypes?.length">当前模型尚无已确认关系。</p></div>
+              <details class="model-advanced"><summary>高级校验与字段映射</summary><OAMetaModelStudio :meta-model="model" :draft="draft" :authoring-profile="profile" :simulation="simulation" :semantic-context="semanticContext" :role="role" :message="message" :replay-cases="client.replayOntologyCases" :knowledge-client="client.knowledge" :button-permission-ids="buttonPermissionIds" @save-draft="saveDraft" @validate-draft="validateDraft" @simulate-build="simulateBuild" @publish="publishModel"/></details>
+            </section>
           </template>
 
           <KnowledgeLibraryPanel v-else-if="activeView === 'knowledge'" :client="client.knowledge" :can-write="buttonPermissionIds.includes('meta_model.draft.save')" :can-model="canModel" @model-candidate="prepareKnowledgeModelCandidate" />
@@ -247,7 +262,7 @@ onMounted(async () => {
           <section><span>权限闸门</span><div class="gate-list"><p :class="{ passed: canModel }"><i/>生成与保存草稿</p><p :class="{ passed: canValidate }"><i/>运行结构校验</p><p :class="{ passed: canSimulate }"><i/>Semantica模拟构建</p><p :class="{ passed: canPublish }"><i/>发布模型版本</p></div></section>
           <section><span>模型状态</span><div class="model-state"><b>{{ model?.name || '语义元模型' }}</b><small>{{ model?.code }} · {{ model?.status }}</small><p>{{ deploymentDriftLabel }}。{{ profile?.semanticDeployment?.detail || '模型变更先进入草稿，通过校验和审批后才会登记。' }}</p><code v-if="profile?.semanticDeployment?.draftFingerprint">草稿 {{ profile.semanticDeployment.draftFingerprint }}<br>部署 {{ profile.semanticDeployment.deploymentFingerprint || '—' }}</code></div></section>
           <section><span>执行原则</span><ul><li>不读取无授权业务明细</li><li>不把长期记忆当作执行授权</li><li>不允许Agent绕过Review Queue</li><li>所有变更保存证据、Diff和快照</li></ul></section>
-          <SemanticOperationsCenter :client="client" />
+          <SemanticOperationsCenter ref="operationsCenter" :client="client" @open-task="openSemanticReviewTask" />
         </aside>
       </div>
     </main>
@@ -257,6 +272,11 @@ onMounted(async () => {
 
 <style scoped>
 .ops-onboarding-pane { min-width: 0; padding: 24px; }
+.model-overview-card{display:grid;gap:16px;padding:18px;border:1px solid #274e60;border-radius:12px;background:linear-gradient(145deg,#0c2634,#081a25)}
+.model-overview-card>header{display:flex;align-items:center;justify-content:space-between;gap:12px}.model-overview-card>header>div{display:grid;gap:5px}.model-overview-card>header span{color:#e2f2f4;font-size:16px;font-weight:750}.model-overview-card>header small{color:#83a4b2;font-size:11px}.model-overview-card>header>b{padding:6px 9px;border-radius:999px;color:#73d5bd;background:#103a35;font-size:10px}
+.model-object-list{display:flex;flex-wrap:wrap;gap:10px}.model-object-list article{display:grid;gap:5px;min-width:150px;padding:12px 14px;border:1px solid #316275;border-radius:9px;background:#0d2a39}.model-object-list b{color:#cde6e9;font-size:12px}.model-object-list small{color:#6bcab9;font-size:10px}
+.model-relationship-list{display:grid;gap:8px}.model-relationship-list article{display:grid;grid-template-columns:auto minmax(150px,1fr) auto;align-items:center;gap:8px;padding:10px 12px;border:1px solid #264858;border-radius:8px;background:#081b26}.model-relationship-list b{color:#d1e4e8;font-size:11px}.model-relationship-list span{color:#9cb8c3;font-size:11px}.model-relationship-list small{grid-column:2 / 4;color:#62c8b4;font-size:10px}.model-relationship-list>p{color:#7995a2;font-size:12px}
+.model-advanced{padding-top:12px;border-top:1px solid #274657}.model-advanced>summary{color:#83aab8;font-size:11px;cursor:pointer}
 .ops-subtabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .ops-subtabs button { font-size: 12px; padding: 7px 13px; border: 1px solid #36556b; border-radius: 7px; background: #102637; color: #cfdfeb; cursor: pointer; }
 .ops-subtabs button.active { border-color: #62a5b2; background: #143647; color: #eaf7fb; }

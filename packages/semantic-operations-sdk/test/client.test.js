@@ -22,6 +22,8 @@ test('uses identity and device sessions without demo role headers', async () => 
   assert.equal(calls[2].options.headers['x-identity-session'], 'identity-1');
   assert.equal(calls[2].options.headers['x-device-session'], 'device-session-1');
   assert.equal(calls[2].options.headers['x-demo-role'], undefined);
+  await client.tasks({ limit: 30, offset: 30 });
+  assert.match(calls[3].url, /\/semantic-operations\/tasks\?limit=30&offset=30$/);
 });
 
 test('source scope list is requested explicitly and surfaces scope rejection codes', async () => {

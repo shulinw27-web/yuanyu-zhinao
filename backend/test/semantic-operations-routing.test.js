@@ -94,3 +94,10 @@ test('无模型（mock 模式）：turn 为空时走确定性分类，且不标�
   assert.equal(classified.intent, 'build_model');
   assert.equal(classified.reason, 'explicit_grounded_build');
 });
+
+test('模型审核通过使用独立审核权限，而不是混同建模权限', () => {
+  const classified = classifySemanticOperationsIntent('审核通过');
+  assert.equal(classified.intent, 'approve_model');
+  assert.equal(classified.permission, 'meta_model.draft.review');
+  assert.equal(classified.command, 'apply_proposal');
+});

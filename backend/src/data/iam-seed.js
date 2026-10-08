@@ -82,6 +82,7 @@ export const permissionCatalog = [
       { id: 'event.outbox.view', name: '查看领域事件 Outbox', risk: 'medium' },
       { id: 'event.outbox.replay', name: '重放领域事件死信', risk: 'high' },
       { id: 'meta_model.draft.save', name: '保存元模型草稿', risk: 'medium' },
+      { id: 'meta_model.draft.review', name: '审核语义模型提案', risk: 'medium' },
       { id: 'meta_model.draft.validate', name: '校验元模型草稿', risk: 'medium' },
       { id: 'meta_model.simulate', name: '模拟构建元模型', risk: 'high' },
       { id: 'meta_model.publish', name: '发布元模型版本', risk: 'high' }
@@ -115,7 +116,7 @@ export const initialRolePolicies = {
   },
   quality_manager: {
     roleId: 'quality_manager', menuIds: ['dashboard', 'intelligence', 'agent', 'risks', 'semantic-operations', 'channels', 'config'],
-    buttonPermissionIds: ['dashboard.refresh', 'intelligence.drilldown', 'agent.prompt.run', 'agent.command.execute', 'risk.detail.view', 'risk.acknowledge', 'simulation.approval.decide', 'meta_model.draft.save', 'meta_model.draft.validate', 'meta_model.simulate'],
+    buttonPermissionIds: ['dashboard.refresh', 'intelligence.drilldown', 'agent.prompt.run', 'agent.command.execute', 'risk.detail.view', 'risk.acknowledge', 'simulation.approval.decide', 'meta_model.draft.save', 'meta_model.draft.review', 'meta_model.draft.validate', 'meta_model.simulate'],
     dataScope: { mode: 'selected_orgs', organizationIds: ['org-quality-dept', 'org-market-dept'] }, version: 1
   },
   production_manager: {

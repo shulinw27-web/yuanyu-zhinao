@@ -722,5 +722,43 @@ body {
   .ops-section-head h2 { font-size: 16px; }
   .ops-prompts { margin-bottom: 8px; }
 }
+
+/* Agent 工作台占用顶栏下方的可视高度，输入区随对话面板贴底；任务侧栏独立滚动。 */
+@media (min-width: 1181px) {
+  .ops-workspace.ops-agent-workspace {
+    height: calc(100dvh - 92px);
+    min-height: 560px;
+    grid-template-columns: minmax(0, 1fr) 260px;
+    align-items: stretch;
+    padding-bottom: 0;
+  }
+  .ops-workspace.ops-agent-workspace > .ops-main-pane {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+  }
+  .ops-workspace.ops-agent-workspace .ops-intro,
+  .ops-workspace.ops-agent-workspace .ops-prompts {
+    flex: 0 0 auto;
+  }
+  .ops-workspace.ops-agent-workspace .agent-task-workspace {
+    flex: 1 1 0;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+  }
+  .ops-workspace.ops-agent-workspace > .ops-context-pane {
+    position: static;
+    grid-column: auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+    width: auto;
+    max-height: 100%;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+}
 .semantic-auth{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 50% 10%,#123747,#06131e 55%)}.semantic-auth form{display:grid;gap:14px;width:min(420px,100%);padding:34px;border:1px solid #315c6e;border-radius:14px;background:#081d29;box-shadow:0 28px 90px #02080db3}.semantic-auth form>span{color:#5fc7c9;font-size:10px;letter-spacing:.14em}.semantic-auth h1{margin:0;color:#e2f0f3}.semantic-auth p{margin:0;color:#789aa8;font-size:12px;line-height:1.7}.semantic-auth label{display:grid;gap:6px;color:#87a8b5;font-size:10px}.semantic-auth input{border:1px solid #31576a;border-radius:6px;padding:11px;color:#d8e9ed;background:#0c2937}.auth-mode{display:grid;grid-template-columns:1fr 1fr;gap:6px}.auth-mode button,.auth-submit,.ops-logout{border:1px solid #31596b;border-radius:6px;padding:9px;color:#8db6c2;background:#0b2634}.auth-mode button.active,.auth-submit{border-color:#55c9ad;color:#08251e;background:#58d2b3;font-weight:700}.ops-top-actions label{display:grid;gap:2px}.ops-top-actions label strong{color:#c7dde3;font-size:10px}.ops-top-actions label small{color:#6f909e;font-size:8px}.ops-logout{padding:6px 9px;font-size:8px}
 .semantic-ops-center{display:grid;gap:7px}.semantic-ops-center header{display:flex;justify-content:space-between}.semantic-ops-center header b{color:#63d1bd}.semantic-ops-center>button,.semantic-ops-center article button,.semantic-ops-center details button{border:1px solid #31586a;border-radius:5px;padding:6px;color:#85b2bf;background:#0b2634;font-size:8px}.semantic-ops-center article{display:grid;gap:4px;padding:8px;border:1px solid #274959;border-radius:6px}.semantic-ops-center article>b{color:#b8d4db;font-size:9px}.semantic-ops-center article small,.semantic-ops-center article p{margin:0;color:#6f929f;font-size:7px}.semantic-ops-center article div{display:flex;gap:4px}.semantic-ops-center details>button{display:grid;width:100%;margin-top:5px;text-align:left}.semantic-ops-center details>button.unread{border-color:#51cbb0}.semantic-ops-center details small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

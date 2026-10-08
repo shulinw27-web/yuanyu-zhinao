@@ -1478,6 +1478,12 @@ paths:
     get:
       tags: [SemanticOperations]
       operationId: listSemanticOperationsTasks
+      parameters:
+        - { name: query, in: query, required: false, schema: { type: string }, description: 按任务标题、诉求或意图筛选 }
+        - { name: status, in: query, required: false, schema: { type: string } }
+        - { name: archived, in: query, required: false, schema: { type: boolean, default: false } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+        - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 }, description: 分页偏移量 }
       responses:
         '200': { description: 当前身份可见的连续语义任务, content: { application/json: { schema: { $ref: '#/components/schemas/GenericObject' } } } }
     post:
