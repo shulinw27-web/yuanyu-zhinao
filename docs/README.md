@@ -63,6 +63,7 @@
 | 现阶段用 Mock 推进开发与业务验证 | [阶段计划与验收规则](development/DEVELOPMENT_ROADMAP.md) → [模拟运行时](development/MOCK_SIMULATION_RUNTIME.md) |
 | 准备未来真实系统联调 | [开发准备事项](development/DEVELOPMENT_READINESS.md) |
 | 理解整体设计 | [整体架构](architecture/ARCHITECTURE.md) → [模块文档](modules/README.md) |
+| 接入并理解 OA / 钉钉流程 | [流程语义接入架构](architecture/WORKFLOW_SEMANTIC_INTEGRATION.md) |
 | 了解参考 WeKnora 的升级方向 | [采纳点与验证路线](architecture/WEKNORA_UPGRADE_REFERENCE.md) · [分批实施与接口验收](development/WEKNORA_UPGRADE_ACCEPTANCE.md) · [D 盘本地部署](operations/WEKNORA_LOCAL_DEPLOYMENT.md)（聊天与 2048 维 Embedding 原生调用通过；双端只读适配器已开发，真实集成未启用） |
 | 使用智脑或元域智语端 | [操作指南目录](guides/README.md) |
 | 按业务场景建设本体、配置质量判断 | [场景建模指南](guides/ONTOLOGY_SCENARIO_MODELING.md) · [验收记录](development/ONTOLOGY_MODELING_ACCEPTANCE.md) |

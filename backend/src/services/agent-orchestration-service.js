@@ -11,7 +11,8 @@ let postgresRepository = null;
 const routeDefinitions = Object.freeze({
   production: Object.freeze({ id: 'production', name: '生产质量 Agent', tool: 'analyze_production_impact', owner: '生产质量 Agent' }),
   marketing: Object.freeze({ id: 'marketing', name: '市场经营 Agent', tool: 'analyze_market_impact', owner: '市场经营 Agent' }),
-  internal: Object.freeze({ id: 'internal', name: '内务协同 Agent', tool: 'review_internal_operations', owner: '内务协同 Agent' })
+  internal: Object.freeze({ id: 'internal', name: '内务协同 Agent', tool: 'review_internal_operations', owner: '内务协同 Agent' }),
+  workflow: Object.freeze({ id: 'workflow', name: '流程语义 Agent', tool: 'read_workflow_context', owner: '流程语义 Agent' })
 });
 const orchestrationAgent = Object.freeze({ id: 'orchestrator', name: '总控编排 Agent', tool: 'route_and_govern' });
 
@@ -21,10 +22,13 @@ const orchestrationAgent = Object.freeze({ id: 'orchestrator', name: '总控编�
 export function routeAgentTask(input) {
   const text = String(input || '').toLowerCase();
   const domains = [];
-  if (/(?:生产|质量|检验|原料|批次|设备|库存|告警|报警|风险|lims|qms|mes|wms)/iu.test(text)) domains.push('production');
-  if (/(?:市场|门店|订单|投诉|渠道|客户|履约|oms|销售)/iu.test(text)) domains.push('marketing');
-  if (/(?:内务|预算|供应商|合同|采购|审批|财务|erp|oa)/iu.test(text)) domains.push('internal');
-  const uniqueDomains = [...new Set([...domains, ...businessIdDomains(input)])];
+  const workflowIntent = /(?:流程|审批到哪|审批进度|审批记录|审批历史|谁审批过|流转记录|当前节点|待谁审批|钉钉审批|oa\s*审批|请假|入职|供应商准入|workflow|process\s*instance)/iu.test(text);
+  const workflowOnly = workflowIntent && !/(?:影响|分析|风险|核验|原因|处理方案)/u.test(text);
+  if (workflowIntent) domains.push('workflow');
+  if (!workflowOnly && /(?:生产|质量|检验|原料|批次|设备|库存|告警|报警|风险|lims|qms|mes|wms)/iu.test(text)) domains.push('production');
+  if (!workflowOnly && /(?:市场|门店|订单|投诉|渠道|客户|履约|oms|销售)/iu.test(text)) domains.push('marketing');
+  if (!workflowOnly && /(?:内务|预算|供应商|合同|采购|审批|财务|erp|oa)/iu.test(text)) domains.push('internal');
+  const uniqueDomains = [...new Set([...domains, ...(workflowOnly ? [] : businessIdDomains(input))])];
   return {
     orchestrator: orchestrationAgent,
     primaryDomain: uniqueDomains[0] || null,

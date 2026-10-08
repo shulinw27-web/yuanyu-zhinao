@@ -20,7 +20,7 @@ const emptyInputSchema = Object.freeze({
 const defineTool = (definition) => Object.freeze({
   ...definition,
   domain: definition.scope.split(':')[0],
-  inputSchema: ['analyze_production_impact', 'analyze_market_impact', 'review_internal_operations'].includes(definition.id)
+  inputSchema: ['analyze_production_impact', 'analyze_market_impact', 'review_internal_operations', 'read_workflow_context'].includes(definition.id)
     ? Object.freeze({ type: 'object', properties: Object.freeze({ businessIds: Object.freeze({ type: 'array', items: { type: 'string', maxLength: 100 }, maxItems: MAX_QUERY_BUSINESS_IDS, uniqueItems: true }) }), required: [], additionalProperties: false })
     : emptyInputSchema
 });
@@ -33,6 +33,7 @@ const tools = Object.freeze([
   defineTool({ id: 'analyze_production_impact', name: '生产影响分析', scope: 'production:analyze', risk: '低', mode: '只读推演', description: '分析原料、生产批、检验、库存和排产之间的受控影响关系。' }),
   defineTool({ id: 'analyze_market_impact', name: '市场影响分析', scope: 'market:analyze', risk: '低', mode: '只读推演', description: '分析渠道、订单、投诉、SKU 和需求变化的脱敏经营影响。' }),
   defineTool({ id: 'review_internal_operations', name: '内务协同检查', scope: 'internal:review', risk: '低', mode: '只读核验', description: '核验供应商、预算、合同与审批状态，不执行任何写入。' }),
+  defineTool({ id: 'read_workflow_context', name: '读取流程语义上下文', scope: 'workflow:read', risk: '低', mode: '只读', description: '读取已发布流程定义、实例状态和当前审批节点；不执行审批、提交、撤回或催办。' }),
   defineTool({ id: 'read_world_context', name: '读取受控世界模型上下文', scope: 'world:read', risk: '低', mode: '只读', description: '查询当前用户可见的对象、关系、状态与证据。' }),
   defineTool({ id: 'read_operating_status', name: '查询企业运行状态', scope: 'risk:read', risk: '低', mode: '只读', description: '读取风险、监控、系统状态和通知摘要。' }),
   defineTool({ id: 'prepare_procurement', name: '生成原料采购协同方案', scope: 'procurement:prepare', risk: '中', mode: '计划', description: '核算需求、库存、质量、供应商与预算，生成不可写入的方案。' }),

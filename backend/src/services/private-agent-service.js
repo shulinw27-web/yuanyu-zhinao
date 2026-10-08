@@ -560,7 +560,7 @@ export async function runPrivateAgent(request, role, identityScope, options = {}
     modelEnabled: !contextCompromised && getLocalModelRuntime().mode !== 'mock',
     execute: (toolId) => executeReadOnlyTool(toolId, role, authorization, identityScope, queryInput, {
       systemEvidence: systemData.evidence,
-      queryPlan,
+      queryPlan, goal: contextualTaskInput,
       allowDemoFacts: systemData.mode === 'coherent_stateful_mock_data'
     }),
     onEvent: (event) => appendAgentEvidenceEvent(traceId, {
@@ -569,7 +569,7 @@ export async function runPrivateAgent(request, role, identityScope, options = {}
       summary: `只读核验 ${event.toolId}：${event.status}。`, details: event
     })
   });
-  const broadEvidenceRead = turn?.intent === 'read_business' && !targetedQuery;
+  const broadEvidenceRead = turn?.intent === 'read_business' && !targetedQuery && !route.subAgents.some(item => item.tool === 'read_workflow_context');
   // Broad reporting must be grounded in the scoped connector records, not
   // summaries from fixed Demo risk/procurement handlers. Those handlers still
   // serve their explicit workflows and exact-ID paths.

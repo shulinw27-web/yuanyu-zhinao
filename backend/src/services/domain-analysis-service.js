@@ -5,6 +5,7 @@ import { matchesQueryPlan } from './agent-query-plan-service.js';
 import { evaluateBusinessDecision } from './business-decision-service.js';
 import { getPublishedDecisionContext } from './meta-model-service.js';
 import { evaluateBoundDecision } from './decision-binding-service.js';
+import { queryPublishedWorkflowContext } from '../domains/workflow-integration/public-api.js';
 
 const domainSystemIds = {
   analyze_production_impact: ['lims', 'qms', 'mes', 'wms', 'erp'],
@@ -84,7 +85,29 @@ export async function reviewInternalOperations() {
   };
 }
 
+export async function readWorkflowContext(roleId, identityScope, query) {
+  const result = queryPublishedWorkflowContext({ query, identityScope: { ...identityScope, roleId } });
+  if (result.error) return { summary: result.error, evidence: [] };
+  const instances = result.matches || [];
+  const definitions = result.definitions || [];
+  const statusLabel = value => ({ running: '处理中', completed: '已完成', rejected: '已拒绝', cancelled: '已取消' })[value] || value;
+  const wantsTimeline = /(?:记录|历史|轨迹|流转|经过|谁审批过)/u.test(String(query || ''));
+  const timelineText = item => (item.timeline || []).slice(-5).map(event => `${event.occurredAt} ${event.actorDisplay || '系统'}：${event.label}`).join('；');
+  const instanceLines = instances.map(item => {
+    const history = wantsTimeline && item.timeline?.length ? `\n流转记录：${timelineText(item)}` : '';
+    return `${item.definition.name} ${item.businessKey || item.id}：${statusLabel(item.status)}，当前节点${item.currentNode?.label || '未知'}；${item.summary}${history}`;
+  });
+  const definitionLines = definitions.map(item => `${item.name}（${item.provider}/${item.code}/v${item.version}）：${item.purpose}`);
+  const summary = [...instanceLines, ...definitionLines].join('\n') || '当前已发布流程中没有找到匹配的流程定义或实例；这不代表来源系统中不存在，可能尚未同步或当前用户不可见。';
+  const evidence = [
+    ...instances.map(item => ({ source: `${item.evidence.sourceSystem.toUpperCase()} 流程实例`, id: item.id, title: item.title, statement: `${item.status}；当前节点：${item.currentNode?.label || '未知'}；${item.summary}${wantsTimeline && item.timeline?.length ? `；流转记录：${timelineText(item)}` : ''}`, version: item.definition.version })),
+    ...definitions.map(item => ({ source: `${item.provider.toUpperCase()} 流程定义`, id: item.code, title: item.name, statement: item.purpose, version: item.version }))
+  ];
+  return { summary, evidence, matchedBusinessIds: instances.flatMap(item => [item.id, item.businessKey].filter(Boolean)) };
+}
+
 export async function executeDomainAnalysis(toolId, roleId, identityScope = null, input = {}, controlledContext = {}) {
+  if (toolId === 'read_workflow_context') return readWorkflowContext(roleId, identityScope, controlledContext.goal || input.businessIds?.join(' ') || '');
   if (input.businessIds?.length && domainSystemIds[toolId]) return analyzeSelectedObjects(toolId, roleId, identityScope, input.businessIds, controlledContext);
   if (toolId === 'analyze_production_impact') return analyzeProductionImpact(roleId, identityScope);
   if (toolId === 'analyze_market_impact') return analyzeMarketImpact(roleId, identityScope);

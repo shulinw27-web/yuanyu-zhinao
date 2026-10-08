@@ -21,6 +21,115 @@ tags:
   - { name: SemanticOperations, description: 独立元域智语任务、证据、巡检、通知与受控报告 }
   - { name: Platform, description: 平台运行状态与配置 }
 paths:
+  /integrations/workflows/webhooks/{providerId}:
+    post:
+      tags: [SemanticOperations]
+      operationId: receiveWorkflowChangeNotification
+      security: []
+      description: 服务端流程变更通知入口。签名仅把通知作为重新拉取信号；不采信回调正文为业务事实。提供方、租户和签名密钥由部署配置绑定。
+      parameters:
+        - { name: providerId, in: path, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9_-]{1,48}$' } }
+        - { name: x-workflow-event-id, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 180 } }
+        - { name: x-workflow-timestamp, in: header, required: true, schema: { type: string, pattern: '^\d{10}$' } }
+        - { name: x-workflow-signature, in: header, required: true, schema: { type: string, pattern: '^sha256=[a-f0-9]{64}$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [eventType]
+              properties:
+                eventType: { type: string, enum: [definition.changed, instance.changed, instance.completed, reconciliation.requested] }
+                resourceRef: { type: string, maxLength: 240, description: 只保存哈希，不作为业务事实 }
+      responses:
+        '202': { description: 已验证签名并按配置租户入队 }
+        '200': { description: 重复事件已幂等接收 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: 未配置提供方 }
+        '503': { description: 签名密钥不可用或收件箱已满 }
+  /semantic-operations/workflows:
+    get:
+      tags: [SemanticOperations]
+      operationId: getWorkflowIntegrationOverview
+      description: 读取当前租户的流程目录、提供方能力和同步记录；候选版本不等于已发布。
+      responses:
+        '200': { description: 流程目录、指标、提供方与同步记录 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /semantic-operations/workflows/sync:
+    post:
+      tags: [SemanticOperations]
+      operationId: syncWorkflowDefinitions
+      description: 需meta_model.draft.save。发现新定义或版本并生成候选，不自动发布给智脑。
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                scenario: { type: string, enum: [baseline, changed], default: baseline }
+                mode: { type: string, enum: [configured], description: 使用服务端配置的真实连接器；与scenario二选一 }
+      responses:
+        '200': { description: 幂等同步结果 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: 真实连接器或服务端凭据尚未配置 }
+  /semantic-operations/workflows/{code}:
+    get:
+      tags: [SemanticOperations]
+      operationId: getWorkflowDefinition
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 最新定义、版本历史、流程图和运行实例 }
+        '404': { description: 流程不可见或不存在 }
+  /semantic-operations/workflows/{code}/versions/{version}/review:
+    post:
+      tags: [SemanticOperations]
+      operationId: reviewWorkflowVersion
+      description: 需meta_model.publish。明确发布或拒绝候选版本；同步权限不能替代该权限。
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+        - { name: version, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action: { type: string, enum: [publish, reject] }
+      responses:
+        '200': { description: 校对后的版本与当前生效版本 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 目标不是候选版本 }
+  /semantic-operations/workflows/events/{eventId}/replay:
+    post:
+      tags: [SemanticOperations]
+      operationId: replayWorkflowDeadLetterEvent
+      description: 需event.outbox.replay。只把当前租户的流程通知死信重新入队，不直接写流程事实。
+      parameters:
+        - { name: eventId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 240 } }
+      responses:
+        '200': { description: 死信已重新入队 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 当前租户不存在该事件 }
+        '409': { description: 事件不是死信状态 }
+  /agent/workflow-context:
+    get:
+      tags: [Agent]
+      operationId: queryPublishedWorkflowContext
+      description: 只读查询已发布流程、运行实例和有界流转记录。管理流程按主体隐藏个人数据，业务流程按角色和业务域裁剪申请人、金额、意见及参与人；不执行审批动作。
+      parameters:
+        - { name: query, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 240 } }
+      responses:
+        '200': { description: 带来源版本和观测时间的流程上下文 }
+        '400': { description: 查询为空 }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /agent/anomalies:
     get:
       tags: [Agent]

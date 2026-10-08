@@ -28,6 +28,13 @@ const domainPolicies = {
     objects: ['Supplier', 'Budget', 'Contract', 'ApprovalCase'],
     readTools: ['read_world_context', 'review_internal_operations'],
     workflowTools: ['create_budget_review_draft']
+  },
+  workflow: {
+    name: '流程语义域',
+    users: ['executive', 'quality_manager', 'production_manager', 'procurement_manager', 'marketing_manager'],
+    objects: ['WorkflowDefinition', 'WorkflowInstance', 'ApprovalNode'],
+    readTools: ['read_workflow_context'],
+    workflowTools: []
   }
 };
 

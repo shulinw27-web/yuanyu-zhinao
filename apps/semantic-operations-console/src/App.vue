@@ -5,6 +5,7 @@ import SemanticAgentWorkspace from './components/SemanticAgentWorkspace.vue';
 import SemanticOperationsCenter from './components/SemanticOperationsCenter.vue';
 import SemanticOnboardingWorkspace from './components/SemanticOnboardingWorkspace.vue';
 import SystemAccessWorkspace from './components/SystemAccessWorkspace.vue';
+import WorkflowSemanticCenter from './components/WorkflowSemanticCenter.vue';
 import { OAMetaModelStudio, semanticSimulationMessage } from '@healthcare-ai/agent-ui/meta-model';
 import { KnowledgeLibraryPanel } from '@healthcare-ai/agent-ui/knowledge';
 
@@ -183,6 +184,7 @@ onMounted(async () => {
       <div class="ops-boundary"><i/><div><b>独立运营端</b><small>不属于业务端智脑</small></div></div>
       <nav>
         <button :class="{ active: activeView === 'system-access' }" @click="activeView = 'system-access'"><span>＋</span><div><b>系统接入</b><small>系统清单、连接配置与接入准备</small></div></button>
+        <button :class="{ active: activeView === 'workflows' }" @click="activeView = 'workflows'"><span>↗</span><div><b>流程语义</b><small>钉钉与 OA 流程读取、版本同步</small></div></button>
         <button :class="{ active: activeView === 'agent' }" @click="activeView = 'agent'"><span>01</span><div><b>Agent 工作台</b><small>自然语言与多模态建模</small></div></button>
         <button :class="{ active: activeView === 'model' }" @click="activeView = 'model'"><span>02</span><div><b>模型校对</b><small>人工可视化精调</small></div></button>
         <button :class="{ active: activeView === 'versions' }" @click="activeView = 'versions'"><span>03</span><div><b>版本与回滚</b><small>Diff、快照和恢复</small></div></button>
@@ -193,7 +195,7 @@ onMounted(async () => {
     </aside>
 
     <main>
-      <header class="ops-topbar"><div><span>SEMANTIC CONTROL PLANE</span><h1>{{ activeView === 'system-access' ? (accessTab === 'systems' ? '系统接入与生命周期' : '接入材料与场景准备') : activeView === 'knowledge' ? '知识资料与来源校对' : activeView === 'agent' ? '元域智语 Agent 工作台' : activeView === 'model' ? '语义模型人工校对' : '模型版本与恢复' }}</h1></div><div class="ops-top-actions"><div v-if="activeView !== 'system-access'" :class="['ops-live', deploymentDrift]"><i/>Semantica · {{ semanticaStatus }} · {{ deploymentDriftLabel }}</div><button v-if="activeView !== 'system-access'" class="ops-logout" :disabled="refreshingStatus" @click="refreshSemanticStatus">{{ refreshingStatus ? '刷新中…' : '刷新服务状态' }}</button><label>已认证运营身份<strong>{{ currentUser?.name || currentUser?.account }}</strong><small>{{ roles.find(item => item.id === role)?.name || role }} · {{ client.deviceId.slice(-8) }}</small></label><button class="ops-logout" @click="logout">退出</button></div></header>
+      <header class="ops-topbar"><div><span>SEMANTIC CONTROL PLANE</span><h1>{{ activeView === 'system-access' ? (accessTab === 'systems' ? '系统接入与生命周期' : '接入材料与场景准备') : activeView === 'workflows' ? '流程语义接入中心' : activeView === 'knowledge' ? '知识资料与来源校对' : activeView === 'agent' ? '元域智语 Agent 工作台' : activeView === 'model' ? '语义模型人工校对' : '模型版本与恢复' }}</h1></div><div class="ops-top-actions"><div v-if="!['system-access','workflows'].includes(activeView)" :class="['ops-live', deploymentDrift]"><i/>Semantica · {{ semanticaStatus }} · {{ deploymentDriftLabel }}</div><button v-if="!['system-access','workflows'].includes(activeView)" class="ops-logout" :disabled="refreshingStatus" @click="refreshSemanticStatus">{{ refreshingStatus ? '刷新中…' : '刷新服务状态' }}</button><label>已认证运营身份<strong>{{ currentUser?.name || currentUser?.account }}</strong><small>{{ roles.find(item => item.id === role)?.name || role }} · {{ client.deviceId.slice(-8) }}</small></label><button class="ops-logout" @click="logout">退出</button></div></header>
 
       <div v-if="error && activeView !== 'system-access'" class="ops-error">{{ error }}<button @click="loadWorkspace">重新加载</button></div>
       <div v-if="message && activeView !== 'system-access'" class="ops-message">{{ message }}</div>
@@ -215,6 +217,9 @@ onMounted(async () => {
           v-if="onboardingMounted" v-show="accessTab === 'materials'"
           :client="client" :can-write="buttonPermissionIds.includes('meta_model.draft.save')"
           @open-agent="onboardingTaskId = $event; activeView = 'agent'" @open-model="activeView = 'model'" />
+      </div>
+      <div v-else-if="activeView === 'workflows'" class="ops-onboarding-pane">
+        <WorkflowSemanticCenter :client="client" :can-sync="buttonPermissionIds.includes('meta_model.draft.save')" :can-publish="buttonPermissionIds.includes('meta_model.publish')" :can-replay="buttonPermissionIds.includes('event.outbox.replay')" />
       </div>
       <div v-else-if="!error && !loading" class="ops-workspace">
         <section class="ops-main-pane">

@@ -7,6 +7,7 @@ const integerFromEnv = (name, fallback) => {
 
 export const getRateLimitPolicy = (pathname) => {
   if (pathname.includes('/login')) return { limit: integerFromEnv('AUTH_RATE_LIMIT', 12), windowMs: 5 * 60_000 };
+  if (pathname.startsWith('/api/integrations/workflows/webhooks/')) return { limit: integerFromEnv('WORKFLOW_WEBHOOK_RATE_LIMIT', 120), windowMs: 60_000 };
   if (pathname === '/api/agent/message') return { limit: integerFromEnv('AGENT_RATE_LIMIT', 45), windowMs: 60_000 };
   return { limit: integerFromEnv('API_RATE_LIMIT', 240), windowMs: 60_000 };
 };

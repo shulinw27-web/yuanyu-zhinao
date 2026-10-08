@@ -20,6 +20,7 @@ import { handleAnomalyRoutes } from './routes/anomaly-routes.js';
 import { handleSimulationRoutes } from './routes/simulation-routes.js';
 import { handleKeyRoutes } from './routes/key-routes.js';
 import { handlePlatformRoutes } from './routes/platform-routes.js';
+import { handleWorkflowIntegrationRoutes } from './routes/workflow-integration-routes.js';
 import { loadRuntimeConfiguration } from './config/runtime-config.js';
 import { configureRuntimeDependencies } from './config/runtime-dependencies.js';
 import { attachHttpCompletionLog } from './observability/structured-logger.js';
@@ -47,6 +48,7 @@ const routeHandlers = [
   handleSystemMonitoringRoutes,
   handleKnowledgeRoutes,
   handleAnomalyRoutes,
+  handleWorkflowIntegrationRoutes,
   handleSimulationRoutes,
   handleKeyRoutes,
   handlePlatformRoutes

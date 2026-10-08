@@ -19,6 +19,7 @@
 - [IAM 权限中心说明](IAM_PERMISSION_CENTER.md)
 - [密钥中心微服务 v0.1](KEY_CENTER_MICROSERVICE.md)
 - [OA 组织、权限与审批元模型（Demo）](OA_META_MODEL.md)
+- [OA / 钉钉流程语义接入架构](WORKFLOW_SEMANTIC_INTEGRATION.md)
 - [语义上下文微服务（Semantica）v0.1](SEMANTIC_CONTEXT_MICROSERVICE.md)
 - [语义层元模型与元对象建设说明](SEMANTIC_MODEL_AUTHORING.md)
 - [元域智脑多端 Agent 架构技术说明书](ZHINAO_AGENT_ARCHITECTURE_V2.md)

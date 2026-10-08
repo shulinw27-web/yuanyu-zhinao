@@ -14,5 +14,7 @@ const readPagePolicies = [
   { test: (path) => path.startsWith('/api/agent/') || path === '/api/procurement/scenario', pagePermissionIds: ['page.agent.view'] }
 ];
 
-export const isPublicPath = (path) => publicPaths.has(path) || ['/api/auth/providers', '/api/auth/dingtalk/config', '/api/auth/dingtalk/login/challenge', '/api/auth/dingtalk/login'].includes(path);
+export const isPublicPath = (path) => publicPaths.has(path)
+  || /^\/api\/integrations\/workflows\/webhooks\/[a-z][a-z0-9_-]{1,48}$/u.test(path)
+  || ['/api/auth/providers', '/api/auth/dingtalk/config', '/api/auth/dingtalk/login/challenge', '/api/auth/dingtalk/login'].includes(path);
 export const requiredReadPagePermissions = (path) => readPagePolicies.find((policy) => policy.test(path))?.pagePermissionIds || null;

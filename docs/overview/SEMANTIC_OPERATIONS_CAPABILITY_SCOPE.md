@@ -172,9 +172,16 @@ Electron 桌面端可使用受限语义报告导出；Web 页面和桌面壳不�
 
 - [双端修复与验收记录](../development/AGENT_INTELLIGENCE_REPAIR_2026-09-07.md)
 - [语义层建设说明](../architecture/SEMANTIC_MODEL_AUTHORING.md)
+- [OA / 钉钉流程语义接入架构](../architecture/WORKFLOW_SEMANTIC_INTEGRATION.md)
 - [元域智语操作指南](../guides/元域智语-Agent操作指南-v1.0.md)
 - [对话及上下文使用说明](../guides/AGENT_DIALOGUE_AND_CONTEXT.md)
 - [受控样本映射接入指南](../development/SEMANTIC_DATA_CONTRACT_GUIDE.md)
 - [智脑能力范围](ZHINAO_CAPABILITY_SCOPE.md)、[生产待办](../operations/PRODUCTION_TODO_CHECKLIST.md)
 
 代码核对入口：[运营任务服务](../../backend/src/services/semantic-operations-task-service.js)、[结构化字典提取](../../backend/src/services/semantic-schema-discovery-service.js)、[自然语言候选提取](../../backend/src/services/semantic-natural-schema-service.js)、[可视化工作台](../../apps/semantic-operations-console/src/components/SemanticAgentWorkspace.vue)。
+
+## 流程语义中心增量（2026-10-08）
+
+元域智语端已增加独立“流程语义”模块，可用 Mock 或受控适配网关读取请假、入职和采购流程的定义、节点、条件、表单字段、运行实例及有界流转记录。模拟更新会发现采购 v4 和供应商准入新流程，生成结构 Diff 并停在候选区；同步权限不能发布，发布权限必须明确批准。页面可查看流程图、字段到世界模型的映射、运行实例、流转时间线、来源版本和事件收件箱状态；具备权限的管理员可把死信重新入队，但不能直接篡改流程事实。
+
+开发闭环已包含规范化/钉钉网关/OA-BPM 网关三种响应档案、静态 Bearer 或 OAuth Client Credentials、定义/实例分页、签名通知、防重放、租户队列、Worker 重试与死信，以及主体/角色字段裁剪。这不等于已经连接某家企业的真实钉钉审批：企业应用授权、官方 API 字段映射、真实回调网络、组织范围和压测仍需在目标企业环境验收。

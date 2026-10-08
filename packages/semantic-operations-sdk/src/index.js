@@ -126,6 +126,12 @@ export function createSemanticOperationsClient({ baseUrl, platform = 'semantic-w
     systemMonitoring: () => request('/semantic-operations/system-monitoring'),
     controlSystemMonitoring: (code, action) => post(`/semantic-operations/system-monitoring/${encodeURIComponent(code)}/${encodeURIComponent(action)}`),
     runSystemMonitoring: (payload = {}) => post('/semantic-operations/system-monitoring/run', payload),
+    workflowOverview: () => request('/semantic-operations/workflows'),
+    workflowDefinition: (code) => request(`/semantic-operations/workflows/${encodeURIComponent(code)}`),
+    syncWorkflows: (payload = {}) => post('/semantic-operations/workflows/sync', payload),
+    reviewWorkflowVersion: (code, version, action) => post(`/semantic-operations/workflows/${encodeURIComponent(code)}/versions/${encodeURIComponent(version)}/review`, { action }),
+    replayWorkflowEvent: (eventId) => post(`/semantic-operations/workflows/events/${encodeURIComponent(eventId)}/replay`),
+    workflowContext: (query) => request(`/agent/workflow-context?${new URLSearchParams({ query })}`),
     // ── 建模来源范围（阶段 3：范围必须是显式选择） ─────────────────────────────
     // scope=all_registered 是**显式**请求「全部已登记系统」，用于系统多选面板列清单；
     // 不是「没给范围就默认全量」——该回落行为已删除（selectionSource 会如实标注范围来源）。

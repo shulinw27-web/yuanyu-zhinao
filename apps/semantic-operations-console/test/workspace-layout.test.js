@@ -258,3 +258,30 @@ test('系统接入：物料补充、可审阅系统理解与监控控制必须�
   assert.match(accessSource, /client\.controlSystemMonitoring\(code, action\)/);
   assert.ok(!/selectedMonitoring\.value\.paused\s*=/.test(accessSource), '监控暂停状态不得由浏览器本地改写');
 });
+
+test('流程语义中心：流程图、变更校对和只读边界必须在独立模块可见', async () => {
+  const appSource = await readFile(new URL('../src/App.vue', import.meta.url), 'utf8');
+  const workflowSource = await readFile(new URL('../src/components/WorkflowSemanticCenter.vue', import.meta.url), 'utf8');
+  assert.match(appSource, /activeView === 'workflows'/);
+  assert.match(appSource, />流程语义</);
+  assert.match(appSource, /<WorkflowSemanticCenter/);
+  assert.match(appSource, /:can-replay="buttonPermissionIds\.includes\('event\.outbox\.replay'\)"/);
+  assert.match(workflowSource, />流程语义中心</);
+  assert.match(workflowSource, /结构事实由连接器确定性解析/);
+  assert.match(workflowSource, /不会自动提交、审批或撤回/);
+  assert.match(workflowSource, /client\.syncWorkflows\(mode === 'configured' \? \{ mode \} : \{ scenario \}\)/);
+  assert.match(workflowSource, />同步已配置连接器</);
+  assert.match(workflowSource, /client\.reviewWorkflowVersion\(selectedCode\.value, latest\.value\.version, action\)/);
+  assert.match(workflowSource, /当前 v\{\{ detail\.activeVersion \}\} 仍为智脑生效版本/);
+  assert.match(workflowSource, /latest\.diff\?\.changes/);
+  assert.match(workflowSource, /latest\.nodes/);
+  assert.match(workflowSource, /latest\.fields/);
+  assert.match(workflowSource, /detail\.instances/);
+  assert.match(workflowSource, /instance\.timeline\?\.length/);
+  assert.match(workflowSource, /查看 \{\{ instance\.timeline\.length \}\} 条流转记录/);
+  assert.match(workflowSource, /runtime-timeline/);
+  assert.match(workflowSource, /overview\?\.webhookInbox\?\.deadLetter/);
+  assert.match(workflowSource, /client\.replayWorkflowEvent\(eventId\)/);
+  assert.match(workflowSource, /签名通知只触发重新拉取/);
+  assert.match(workflowSource, /@media\(max-width:900px\)/);
+});
