@@ -293,9 +293,12 @@ const publicProposal = (proposal) => proposal && ({
   identityLinkConfirmationReport: proposal.identityLinkConfirmationReport || null
 });
 
-const publicSnapshot = (snapshot) => snapshot && ({
-  id: snapshot.id, proposalId: snapshot.proposalId, createdAt: snapshot.createdAt, status: snapshot.status,
-  rolledBackAt: snapshot.rolledBackAt || null, summary: snapshot.diff.summary, diff: snapshot.diff, rollbackAllowed: snapshot.status === 'active'
+const publicSnapshot = (snapshot, currentFingerprint = null) => snapshot && ({
+  id: snapshot.id, proposalId: snapshot.proposalId || null, sourceType: snapshot.sourceType || 'agent_adoption', createdAt: snapshot.createdAt, status: snapshot.status,
+  createdBySubjectId: snapshot.createdBySubjectId || null, createdByRoleId: snapshot.createdByRoleId || null,
+  rolledBackAt: snapshot.rolledBackAt || null, rolledBackBySubjectId: snapshot.rolledBackBySubjectId || null, rolledBackByRoleId: snapshot.rolledBackByRoleId || snapshot.rolledBackBy || null,
+  summary: snapshot.diff.summary, diff: snapshot.diff,
+  rollbackAllowed: snapshot.status === 'active' && currentFingerprint !== null && currentFingerprint === snapshot.afterFingerprint
 });
 
 /**
@@ -928,7 +931,42 @@ export async function createSemanticOperationsProposalFromRequest({ body, role, 
 
 export function listSemanticOperationsSnapshots({ identityScope }) {
   assertSemanticTenant(identityScope);
-  return mapMaybe(readSemanticGovernanceState(SNAPSHOT_NAMESPACE, 'index', {}), (index) => Object.values(index).filter((snapshot) => semanticOperationsOwnerMatches(snapshot.owner, identityScope)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(publicSnapshot));
+  return mapMaybe(readSemanticGovernanceState(SNAPSHOT_NAMESPACE, 'index', {}), (index) => mapMaybe(getOAMetaModelDraft(), (draft) => {
+    const currentFingerprint = semanticFingerprint(draft);
+    return Object.values(index).filter((snapshot) => semanticOperationsOwnerMatches(snapshot.owner, identityScope))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((snapshot) => publicSnapshot(snapshot, currentFingerprint));
+  }));
+}
+
+export function saveSemanticOperationsDraft({ input, role, identityScope }) {
+  assertSemanticTenant(identityScope);
+  return mutateSemanticGovernanceStates([
+    getOAMetaModelRuntimeTransactionEntry(),
+    { name: 'snapshots', namespace: SNAPSHOT_NAMESPACE, key: 'index', initialValue: {} }
+  ], ({ oaRuntime, snapshots }) => {
+    const before = getOAMetaModelDraftFromRuntime(oaRuntime);
+    const change = buildOAMetaModelDraftRuntimeChange(oaRuntime, input, role, { action: '手动保存语义模型草稿' });
+    if (change.error) return { commit: false, result: change };
+    const after = change.result.draft;
+    const beforeFingerprint = semanticFingerprint(before);
+    const afterFingerprint = semanticFingerprint(after);
+    let savedSnapshot = null;
+    if (beforeFingerprint !== afterFingerprint) {
+      const createdAt = now();
+      const owner = semanticOperationsPrincipalKey(identityScope);
+      const id = `semantic-snapshot-${createHash('sha256').update(JSON.stringify([owner, beforeFingerprint, afterFingerprint, createdAt, Math.random()])).digest('hex').slice(0, 16)}`;
+      savedSnapshot = {
+        id, owner, sourceType: 'manual_save', proposalId: null, createdAt, status: 'active',
+        createdBySubjectId: identityScope.subjectId || null, createdByRoleId: role.id,
+        before: clone(before), after: clone(after), afterFingerprint, diff: buildDiff(before, after, 'replace')
+      };
+      snapshots[id] = savedSnapshot;
+    }
+    return {
+      values: { oaRuntime: change.runtime, snapshots },
+      result: { ...change.result, ...(savedSnapshot ? { snapshot: publicSnapshot(savedSnapshot, afterFingerprint) } : {}) }
+    };
+  });
 }
 
 export function applySemanticOperationsProposal({ proposalId, role, identityScope, accessContext }) {
@@ -993,13 +1031,14 @@ export function applySemanticOperationsProposal({ proposalId, role, identityScop
     if (change.error) return { commit: false, result: { error: change.error } };
     const snapshot = {
       id: `semantic-snapshot-${createHash('sha256').update(`${proposal.id}:${now()}`).digest('hex').slice(0, 16)}`,
-      owner: proposal.owner, proposalId: proposal.id, createdAt: now(), status: 'active', before: clone(transactionBase), after: clone(change.result.draft), afterFingerprint: semanticFingerprint(change.result.draft), diff: proposal.diff
+      owner: semanticOperationsPrincipalKey(identityScope), sourceType: 'agent_adoption', createdBySubjectId: identityScope.subjectId || null, createdByRoleId: role.id,
+      proposalId: proposal.id, createdAt: now(), status: 'active', before: clone(transactionBase), after: clone(change.result.draft), afterFingerprint: semanticFingerprint(change.result.draft), diff: proposal.diff
     };
     values.snapshots[snapshot.id] = snapshot;
     storedProposal.status = 'applied_to_draft'; storedProposal.appliedAt = now(); storedProposal.appliedBy = role.id; storedProposal.snapshotId = snapshot.id;
     return {
       values: { ...values, oaRuntime: change.runtime, proposal: storedProposal },
-      result: { proposal: publicProposal(storedProposal), snapshot: publicSnapshot(snapshot), draft: change.result.draft, message: `已${replacing ? '替换当前草稿为' : '合并到当前草稿：'} ${storedProposal.draft.objectTypes.length} 个对象和 ${storedProposal.draft.relationshipTypes.length} 条关系，并保存可回滚快照；尚未校验或登记。` }
+      result: { proposal: publicProposal(storedProposal), snapshot: publicSnapshot(snapshot, snapshot.afterFingerprint), draft: change.result.draft, message: `已${replacing ? '替换当前草稿为' : '合并到当前草稿：'} ${storedProposal.draft.objectTypes.length} 个对象和 ${storedProposal.draft.relationshipTypes.length} 条关系，并保存可回滚快照；尚未校验或登记。` }
     };
   });
   }));
@@ -1021,8 +1060,8 @@ export function rollbackSemanticOperationsSnapshot({ snapshotId, role, identityS
       detail: `已恢复到提案 ${snapshot.proposalId} 采纳前的草稿。`
     });
     if (change.error) return { commit: false, result: { error: change.error } };
-    snapshot.status = 'rolled_back'; snapshot.rolledBackAt = now(); snapshot.rolledBackBy = role.id;
+    snapshot.status = 'rolled_back'; snapshot.rolledBackAt = now(); snapshot.rolledBackByRoleId = role.id; snapshot.rolledBackBySubjectId = identityScope.subjectId || null;
     values.snapshots[snapshot.id] = snapshot;
-    return { values: { ...values, oaRuntime: change.runtime }, result: { snapshot: publicSnapshot(snapshot), draft: change.result.draft, message: `已回滚到采纳“${snapshot.proposalId}”前的语义层草稿版本；未影响已发布版本。` } };
+    return { values: { ...values, oaRuntime: change.runtime }, result: { snapshot: publicSnapshot(snapshot, semanticFingerprint(change.result.draft)), draft: change.result.draft, message: `已回滚到采纳“${snapshot.proposalId}”前的语义层草稿版本；未影响已发布版本。` } };
   });
 }

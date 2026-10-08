@@ -52,7 +52,7 @@ import {
   getOntologyCaseReplay,
   publishWorldModelDraft,
   retrieveEnterpriseKnowledge,
-  saveOAMetaModelDraft,
+  saveSemanticOperationsDraft,
   semanticFingerprint,
   simulateBuildOAMetaModel,
   validateSemanticaModelDefinition,
@@ -361,8 +361,7 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
     return true;
   }
   if (req.method === 'GET' && url.pathname === '/api/semantic-operations/snapshots') {
-    const actionRole = selectActionRole('meta_model.draft.save');
-    if (!actionRole) { denyButton('meta_model.draft.save'); return true; }
+    if (!canReadWorldModel) { denyButton('page.semantic-operations.view'); return true; }
     send(res, 200, { snapshots: await listSemanticOperationsSnapshots({ identityScope: agentIdentity }) });
     return true;
   }
@@ -395,7 +394,7 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
   if (req.method === 'POST' && url.pathname === '/api/meta-models/oa-governance/draft') {
     const actionRole = selectActionRole('meta_model.draft.save');
     if (!actionRole) { denyButton('meta_model.draft.save'); return true; }
-    const result = await saveOAMetaModelDraft(await readBody(req), actionRole);
+    const result = await saveSemanticOperationsDraft({ input: await readBody(req), role: actionRole, identityScope: agentIdentity });
     send(res, result.error ? 403 : 200, result);
     return true;
   }

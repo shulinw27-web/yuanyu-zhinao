@@ -19,6 +19,16 @@ const pendingNavigation = ref(null);
 const dirty = computed(() => draft.value && JSON.stringify(draft.value) !== baselineDraft.value);
 const changed = computed(() => draft.value && draft.value.text !== baseline.value);
 const activeCount = computed(() => documents.value.filter(item => item.available).length);
+const knowledgeGroups = computed(() => {
+  const groups = new Map();
+  for (const item of documents.value) {
+    const key = item.source?.trim() || '来源未填写';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+  return [...groups.entries()].map(([sourceName, items]) => ({ sourceName, items }));
+});
+const view = ref('map');
 const selectedProvider = ref('local_private_library');
 const isNew = computed(() => draft.value?.expectedRevision === 0);
 function acceptReviewedMaterial(material) {
@@ -55,6 +65,11 @@ function newDocument() {
   draft.value = { id: `doc-${globalThis.crypto.randomUUID()}`, expectedRevision: 0, title: '', source: '手动提供', sourceVersion: 'v1', kind: 'reference', text: '', effectiveFrom: null, effectiveUntil: null };
   baseline.value = ''; baselineDraft.value = JSON.stringify(draft.value); chunks.value = []; source.value = null;
 }
+function startNewDocument() {
+  if (dirty.value) { pendingNavigation.value = { type: 'new' }; return; }
+  view.value = 'manage';
+  newDocument();
+}
 function openDocument(item) {
   if (dirty.value) { pendingNavigation.value = { type: 'open', item }; return; }
   return run(async ticket => {
@@ -63,12 +78,13 @@ function openDocument(item) {
   draft.value = { id: result.id, expectedRevision: result.revision, title: result.title, source: result.source, sourceVersion: result.sourceVersion,
     kind: result.kind, text: result.text, effectiveFrom: result.effectiveFrom, effectiveUntil: result.effectiveUntil };
   baseline.value = result.text; baselineDraft.value = JSON.stringify(draft.value); chunks.value = result.chunks; source.value = null;
+  view.value = 'manage';
   });
 }
 function discardAndContinue() {
   const target = pendingNavigation.value;
   pendingNavigation.value = null; draft.value = null; baselineDraft.value = '';
-  if (target?.type === 'new') newDocument();
+  if (target?.type === 'new') { view.value = 'manage'; newDocument(); }
   if (target?.type === 'open') openDocument(target.item);
 }
 const preview = () => run(async ticket => {
@@ -122,21 +138,29 @@ onUnmounted(() => { generation++; });
 <template>
   <section class="knowledge-panel" aria-label="个人知识资料工作区" :aria-busy="busy">
     <section v-if="pendingNavigation" class="knowledge-withdrawal" aria-label="未保存修改确认"><h3>当前资料有未保存修改</h3><p>保存后再切换，或明确放弃本次编辑。</p><button @click="pendingNavigation = null">继续编辑</button><button @click="discardAndContinue">放弃修改并切换</button></section>
-    <header><div><h2>知识资料</h2><p>管理当前身份的资料，核对原文和引用。不会自动发布制度或写入长期记忆。</p></div><button :disabled="busy" @click="reload">刷新目录</button></header>
+    <header class="knowledge-heading"><div><h2>知识资料地图</h2><p>先看资料来自哪里、彼此如何归类；需要时再打开原文、查证或编辑。</p></div><div class="knowledge-heading-actions"><span>{{ activeCount }} 份可用 · 共 {{ documents.length }} 份</span><button :disabled="busy" @click="reload">刷新</button></div></header>
     <p v-if="error" role="alert" class="knowledge-error">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
     <slot />
-    <KnowledgeMaterialReviewPanel :client="client" :can-write="canEdit" @reviewed-material="acceptReviewedMaterial" />
-    <KnowledgeStudyPanel :client="client" :evidence="answer?.evidence || []" :generated="generatedWiki" :can-write="canEdit" :can-model="canModel && canEdit" @model-candidate="emit('model-candidate', $event)" />
-    <label>检索来源<select v-model="selectedProvider" :disabled="busy" @change="answer = null; source = null"><option value="local_private_library">本人资料 · 词法检索</option><option value="weknora_local" :disabled="!providers.find(item => item.provider === 'weknora_local')?.configured">WeKnora · 服务端授权资料</option></select></label>
-    <div class="knowledge-status"><span>{{ activeCount }} 份可用 / {{ documents.length }} 份资料</span><span v-for="provider in providers" :key="provider.provider">{{ provider.provider === 'local_private_library' ? '本地词法检索' : 'WeKnora 项目接入' }}：{{ provider.configured ? '已配置' : '未配置' }}</span></div>
-    <details><summary>管理员接入诊断</summary><p>当前身份绑定指纹（不是密钥，也不授予权限）：</p><pre>{{ principalKey }}</pre><p>由管理员将此指纹映射至允许访问的 WeKnora 库和文档；不能按显示名称猜测身份，也不能把方舟密钥填入 WeKnora 配置。</p></details>
-    <form class="knowledge-search" @submit.prevent="search"><label>查询资料<input v-model="query" maxlength="4000" placeholder="例如：供应商资质过期如何处理？" required :disabled="busy" /></label><button :disabled="busy || !query.trim()">查找原文依据</button></form>
-    <section v-if="answer" class="knowledge-results" aria-label="检索依据"><p>{{ answer.message }}</p><article v-for="item in answer.evidence" :key="item.citation.chunkId"><h3>{{ item.title }}</h3><small>{{ item.source }} · {{ item.sourceVersion }} · 修订 {{ item.revision }}</small><pre>{{ item.excerpt }}</pre><button :disabled="busy" @click="openCitation(item.citation)">重新核验并打开引用</button></article></section>
-    <KnowledgeConversationPanel :client="client" :evidence="answer?.evidence || []" :policy="answerPolicy" :can-write="canEdit" @wiki-draft="generatedWiki = $event" />
-    <KnowledgeBusinessBriefPanel :client="client" :evidence="answer?.evidence || []" :can-write="canEdit" />
-    <section v-if="source" class="knowledge-source" aria-label="已核验原文"><h3>{{ source.title }} · 当前有效引用</h3><small v-if="source.provider === 'local_private_library'">{{ source.citation.start }}–{{ source.citation.end }} UTF-16 字符偏移（不是 PDF 页码）</small><small v-else>WeKnora 分块定位 · {{ source.citation.chunkId }}（不代表 PDF 页码）</small><pre>{{ source.excerpt }}</pre></section>
-    <div class="knowledge-columns">
-      <aside><div class="knowledge-toolbar"><h3>资料目录</h3><button v-if="canEdit" :disabled="busy" @click="newDocument">＋ 新建</button></div><p v-if="!documents.length">尚无资料。保存后才能检索，不会自动使用其他用户的资料。</p>
+    <nav class="knowledge-nav" aria-label="知识资料操作"><button :aria-pressed="view === 'map'" @click="view = 'map'">知识地图</button><button :aria-pressed="view === 'search'" @click="view = 'search'">查找依据</button><button :aria-pressed="view === 'manage'" @click="view = 'manage'">资料管理</button><button v-if="canEdit" class="knowledge-primary" :disabled="busy" @click="startNewDocument">＋ 添加资料</button></nav>
+    <section v-if="view === 'map'" class="knowledge-map-view" aria-label="资料关联地图">
+      <div class="knowledge-map-intro"><b>资料从哪里来？</b><span>按来源归在一起，点击资料可查看原文。</span><small>当前连线只表示“同一来源”，不是 AI 已确认的业务关系。业务对象关系需要经过语义建模和人工审核后才能成立。</small></div>
+      <div v-if="knowledgeGroups.length" class="knowledge-map">
+        <article v-for="group in knowledgeGroups" :key="group.sourceName" class="knowledge-source-group">
+          <div class="knowledge-source-node"><i/>来源 <b>{{ group.sourceName }}</b><small>{{ group.items.length }} 份资料</small></div>
+          <div class="knowledge-source-links" aria-hidden="true"><i v-for="item in group.items" :key="`line-${item.id}`"/></div>
+          <div class="knowledge-map-documents"><button v-for="item in group.items" :key="item.id" class="knowledge-map-document" :disabled="busy || !item.available" :aria-label="`打开${item.title}`" @click="openDocument(item)"><b>{{ item.title }}</b><span>{{ item.kind === 'policy' ? '制度参考' : '参考资料' }} · 修订 {{ item.revision }}</span><small>{{ item.available ? '可查证' : item.status === 'retracted' ? '已撤回' : '暂不可用' }} · {{ item.chunkCount }} 个内容片段</small></button></div>
+        </article>
+      </div>
+      <div v-else class="knowledge-map-empty"><div class="knowledge-empty-icon">＋</div><h3>还没有知识资料</h3><p>添加一份制度、流程说明或数据字典，知识地图就会按资料来源整理出来。</p><button v-if="canEdit" class="knowledge-primary" @click="startNewDocument">添加第一份资料</button><small>资料仅在当前身份和权限范围内使用。</small></div>
+    </section>
+    <section v-else-if="view === 'search'" class="knowledge-search-view" aria-label="查找知识资料"><div class="knowledge-section-title"><h3>你想查什么？</h3><p>回答会附上原文依据，可打开引用重新核对。</p></div>
+      <label class="knowledge-provider">使用资料范围<select v-model="selectedProvider" :disabled="busy" @change="answer = null; source = null"><option value="local_private_library">本人资料</option><option value="weknora_local" :disabled="!providers.find(item => item.provider === 'weknora_local')?.configured">已授权的 WeKnora 资料</option></select></label>
+      <form class="knowledge-search" @submit.prevent="search"><label>问题<input v-model="query" maxlength="4000" placeholder="例如：供应商资质过期要怎么处理？" required :disabled="busy" /></label><button class="knowledge-primary" :disabled="busy || !query.trim()">查找原文依据</button></form>
+      <section v-if="answer" class="knowledge-results" aria-label="检索依据"><p>{{ answer.message }}</p><article v-for="item in answer.evidence" :key="item.citation.chunkId"><h3>{{ item.title }}</h3><small>{{ item.source }} · {{ item.sourceVersion }} · 修订 {{ item.revision }}</small><pre>{{ item.excerpt }}</pre><button :disabled="busy" @click="openCitation(item.citation)">重新核验原文</button></article></section>
+      <section v-if="source" class="knowledge-source" aria-label="已核验原文"><h3>{{ source.title }} · 已核验引用</h3><small v-if="source.provider === 'local_private_library'">原文字符位置 {{ source.citation.start }}–{{ source.citation.end }}</small><small v-else>WeKnora 内容片段 {{ source.citation.chunkId }}</small><pre>{{ source.excerpt }}</pre></section>
+    </section>
+    <div v-else class="knowledge-columns">
+      <aside><div class="knowledge-toolbar"><h3>我的资料</h3><span>{{ documents.length }} 份</span></div><p v-if="!documents.length">尚无资料。保存后才能检索，不会自动使用其他用户的资料。</p>
         <article v-for="item in documents" :key="item.id" class="knowledge-card"><b>{{ item.title }}</b><small>修订 {{ item.revision }} · {{ item.available ? '当前可用' : item.status === 'retracted' ? '已撤回' : '不在有效期' }} · {{ item.chunkCount }} 个片段</small><small>{{ item.source }} / {{ item.sourceVersion }}</small><div><button :disabled="busy || !item.available" @click="openDocument(item)">打开 / 校对</button><button v-if="canWrite && item.status !== 'retracted'" :disabled="busy" @click="withdrawal = item; phrase = ''">撤回</button></div></article>
       </aside>
       <section class="knowledge-editor"><template v-if="draft"><div class="knowledge-toolbar"><h3>{{ isNew ? '新建资料（未保存）' : `校对修订 ${draft.expectedRevision}` }}</h3><span>{{ changed ? '正文有未保存修改' : '正文未修改' }}</span></div>
@@ -148,10 +172,19 @@ onUnmounted(() => { generation++; });
         <section aria-label="分块预览"><article v-for="chunk in chunks" :key="chunk.index" class="knowledge-chunk"><small>片段 {{ chunk.index + 1 }} · 字符 {{ chunk.start }}–{{ chunk.end }}</small><pre>{{ chunk.text }}</pre></article></section>
       </template><p v-else>选择资料进行校对，或新建资料。身份、访问范围和修订号由服务端控制。</p></section>
     </div>
+    <details class="knowledge-advanced"><summary>高级工具：导入、主题整理与联合核验</summary><p>日常查看资料不需要使用这些功能。它们用于多模态材料校对、整理主题草稿或执行授权检索。</p>
+      <KnowledgeMaterialReviewPanel :client="client" :can-write="canEdit" @reviewed-material="acceptReviewedMaterial" />
+      <KnowledgeStudyPanel :client="client" :evidence="answer?.evidence || []" :generated="generatedWiki" :can-write="canEdit" :can-model="canModel && canEdit" @model-candidate="emit('model-candidate', $event)" />
+      <KnowledgeConversationPanel :client="client" :evidence="answer?.evidence || []" :policy="answerPolicy" :can-write="canEdit" @wiki-draft="generatedWiki = $event" />
+      <KnowledgeBusinessBriefPanel :client="client" :evidence="answer?.evidence || []" :can-write="canEdit" />
+      <div class="knowledge-status"><span v-for="provider in providers" :key="provider.provider">{{ provider.provider === 'local_private_library' ? '本人资料检索' : 'WeKnora 授权库' }}：{{ provider.configured ? '已配置' : '未配置' }}</span></div>
+      <details><summary>管理员接入诊断</summary><p>身份绑定指纹（不是密钥，也不授予权限）：</p><pre>{{ principalKey }}</pre><p>管理员将此身份映射至允许访问的 WeKnora 库和文档；不能按显示名称猜测身份，也不能把方舟密钥填入 WeKnora 配置。</p></details>
+    </details>
     <section v-if="withdrawal" class="knowledge-withdrawal" role="group" aria-label="撤回确认"><h3>撤回《{{ withdrawal.title }}》？</h3><p>停止检索和引用读取，历史仍保留。不会删除电脑上的源文件。</p><label>输入“确认撤回”<input v-model="phrase" :disabled="busy" /></label><button :disabled="busy" @click="withdrawal = null">取消</button><button :disabled="busy || phrase !== '确认撤回'" @click="retract">确认撤回</button></section>
   </section>
 </template>
 
 <style scoped>
 .knowledge-panel{padding:20px;min-width:0;color:inherit;overflow:auto;flex:1}.knowledge-panel header,.knowledge-toolbar,.knowledge-search,.knowledge-status{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}.knowledge-panel h2,.knowledge-panel h3{margin:0 0 10px}.knowledge-panel p,.knowledge-panel small{line-height:1.7;opacity:.8}.knowledge-panel button,.knowledge-panel input,.knowledge-panel select,.knowledge-panel textarea{font:inherit;color:inherit;background:#102832;border:1px solid #46616c;border-radius:7px;padding:10px;min-height:40px}.knowledge-panel button{cursor:pointer}.knowledge-panel button:disabled{opacity:.45;cursor:not-allowed}.knowledge-panel button:focus-visible,.knowledge-panel input:focus-visible,.knowledge-panel textarea:focus-visible{outline:2px solid #57dbc4;outline-offset:2px}.knowledge-panel label{display:flex;flex-direction:column;gap:7px;min-width:0}.knowledge-panel textarea{resize:vertical;width:100%;box-sizing:border-box}.knowledge-status{justify-content:flex-start;margin:14px 0;font-size:12px}.knowledge-status span{border:1px solid #46616c;padding:6px 10px;border-radius:20px}.knowledge-search label{flex:1}.knowledge-search{margin:20px 0}.knowledge-columns{display:grid;grid-template-columns:minmax(200px,28%) minmax(0,1fr);gap:18px}.knowledge-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}.knowledge-card,.knowledge-chunk,.knowledge-results article,.knowledge-source,.knowledge-withdrawal{border:1px solid #46616c;border-radius:9px;padding:14px;margin:12px 0;background:#0d212b}.knowledge-card b,.knowledge-card small{display:block;overflow-wrap:anywhere}.knowledge-card button{margin:9px 6px 0 0}.knowledge-panel pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.75;max-height:420px;overflow:auto}.knowledge-error{color:#ffb0a6}.knowledge-editor,.knowledge-columns aside{min-width:0}.knowledge-file{margin:12px 0}.knowledge-toolbar{margin:12px 0}.knowledge-withdrawal{border-color:#b58e51}.knowledge-withdrawal input{max-width:320px;margin-bottom:12px}@media(max-width:850px){.knowledge-columns,.knowledge-fields{grid-template-columns:1fr}.knowledge-panel{padding:12px}.knowledge-columns aside{max-height:320px;overflow:auto}.knowledge-search{align-items:stretch}.knowledge-search label{flex-basis:100%}}
+.knowledge-heading{align-items:flex-start!important}.knowledge-heading-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.knowledge-heading-actions>span{color:#77d8c4;font-size:12px}.knowledge-nav{display:flex;align-items:center;gap:8px;margin:18px 0;padding-bottom:12px;border-bottom:1px solid #294652}.knowledge-nav button{background:transparent;border-color:transparent;color:#9ebbc4}.knowledge-nav button[aria-pressed="true"]{color:#e6f7f4;background:#12343c;border-color:#2d766f}.knowledge-nav .knowledge-primary,.knowledge-primary{background:#1a7568;border-color:#3ba995;color:#f2fffb}.knowledge-map-intro,.knowledge-map-empty{padding:18px;border:1px solid #294c59;border-radius:12px;background:linear-gradient(130deg,#102d39,#0b202b)}.knowledge-map-intro{display:grid;gap:6px}.knowledge-map-intro>b{font-size:16px;color:#d9f0ed}.knowledge-map-intro>span{color:#b3ccd2}.knowledge-map-intro>small{margin-top:4px;color:#83a6b0}.knowledge-map{display:grid;gap:12px;margin-top:14px}.knowledge-source-group{display:grid;grid-template-columns:minmax(160px,220px) 26px minmax(0,1fr);align-items:stretch;gap:0;padding:12px;border:1px solid #244552;border-radius:11px;background:#0a1d27}.knowledge-source-node{display:flex;flex-direction:column;justify-content:center;gap:6px;padding:14px;border:1px solid #316372;border-radius:9px;background:#0e2c38}.knowledge-source-node i{width:9px;height:9px;border-radius:50%;background:#55d3b3;box-shadow:0 0 12px #55d3b355}.knowledge-source-node>b{overflow-wrap:anywhere;color:#e1f4f1}.knowledge-source-node>small{color:#82aab4}.knowledge-source-links{display:flex;flex-direction:column;justify-content:space-evenly;align-items:stretch;padding:20px 0}.knowledge-source-links i{height:1px;background:linear-gradient(90deg,#3b857d,#2b5867)}.knowledge-map-documents{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:9px;min-width:0}.knowledge-map-document{display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:7px;min-width:0;padding:13px!important;border-color:#315362!important;background:#102832!important}.knowledge-map-document>b{color:#dceff0;overflow-wrap:anywhere}.knowledge-map-document>span{color:#6ad1bb;font-size:11px}.knowledge-map-document>small{color:#91aeb8}.knowledge-map-empty{display:grid;justify-items:center;text-align:center;padding:40px 20px;margin-top:14px}.knowledge-empty-icon{display:grid;place-items:center;width:44px;height:44px;border-radius:50%;color:#85e3cf;background:#12473f;font-size:24px}.knowledge-map-empty h3{margin:14px 0 0}.knowledge-map-empty p{max-width:460px}.knowledge-map-empty>small{margin-top:10px;color:#84a6af}.knowledge-search-view{max-width:900px;padding:12px 0}.knowledge-section-title{margin-bottom:18px}.knowledge-section-title h3{font-size:20px}.knowledge-provider{max-width:360px}.knowledge-advanced{margin-top:24px;border:1px solid #294652;border-radius:10px;padding:14px;background:#091b24}.knowledge-advanced>summary{color:#a9c4ca;cursor:pointer;font-weight:650}.knowledge-advanced>p{color:#86a7b0}.knowledge-advanced[open]{padding:18px}.knowledge-advanced details{margin:12px 0}.knowledge-advanced details pre{overflow-wrap:anywhere}@media(max-width:700px){.knowledge-heading{align-items:stretch!important}.knowledge-heading-actions{justify-content:space-between}.knowledge-nav{overflow-x:auto}.knowledge-nav button{white-space:nowrap}.knowledge-source-group{grid-template-columns:1fr;gap:8px}.knowledge-source-links{padding:0 20px;min-height:16px}.knowledge-source-links i{height:16px;width:1px;justify-self:start;background:linear-gradient(#3b857d,#2b5867)}.knowledge-map-documents{grid-template-columns:1fr}.knowledge-map-document{width:100%}}
 </style>

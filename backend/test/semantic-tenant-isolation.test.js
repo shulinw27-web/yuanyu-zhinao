@@ -26,8 +26,26 @@ async function draftRequest(tenant, method, body) {
   assert.equal(response.status, 200); return response.value;
 }
 
+async function snapshotsRequest(tenant, { pagePermissionIds = ['page.semantic-operations.view'], buttonPermissionIds = [] } = {}) {
+  let response;
+  const allowed = buttonPermissionIds.includes('meta_model.draft.save');
+  await handleGovernanceRoutes({ req: { method: 'GET' }, res: {}, url: new URL('http://test/api/semantic-operations/snapshots'), role: 'executive',
+    agentIdentity: identity(tenant), effectiveAccess: { pagePermissionIds, buttonPermissionIds },
+    selectActionRole: permissionId => permissionId === 'meta_model.draft.save' && allowed ? role : null,
+    denyButton: permissionId => { response = { status: 403, value: { denied: permissionId } }; },
+    send: (_res, status, value) => { response = { status, value }; } });
+  return response;
+}
+
 test('tenant model: real routes isolate manual drafts and ignore body tenant IDs', async () => {
   await draftRequest('company-a', 'POST', { policies: ['A_ONLY'], tenantId: 'company-b' });
+  const history = await snapshotsRequest('company-a');
+  assert.equal(history.status, 200);
+  assert.equal(history.value.snapshots.length, 1);
+  assert.equal(history.value.snapshots[0].sourceType, 'manual_save');
+  assert.equal(history.value.snapshots[0].rollbackAllowed, true);
+  assert.equal((await snapshotsRequest('company-a', { pagePermissionIds: [] })).status, 403);
+  assert.deepEqual((await snapshotsRequest('company-b')).value.snapshots, []);
   assert.ok((await draftRequest('company-a', 'GET')).policies.includes('A_ONLY'));
   assert.ok(!(await draftRequest('company-b', 'GET')).policies.includes('A_ONLY'));
   await draftRequest('company-b', 'POST', { policies: ['B_ONLY'] });

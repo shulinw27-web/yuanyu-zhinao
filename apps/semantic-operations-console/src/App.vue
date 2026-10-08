@@ -50,7 +50,7 @@ const model = computed(() => metaModels.value[0] || null);
 const semanticaStatus = computed(() => profile.value?.semanticDeployment?.status || profile.value?.semanticDiscovery?.status || '等待连接');
 const deploymentDrift = computed(() => profile.value?.semanticDeployment?.drift || 'unknown');
 const deploymentDriftLabel = computed(() => ({ in_sync: '草稿与部署一致', draft_ahead: '草稿有未发布变更', not_published: '尚未发布', unknown: '状态未知' })[deploymentDrift.value]);
-const activeSnapshots = computed(() => snapshots.value.filter((item) => item.status === 'active').length);
+const activeSnapshots = computed(() => snapshots.value.filter((item) => item.rollbackAllowed && canModel.value).length);
 const suggestedPrompts = [
   '分析 ERP 和 WMS，建立采购到入库的语义模型。',
   '根据数据字典识别对象、主键和跨系统关系。',
@@ -84,7 +84,7 @@ async function loadWorkspace({ preserveMessage = false } = {}) {
     access.value = accessValue;
     const [profileValue, draftValue, modelsValue, simulationValue, contextValue, snapshotValue] = await Promise.all([
       client.authoringProfile(), client.draft(), client.metaModels(), client.simulation(), client.semanticContext(),
-      accessValue.buttonPermissionIds.includes('meta_model.draft.save') ? client.snapshots() : Promise.resolve({ snapshots: [] })
+      accessValue.pagePermissionIds.includes('page.semantic-operations.view') ? client.snapshots() : Promise.resolve({ snapshots: [] })
     ]);
     if (generation !== loadGeneration) return;
     access.value = accessValue;
@@ -143,9 +143,17 @@ const publishModel = () => runAction(() => client.publish(), '语义模型版本
 const rollbackSnapshot = async () => {
   if (!rollbackTarget.value || rollbackPhrase.value !== '确认回滚') return;
   const target = rollbackTarget.value;
-  await runAction(() => client.rollbackSnapshot(target.id), `已恢复到快照 ${target.id} 之前的语义草稿。`);
-  rollbackTarget.value = null;
-  rollbackPhrase.value = '';
+  try {
+    const result = await client.rollbackSnapshot(target.id);
+    if (result.error) throw new Error(result.error);
+    message.value = result.message || `已恢复到快照 ${target.id} 之前的语义草稿。`;
+    rollbackTarget.value = null;
+    rollbackPhrase.value = '';
+    await loadWorkspace({ preserveMessage: true });
+  } catch (err) {
+    error.value = err.message || '回滚失败，请刷新快照状态后重试。';
+    await loadWorkspace({ preserveMessage: true });
+  }
 };
 
 async function finishAuthentication(result) {
@@ -198,14 +206,14 @@ onMounted(async () => {
         <button :class="{ active: activeView === 'agent' }" @click="activeView = 'agent'"><span>01</span><div><b>Agent 工作台</b><small>自然语言与多模态建模</small></div></button>
         <button :class="{ active: activeView === 'model' }" @click="activeView = 'model'"><span>02</span><div><b>模型关系图</b><small>查看顶层对象与系统关联</small></div></button>
         <button :class="{ active: activeView === 'versions' }" @click="activeView = 'versions'"><span>03</span><div><b>版本与回滚</b><small>Diff、快照和恢复</small></div></button>
-        <button :class="{ active: activeView === 'knowledge' }" @click="activeView = 'knowledge'"><span>04</span><div><b>知识资料</b><small>原文校对与证据检索</small></div></button>
+        <button :class="{ active: activeView === 'knowledge' }" @click="activeView = 'knowledge'"><span>04</span><div><b>知识资料</b><small>来源地图与原文依据</small></div></button>
       </nav>
       <section class="ops-flow"><span>当前治理流程</span><div v-for="(step, index) in workflow" :key="step.label" :class="step.status"><i>{{ index + 1 }}</i><b>{{ step.label }}</b></div></section>
       <footer><b>执行边界</b><span>Agent只能生成计划和调用受控工具；发布、删除、主键变更仍需显式确认。</span></footer>
     </aside>
 
     <main>
-      <header class="ops-topbar"><div><span>SEMANTIC CONTROL PLANE</span><h1>{{ activeView === 'system-access' ? (accessTab === 'systems' ? '系统接入与生命周期' : '接入材料与场景准备') : activeView === 'workflows' ? '流程语义接入中心' : activeView === 'knowledge' ? '知识资料与来源校对' : activeView === 'agent' ? '元域智语 Agent 工作台' : activeView === 'model' ? '语义模型关系图' : '模型版本与恢复' }}</h1></div><div class="ops-top-actions"><div v-if="!['system-access','workflows'].includes(activeView)" :class="['ops-live', deploymentDrift]"><i/>Semantica · {{ semanticaStatus }} · {{ deploymentDriftLabel }}</div><button v-if="!['system-access','workflows'].includes(activeView)" class="ops-logout" :disabled="refreshingStatus" @click="refreshSemanticStatus">{{ refreshingStatus ? '刷新中…' : '刷新服务状态' }}</button><label>已认证运营身份<strong>{{ currentUser?.name || currentUser?.account }}</strong><small>{{ roles.find(item => item.id === role)?.name || role }} · {{ client.deviceId.slice(-8) }}</small></label><button class="ops-logout" @click="logout">退出</button></div></header>
+      <header class="ops-topbar"><div><span>SEMANTIC CONTROL PLANE</span><h1>{{ activeView === 'system-access' ? (accessTab === 'systems' ? '系统接入与生命周期' : '接入材料与场景准备') : activeView === 'workflows' ? '流程语义接入中心' : activeView === 'knowledge' ? '知识资料地图' : activeView === 'agent' ? '元域智语 Agent 工作台' : activeView === 'model' ? '语义模型关系图' : '模型版本与恢复' }}</h1></div><div class="ops-top-actions"><div v-if="!['system-access','workflows'].includes(activeView)" :class="['ops-live', deploymentDrift]"><i/>Semantica · {{ semanticaStatus }} · {{ deploymentDriftLabel }}</div><button v-if="!['system-access','workflows'].includes(activeView)" class="ops-logout" :disabled="refreshingStatus" @click="refreshSemanticStatus">{{ refreshingStatus ? '刷新中…' : '刷新服务状态' }}</button><label>已认证运营身份<strong>{{ currentUser?.name || currentUser?.account }}</strong><small>{{ roles.find(item => item.id === role)?.name || role }} · {{ client.deviceId.slice(-8) }}</small></label><button class="ops-logout" @click="logout">退出</button></div></header>
 
       <div v-if="error && activeView !== 'system-access'" class="ops-error">{{ error }}<button @click="loadWorkspace">重新加载</button></div>
       <div v-if="message && activeView !== 'system-access'" class="ops-message">{{ message }}</div>
@@ -251,9 +259,24 @@ onMounted(async () => {
 
           <KnowledgeLibraryPanel v-else-if="activeView === 'knowledge'" :client="client.knowledge" :can-write="buttonPermissionIds.includes('meta_model.draft.save')" :can-model="canModel" @model-candidate="prepareKnowledgeModelCandidate" />
           <template v-else>
-            <div class="ops-section-head"><div><span>GOVERNED HISTORY</span><h2>每次Agent采纳都可解释、可比较、可恢复</h2><p>快照绑定创建人和草稿指纹；如果已有后续变更，系统会拒绝覆盖式回滚。</p></div></div>
-            <section class="version-list"><article v-for="snapshot in snapshots" :key="snapshot.id"><div class="version-icon">{{ snapshot.status === 'active' ? 'V' : '↶' }}</div><div class="version-info"><span>{{ snapshot.status === 'active' ? '有效草稿快照' : '已完成回滚' }}</span><b>{{ snapshot.id }}</b><small>{{ snapshot.createdAt }} · 来源 {{ snapshot.proposalId }}</small><details><summary>查看结构差异</summary><p>基础指纹：{{ snapshot.diff?.baseFingerprint }}</p><ul><li v-for="item in snapshot.diff?.objectChanges?.filter(item => item.change !== 'unchanged')" :key="item.id">{{ item.change === 'added' ? '新增' : '更新' }}对象：{{ item.label }}（{{ item.id }}）</li><li v-for="item in snapshot.diff?.relationshipChanges?.filter(item => item.change === 'added')" :key="`${item.from}-${item.predicate}-${item.to}`">新增关系：{{ item.from }} —{{ item.predicate }}→ {{ item.to }}</li></ul></details></div><div class="version-diff"><b>+{{ snapshot.summary.addedObjects }}</b><span>对象</span><b>~{{ snapshot.summary.updatedObjects }}</b><span>更新</span><b>+{{ snapshot.summary.addedRelationships }}</b><span>关系</span><button v-if="snapshot.rollbackAllowed" class="version-rollback" @click="rollbackTarget = snapshot; rollbackPhrase = ''">恢复此快照之前</button></div></article><p v-if="!snapshots.length">当前身份还没有Agent采纳快照。完成一次语义建模任务后，版本记录会出现在这里。</p></section>
-            <section v-if="rollbackTarget" class="rollback-confirm"><span>受控恢复</span><h3>恢复到 {{ rollbackTarget.id }} 之前？</h3><p>这会把当前未发布草稿恢复为采纳该提案之前的内容，不影响已经发布的版本。如果当前草稿已有后续改动，服务器会拒绝覆盖。</p><label>输入“确认回滚”<input v-model="rollbackPhrase" autocomplete="off" /></label><div><button class="outline-button" @click="rollbackTarget = null; rollbackPhrase = ''">取消</button><button class="danger-button" :disabled="rollbackPhrase !== '确认回滚'" @click="rollbackSnapshot">确认恢复草稿</button></div></section>
+            <div class="ops-section-head"><div><span>GOVERNED HISTORY</span><h2>版本记录与草稿回滚</h2><p>共 {{ snapshots.length }} 个快照，不设固定数量上限。仅当前草稿指纹匹配的快照可回滚；回滚只恢复未发布草稿，不撤销已发布模型或业务数据。</p></div></div>
+            <section class="version-list">
+              <article v-for="snapshot in snapshots" :key="snapshot.id" :class="{ 'snapshot-rolled-back': snapshot.status === 'rolled_back', 'snapshot-stale': snapshot.status === 'active' && !snapshot.rollbackAllowed }">
+                <div class="version-icon">{{ snapshot.status === 'rolled_back' ? '↶' : snapshot.rollbackAllowed ? 'V' : '!' }}</div>
+                <div class="version-info">
+                  <span>{{ snapshot.status === 'rolled_back' ? '已完成回滚' : !snapshot.rollbackAllowed ? '历史快照（草稿已继续变更）' : canModel ? '可回滚的当前快照' : '当前版本匹配 · 需草稿保存权限才能回滚' }}</span>
+                  <b>{{ snapshot.id }}</b>
+                  <small>{{ snapshot.sourceType === 'manual_save' ? '草稿保存时间' : '采纳时间' }} {{ snapshot.createdAt }} · {{ snapshot.sourceType === 'manual_save' ? '人工保存草稿' : `来源提案 ${snapshot.proposalId || '历史记录'}` }}</small>
+                  <small>{{ snapshot.sourceType === 'manual_save' ? '操作人' : '采纳操作人' }} {{ snapshot.createdBySubjectId || '旧记录未留存' }}{{ snapshot.createdByRoleId ? ` · ${roles.find(item => item.id === snapshot.createdByRoleId)?.name || snapshot.createdByRoleId}` : '' }}</small>
+                  <small v-if="snapshot.rolledBackAt">回滚时间 {{ snapshot.rolledBackAt }} · 操作人 {{ snapshot.rolledBackBySubjectId || '旧记录未留存' }}{{ snapshot.rolledBackByRoleId ? ` · ${roles.find(item => item.id === snapshot.rolledBackByRoleId)?.name || snapshot.rolledBackByRoleId}` : '' }}</small>
+                  <small v-else-if="snapshot.status === 'active' && !snapshot.rollbackAllowed">当前草稿指纹与该快照不一致，为避免覆盖后续修改，已禁用回滚。</small>
+                  <details><summary>查看结构差异</summary><p>基础指纹：{{ snapshot.diff?.baseFingerprint }}</p><ul><li v-for="item in snapshot.diff?.objectChanges?.filter(item => item.change !== 'unchanged')" :key="item.id">{{ item.change === 'added' ? '新增' : item.change === 'removed' ? '移除' : '更新' }}对象：{{ item.label }}（{{ item.id }}）</li><li v-for="item in snapshot.diff?.relationshipChanges?.filter(item => item.change !== 'unchanged')" :key="`${item.from}-${item.predicate}-${item.to}`">{{ item.change === 'removed' ? '移除' : item.change === 'added' ? '新增' : '更新' }}关系：{{ item.from }} —{{ item.predicate }}→ {{ item.to }}</li></ul></details>
+                </div>
+                <div class="version-diff"><b>+{{ snapshot.summary.addedObjects }}</b><span>对象</span><b>~{{ snapshot.summary.updatedObjects }}</b><span>更新</span><b>+{{ snapshot.summary.addedRelationships }}</b><span>关系</span><button v-if="snapshot.rollbackAllowed && canModel" class="version-rollback" @click="rollbackTarget = snapshot; rollbackPhrase = ''">恢复到本次操作之前</button><span v-else-if="snapshot.status === 'active' && !snapshot.rollbackAllowed" class="snapshot-locked">草稿已变化，不可直接回滚</span></div>
+              </article>
+              <p v-if="!snapshots.length">暂无本身份的模型变更快照。手动保存产生实际语义变更，或审核采纳 Agent 提案后会生成快照；回滚操作还需要“生成与保存草稿”权限。</p>
+            </section>
+            <section v-if="rollbackTarget" class="rollback-confirm"><span>受控恢复</span><h3>恢复到 {{ rollbackTarget.id }} 之前？</h3><p>将当前未发布草稿恢复为该次模型变更前的内容，不影响已发布版本或业务数据。若草稿在确认前发生变化，服务器会拒绝覆盖。</p><label>输入“确认回滚”<input v-model="rollbackPhrase" autocomplete="off" /></label><div><button class="outline-button" @click="rollbackTarget = null; rollbackPhrase = ''">取消</button><button class="danger-button" :disabled="rollbackPhrase !== '确认回滚'" @click="rollbackSnapshot">确认恢复草稿</button></div></section>
           </template>
         </section>
 

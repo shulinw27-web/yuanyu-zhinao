@@ -3,8 +3,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const workspaceSource = await readFile(new URL('../src/components/SemanticAgentWorkspace.vue', import.meta.url), 'utf8');
+const operationsCenterSource = await readFile(new URL('../src/components/SemanticOperationsCenter.vue', import.meta.url), 'utf8');
 const shellStyles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 const electronSource = await readFile(new URL('../electron/main.cjs', import.meta.url), 'utf8');
+const governanceRoutes = await readFile(new URL('../../../backend/src/routes/governance-routes.js', import.meta.url), 'utf8');
+const knowledgePanel = await readFile(new URL('../../../packages/agent-ui/src/knowledge/KnowledgeLibraryPanel.vue', import.meta.url), 'utf8');
 
 test('conversation content and composer use independent layout regions', () => {
   assert.match(workspaceSource, /ref="transcript" class="task-transcript"/);
@@ -27,6 +30,35 @@ test('agent workbench fills the viewport below the header and keeps task history
   assert.match(workspaceSource, /limit: taskPageSize, offset: taskOffset/);
   assert.match(workspaceSource, /\.task-history-list\{[^}]*overflow-y:auto;/);
   assert.match(workspaceSource, /\.task-history\{[^}]*background:#081925/);
+});
+
+test('version history shows both save sources, actual rollback eligibility and rollback attribution', async () => {
+  const appSource = await readFile(new URL('../src/App.vue', import.meta.url), 'utf8');
+  assert.match(appSource, /snapshot\.sourceType === 'manual_save'/);
+  assert.match(appSource, /snapshot\.rolledBackAt/);
+  assert.match(appSource, /snapshot\.rolledBackBySubjectId/);
+  assert.match(appSource, /v-if="snapshot\.rollbackAllowed && canModel"/);
+  assert.match(appSource, /历史快照（草稿已继续变更）/);
+  assert.match(governanceRoutes, /if \(!canReadWorldModel\) \{ denyButton\('page\.semantic-operations\.view'\)/);
+});
+
+test('inspection plans and human workbench todos are distinct and inspection alerts navigate to their plan', () => {
+  assert.match(operationsCenterSource, /只读语义巡检/);
+  assert.match(operationsCenterSource, /工作台待办/);
+  assert.match(operationsCenterSource, /不会自动修改或发布/);
+  assert.match(operationsCenterSource, /action\?\.type === 'open_inspection'/);
+  assert.match(operationsCenterSource, /data-inspection-id/);
+  assert.match(operationsCenterSource, /只有 Worker 正在运行时才会执行/);
+});
+
+test('knowledge资料默认以来源关联图展示，业务关系边界明确，复杂工具收起', () => {
+  assert.match(knowledgePanel, /知识资料地图/);
+  assert.match(knowledgePanel, /按来源归在一起/);
+  assert.match(knowledgePanel, /不是 AI 已确认的业务关系/);
+  assert.match(knowledgePanel, /class="knowledge-source-group"/);
+  assert.match(knowledgePanel, /class="knowledge-map-document"/);
+  assert.match(knowledgePanel, /高级工具：导入、主题整理与联合核验/);
+  assert.match(knowledgePanel, /view === 'map'/);
 });
 
 test('ordinary conversation does not duplicate its response in the bottom status bar', () => {
