@@ -21,7 +21,7 @@ export async function runConfiguredWorkflowSyncCycles({ tenantIds = resolveWorkf
   const results = [];
   for (const tenantId of tenantIds) {
     try {
-      const result = await runWithIAMStoreContext(() => runWithSemanticTenant({ tenantId }, () => sync({ actor: { type: 'service', id: workerId } })), tenantId);
+      const result = await runWithIAMStoreContext(() => runWithSemanticTenant({ tenantId }, () => sync({ actor: { type: 'service', id: workerId }, trigger: 'scheduled' })), tenantId);
       results.push({ tenantId, result });
     } catch (error) {
       results.push({ tenantId, error: error.code || error.message });
@@ -37,7 +37,7 @@ export async function runWorkflowEventInboxCycles({ tenantIds = resolveWorkflowS
       const claims = workflowWebhookOperations.claim({ workerId, at });
       if (!claims.length) return { status: 'idle', claimed: 0 };
       try {
-        const syncResult = await sync({ actor: { type: 'service', id: workerId } });
+        const syncResult = await sync({ actor: { type: 'service', id: workerId }, trigger: 'event' });
         const succeeded = !syncResult?.error;
         const receipts = workflowWebhookOperations.complete({ claims, succeeded, errorCode: syncResult?.code, at });
         return { status: succeeded ? 'succeeded' : 'retry_scheduled', claimed: claims.length, receipts, syncRun: syncResult?.syncRun || null, error: syncResult?.code || null };

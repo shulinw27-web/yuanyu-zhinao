@@ -12,11 +12,17 @@ const definition = (item, provider, shape) => ({
   version: String(item[shape.version] || ''),
   purpose: String(item.purpose || item.description || ''),
   category: String(item.category || 'business'),
+  processType: String(item.processType || 'unclassified'),
   businessDomain: String(item.businessDomain || item.domain || ''),
   riskLevel: String(item.riskLevel || 'medium'),
   dataClassification: String(item.dataClassification || 'internal'),
   updatedAt: String(item.updatedAt || item.modifiedAt || ''),
-  nodes: array(item[shape.nodes]).map(node => ({ id: String(node.id || node.activityId || node.stepId || ''), type: String(node.type || node.kind || 'approval').toLowerCase(), label: String(node.label || node.name || ''), ...(node.actorRule ? { actorRule: String(node.actorRule) } : {}), ...(node.expression ? { expression: String(node.expression) } : {}) })),
+  systems: array(item.systems).length ? array(item.systems).map(system => String(system)) : [provider],
+  crossSystemHandoffs: array(item.crossSystemHandoffs).map(handoff => ({
+    fromSystem: String(handoff.fromSystem || ''), toSystem: String(handoff.toSystem || ''), trigger: String(handoff.trigger || ''),
+    objectType: String(handoff.objectType || ''), semanticKey: String(handoff.semanticKey || '')
+  })),
+  nodes: array(item[shape.nodes]).map(node => ({ id: String(node.id || node.activityId || node.stepId || ''), type: String(node.type || node.kind || 'approval').toLowerCase(), label: String(node.label || node.name || ''), ...(node.actorRule ? { actorRule: String(node.actorRule) } : {}), ...(node.expression ? { expression: String(node.expression) } : {}), ...(node.systemId ? { systemId: String(node.systemId) } : {}) })),
   edges: array(item[shape.edges]).map(edge => ({ from: String(edge.from || edge.source || ''), to: String(edge.to || edge.target || ''), ...(edge.condition ? { condition: String(edge.condition) } : {}) })),
   fields: array(item[shape.fields]).map(field => ({ id: String(field.id || field.fieldId || field.key || ''), label: String(field.label || field.name || ''), type: String(field.type || 'string').toLowerCase(), required: field.required === true, semanticTarget: String(field.semanticTarget || ''), sensitivity: String(field.sensitivity || 'internal') })),
   bindings: array(item.bindings).map(binding => ({ objectType: String(binding.objectType || ''), field: String(binding.field || '') }))

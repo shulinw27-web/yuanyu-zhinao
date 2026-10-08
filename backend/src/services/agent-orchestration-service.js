@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { businessIdDomains } from './agent-query-service.js';
+import { businessIdDomains, extractQueryBusinessIds } from './agent-query-service.js';
 import { getRuntimeStoreInfo, listState, mutateState, readState } from '../repositories/runtime-state-repository.js';
 
 const NAMESPACE = 'agent_orchestrations';
@@ -22,7 +22,7 @@ const orchestrationAgent = Object.freeze({ id: 'orchestrator', name: '总控编�
 export function routeAgentTask(input) {
   const text = String(input || '').toLowerCase();
   const domains = [];
-  const workflowIntent = /(?:流程|审批到哪|审批进度|审批记录|审批历史|谁审批过|流转记录|当前节点|待谁审批|钉钉审批|oa\s*审批|请假|入职|供应商准入|workflow|process\s*instance)/iu.test(text);
+  const workflowIntent = /(?:流程|审批到哪|审批进度|审批记录|审批历史|谁审批过|流转记录|当前节点|待谁审批|钉钉审批|oa\s*审批|请假|入职|供应商准入|投产放行|生产工单|物流异常|运单|跨系统流程|workflow|process\s*instance)/iu.test(text);
   const workflowOnly = workflowIntent && !/(?:影响|分析|风险|核验|原因|处理方案)/u.test(text);
   if (workflowIntent) domains.push('workflow');
   if (!workflowOnly && /(?:生产|质量|检验|原料|批次|设备|库存|告警|报警|风险|lims|qms|mes|wms)/iu.test(text)) domains.push('production');
@@ -36,6 +36,13 @@ export function routeAgentTask(input) {
     requiresClarification: uniqueDomains.length === 0,
     reason: uniqueDomains.length ? `matched:${uniqueDomains.join(',')}` : 'conversation_or_ambiguous_intent'
   };
+}
+
+export function shouldHonorDeterministicWorkflowRead(input) {
+  if (!extractQueryBusinessIds(input).length) return false;
+  const route = routeAgentTask(input);
+  return route.primaryDomain === 'workflow'
+    && route.subAgents.some(item => item.tool === 'read_workflow_context');
 }
 
 export function buildAgentPlan({ route, canLaunchProcurement = false, isProcurement = false }) {

@@ -8,6 +8,7 @@ const MAX_DEFINITIONS = 500;
 const MAX_INSTANCES = 5_000;
 const MAX_PAGES = 20;
 const ID_PATTERN = /^[a-z][a-z0-9_-]{1,48}$/u;
+const PROCESS_TYPES = new Set(['internal_affairs', 'procurement', 'production_manufacturing', 'logistics', 'quality', 'sales', 'finance', 'unclassified']);
 
 const failure = (code, message, status = 400) => Object.assign(new Error(message), { code, status });
 const privateHostname = hostname => hostname === 'localhost' || hostname.endsWith('.local') || hostname.endsWith('.internal')
@@ -111,6 +112,9 @@ const validDefinition = (value, provider) => {
     || typeof value.purpose !== 'string' || value.purpose.length === 0 || value.purpose.length > 1000
     || typeof value.businessDomain !== 'string' || value.businessDomain.length === 0 || value.businessDomain.length > 160
     || !['management', 'business', 'hybrid'].includes(value.category)
+    || (value.processType !== undefined && !PROCESS_TYPES.has(value.processType))
+    || (value.systems !== undefined && (!Array.isArray(value.systems) || value.systems.length === 0 || value.systems.length > 20 || value.systems.some(system => typeof system !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,48}$/u.test(system))))
+    || (value.crossSystemHandoffs !== undefined && (!Array.isArray(value.crossSystemHandoffs) || value.crossSystemHandoffs.length > 50))
     || !['low', 'medium', 'high', 'critical'].includes(value.riskLevel)
     || !['public', 'internal', 'confidential', 'personal_sensitive', 'business_restricted'].includes(value.dataClassification)
     || typeof value.updatedAt !== 'string' || !Number.isFinite(Date.parse(value.updatedAt))
@@ -123,10 +127,17 @@ const validDefinition = (value, provider) => {
     if (!node || typeof node !== 'object' || Array.isArray(node) || typeof node.id !== 'string' || !node.id || node.id.length > 160 || nodeIds.has(node.id)
       || !['start', 'end', 'approval', 'condition', 'parallel', 'service_task'].includes(node.type) || typeof node.label !== 'string' || !node.label || node.label.length > 240
       || (node.actorRule !== undefined && (typeof node.actorRule !== 'string' || node.actorRule.length > 500))
-      || (node.expression !== undefined && (typeof node.expression !== 'string' || node.expression.length > 500))) return false;
+      || (node.expression !== undefined && (typeof node.expression !== 'string' || node.expression.length > 500))
+      || (node.systemId !== undefined && (typeof node.systemId !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,48}$/u.test(node.systemId)))) return false;
     nodeIds.add(node.id);
   }
   if (value.edges.some(edge => !edge || typeof edge !== 'object' || Array.isArray(edge) || !nodeIds.has(edge.from) || !nodeIds.has(edge.to) || (edge.condition !== undefined && (typeof edge.condition !== 'string' || edge.condition.length > 500)))) return false;
+  if ((value.crossSystemHandoffs || []).some(handoff => !handoff || typeof handoff !== 'object' || Array.isArray(handoff)
+    || typeof handoff.fromSystem !== 'string' || !(value.systems || []).includes(handoff.fromSystem)
+    || typeof handoff.toSystem !== 'string' || !(value.systems || []).includes(handoff.toSystem)
+    || typeof handoff.trigger !== 'string' || !handoff.trigger || handoff.trigger.length > 500
+    || typeof handoff.objectType !== 'string' || !handoff.objectType || handoff.objectType.length > 160
+    || typeof handoff.semanticKey !== 'string' || !handoff.semanticKey || handoff.semanticKey.length > 160)) return false;
   const fieldIds = new Set();
   for (const field of value.fields) {
     if (!field || typeof field !== 'object' || Array.isArray(field) || typeof field.id !== 'string' || !field.id || field.id.length > 160 || fieldIds.has(field.id)
@@ -240,6 +251,7 @@ export async function discoverConfiguredWorkflowDefinitions({ env = process.env,
     instanceProvidersIncluded: results.filter(item => item.payload.instancesIncluded).map(item => item.connector.id),
     providers: results.map(item => ({
       id: item.connector.id, name: item.connector.name, status: 'connected', cursor: item.payload.providerCursor,
+      syncModes: webhookProviderIds.has(item.connector.id) ? ['event', 'scheduled', 'manual'] : ['scheduled', 'manual'],
       capabilities: { definitionDiscovery: true, definitionVersions: true, formSchema: true, runtimeInstances: item.payload.instancesIncluded, eventSubscription: webhookProviderIds.has(item.connector.id), incrementalCursor: true, writeActions: false }
     }))
   };

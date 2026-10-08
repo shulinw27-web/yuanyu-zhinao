@@ -15,7 +15,14 @@ const now = () => new Date().toISOString();
 const clone = value => structuredClone(value);
 const stateKey = () => semanticTenantStateKey('workspace');
 const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 16);
-const structuralPayload = definition => ({ nodes: definition.nodes, edges: definition.edges, fields: definition.fields, bindings: definition.bindings });
+const structuralPayload = definition => ({
+  nodes: definition.nodes, edges: definition.edges, fields: definition.fields, bindings: definition.bindings,
+  processType: definition.processType, systems: definition.systems, crossSystemHandoffs: definition.crossSystemHandoffs
+});
+const processTypeLabel = value => ({
+  internal_affairs: '内部事务', procurement: '采购供应', production_manufacturing: '生产制造',
+  logistics: '物流履约', quality: '质量管理', sales: '销售履约', finance: '财务管理'
+})[value] || value || '未分类';
 
 const summarizeDiff = (previous, current) => {
   if (!previous) return { kind: 'new', breaking: true, summary: '发现新的流程定义，需要校对业务对象映射和读取权限。', changes: ['新增流程定义'] };
@@ -34,6 +41,9 @@ const summarizeDiff = (previous, current) => {
   }
   for (const field of previous.fields) if (!current.fields.some(item => item.id === field.id)) changes.push(`删除字段：${field.label}`);
   if (fingerprint(previous.edges) !== fingerprint(current.edges)) changes.push('分支或流转条件发生变化');
+  if (previous.processType !== current.processType) changes.push(`流程类别变化：${processTypeLabel(previous.processType)} → ${processTypeLabel(current.processType)}`);
+  if (fingerprint(previous.systems || []) !== fingerprint(current.systems || [])) changes.push('参与系统范围发生变化');
+  if (fingerprint(previous.crossSystemHandoffs || []) !== fingerprint(current.crossSystemHandoffs || [])) changes.push('跨系统交接规则发生变化');
   const breaking = changes.some(item => /删除|必填|规则|条件/u.test(item));
   return { kind: 'updated', breaking, summary: changes.length ? `检测到 ${changes.length} 项结构变化。` : '仅来源版本发生变化。', changes };
 };
@@ -69,8 +79,8 @@ const initialWorkspace = () => {
   return {
     schemaVersion: 1,
     providers: [
-      { id: 'dingtalk', name: '钉钉审批', status: 'connected_mock', capabilities: MOCK_WORKFLOW_CONNECTOR_CAPABILITIES, cursor: remote.providerCursor, lastSyncAt: discoveredAt },
-      { id: 'oa', name: '企业 OA / BPM', status: 'connected_mock', capabilities: MOCK_WORKFLOW_CONNECTOR_CAPABILITIES, cursor: remote.providerCursor, lastSyncAt: discoveredAt }
+      { id: 'dingtalk', name: '钉钉审批', status: 'connected_mock', capabilities: MOCK_WORKFLOW_CONNECTOR_CAPABILITIES, syncModes: ['event', 'scheduled', 'manual'], cursor: remote.providerCursor, lastSyncAt: discoveredAt },
+      { id: 'oa', name: '企业 OA / BPM', status: 'connected_mock', capabilities: MOCK_WORKFLOW_CONNECTOR_CAPABILITIES, syncModes: ['event', 'scheduled', 'manual'], cursor: remote.providerCursor, lastSyncAt: discoveredAt }
     ],
     definitions: remote.definitions.map(item => ({ code: item.code, activeVersion: item.version, versions: [candidateFrom(item, null, discoveredAt)] })),
     instances: listMockWorkflowInstances(),
@@ -95,6 +105,8 @@ export function getWorkflowIntegrationOverview() {
     const latest = latestVersionOf(record);
     return {
       code: record.code, name: latest.name, provider: latest.provider, category: latest.category,
+      processType: latest.processType || 'unclassified', processTypeLabel: processTypeLabel(latest.processType),
+      systems: clone(latest.systems || [latest.provider]), crossSystem: (latest.systems || []).length > 1,
       businessDomain: latest.businessDomain, riskLevel: latest.riskLevel, dataClassification: latest.dataClassification,
       activeVersion: record.activeVersion, latestVersion: latest.version, reviewStatus: latest.reviewStatus,
       publicationStatus: latest.publicationStatus, nodeCount: latest.nodes.length, fieldCount: latest.fields.length,
@@ -107,7 +119,14 @@ export function getWorkflowIntegrationOverview() {
     metrics: {
       definitions: definitions.length, published: definitions.filter(item => item.activeVersion !== null).length,
       reviewRequired: definitions.filter(item => item.reviewStatus === 'review_required').length,
-      runningInstances: workspace.instances.filter(item => item.status === 'running').length
+      runningInstances: workspace.instances.filter(item => item.status === 'running').length,
+      crossSystemDefinitions: definitions.filter(item => item.crossSystem).length,
+      processTypes: Object.fromEntries([...new Set(definitions.map(item => item.processType))].map(type => [type, definitions.filter(item => item.processType === type).length]))
+    },
+    syncPolicy: {
+      realTime: { enabled: true, mode: 'signed_webhook', description: '来源系统变更通知触发受控增量拉取' },
+      scheduled: { enabled: true, mode: 'incremental_reconciliation', intervalSeconds: Math.max(60, Number(process.env.WORKFLOW_SYNC_INTERVAL_MS) / 1000 || 300), description: '定时对账修复漏事件与上游差异' },
+      manual: { enabled: true, mode: 'operator_triggered', permission: 'meta_model.draft.save', description: '运营人员可在流程语义中心立即发起同步' }
     },
     webhookInbox: workflowWebhookOperations.overview(),
     lastSyncAt: workspace.lastSyncAt, syncRuns: clone(workspace.syncRuns.slice(0, 10))
@@ -186,15 +205,15 @@ const applyRemoteWorkflowSnapshot = ({ remote, scenario, actor, mode }) => {
   });
 };
 
-export function syncWorkflowDefinitions({ scenario = 'baseline', actor = null } = {}) {
+export function syncWorkflowDefinitions({ scenario = 'baseline', actor = null, trigger = 'manual' } = {}) {
   if (!['baseline', 'changed'].includes(scenario)) return { error: '不支持的模拟同步场景。', code: 'WORKFLOW_SYNC_SCENARIO_INVALID', status: 400 };
-  return applyRemoteWorkflowSnapshot({ remote: discoverMockWorkflowDefinitions({ scenario }), scenario, actor, mode: scenario === 'changed' ? 'incremental_reconciliation' : 'incremental' });
+  return applyRemoteWorkflowSnapshot({ remote: discoverMockWorkflowDefinitions({ scenario }), scenario, actor, mode: `${trigger}_${scenario === 'changed' ? 'incremental_reconciliation' : 'incremental'}` });
 }
 
-export async function syncConfiguredWorkflowDefinitions({ actor = null, env = process.env, fetchImpl = globalThis.fetch } = {}) {
+export async function syncConfiguredWorkflowDefinitions({ actor = null, trigger = 'scheduled', env = process.env, fetchImpl = globalThis.fetch } = {}) {
   try {
     const remote = await discoverConfiguredWorkflowDefinitions({ env, fetchImpl });
-    return applyRemoteWorkflowSnapshot({ remote, scenario: 'configured_connectors', actor, mode: 'configured_incremental' });
+    return applyRemoteWorkflowSnapshot({ remote, scenario: 'configured_connectors', actor, mode: `${trigger}_configured_incremental` });
   } catch (error) {
     return { error: error.message || '真实流程连接器同步失败。', code: error.code || 'WORKFLOW_CONNECTOR_SYNC_FAILED', status: error.status || 502 };
   }
@@ -224,10 +243,10 @@ const visibleInstance = (instance, definition, identityScope) => {
   if (definition.category === 'business') {
     const roleId = identityScope?.roleId;
     const domainGrant = roleId === 'executive'
-      || (roleId === 'procurement_manager' && /采购|供应商|procurement|supplier/iu.test(`${definition.businessDomain} ${definition.name}`))
+      || (roleId === 'procurement_manager' && /采购|供应商|供应链|物流|仓储|procurement|supplier|logistics|warehouse/iu.test(`${definition.businessDomain} ${definition.name}`))
       || (roleId === 'quality_manager' && /质量|检验|quality/iu.test(`${definition.businessDomain} ${definition.name}`))
-      || (roleId === 'production_manager' && /生产|制造|production|manufacturing/iu.test(`${definition.businessDomain} ${definition.name}`))
-      || (roleId === 'marketing_manager' && /市场|销售|订单|marketing|sales/iu.test(`${definition.businessDomain} ${definition.name}`));
+      || (roleId === 'production_manager' && /生产|制造|物流|仓储|production|manufacturing|logistics|warehouse/iu.test(`${definition.businessDomain} ${definition.name}`))
+      || (roleId === 'marketing_manager' && /市场|销售|订单|物流|履约|marketing|sales|logistics|fulfillment/iu.test(`${definition.businessDomain} ${definition.name}`));
     if (domainGrant) return clone(instance);
     return {
       ...clone(instance), applicantId: null, applicantName: '受限人员', amount: null,
@@ -257,27 +276,48 @@ const matchesTerms = (values, terms) => {
   return terms.words.length > 0 && terms.words.every(word => haystack.includes(word));
 };
 
+const requestedProcessTypes = query => {
+  const text = String(query || '').toLowerCase();
+  return [
+    [/(?:内部事务|人事|请假|入职)/u, 'internal_affairs'],
+    [/(?:采购|供应商|供应链)/u, 'procurement'],
+    [/(?:生产|制造|投产|工单|mes)/iu, 'production_manufacturing'],
+    [/(?:物流|运输|运单|出库|tms)/iu, 'logistics']
+  ].filter(([pattern]) => pattern.test(text)).map(([, type]) => type);
+};
+
 export function queryPublishedWorkflowContext({ query = '', identityScope = {} } = {}) {
   const normalized = String(query || '').trim().toLowerCase();
   if (!normalized) return { error: '请输入流程名称、实例编号或业务编号。', code: 'WORKFLOW_QUERY_REQUIRED', status: 400 };
   const workspace = readWorkspace();
   const terms = queryTerms(normalized);
+  const typeFilter = requestedProcessTypes(normalized);
   const definitions = workspace.definitions.flatMap(record => {
     const active = activeVersionOf(record);
-    if (!active || (!terms.catalog && !matchesTerms([active.code, active.name, active.purpose, active.businessDomain, active.provider], terms))) return [];
-    return [{ code: active.code, name: active.name, provider: active.provider, version: active.version, category: active.category, businessDomain: active.businessDomain, purpose: active.purpose, semanticSummary: clone(active.semanticSummary) }];
+    if (active && typeFilter.length && !typeFilter.includes(active.processType)) return [];
+    if (!active || (!terms.catalog && !matchesTerms([active.code, active.name, active.purpose, active.businessDomain, active.provider, active.processType, processTypeLabel(active.processType), ...(active.systems || [])], terms))) return [];
+    return [{
+      code: active.code, name: active.name, provider: active.provider, version: active.version, category: active.category,
+      processType: active.processType || 'unclassified', processTypeLabel: processTypeLabel(active.processType),
+      businessDomain: active.businessDomain, purpose: active.purpose, systems: clone(active.systems || [active.provider]),
+      crossSystemHandoffs: clone(active.crossSystemHandoffs || []), semanticSummary: clone(active.semanticSummary)
+    }];
   }).slice(0, 10);
   const matches = workspace.instances.filter(instance => {
     const record = workspace.definitions.find(item => item.code === instance.definitionCode);
     const published = publishedVersionOf(record, instance.definitionVersion);
     if (!published) return false;
-    return matchesTerms([instance.id, instance.businessKey, instance.title, published.code, published.name, published.businessDomain, published.provider], terms);
+    return matchesTerms([instance.id, instance.businessKey, instance.title, published.code, published.name, published.businessDomain, published.provider, published.processType, processTypeLabel(published.processType), ...(published.systems || [])], terms);
   }).slice(0, 10).map(instance => {
     const record = workspace.definitions.find(item => item.code === instance.definitionCode);
     const definition = publishedVersionOf(record, instance.definitionVersion);
     const currentNode = definition.nodes.find(node => node.id === instance.currentNodeId);
     return {
-      ...visibleInstance(instance, definition, identityScope), definition: { code: definition.code, name: definition.name, version: definition.version, category: definition.category },
+      ...visibleInstance(instance, definition, identityScope), definition: {
+        code: definition.code, name: definition.name, version: definition.version, category: definition.category,
+        processType: definition.processType || 'unclassified', processTypeLabel: processTypeLabel(definition.processType),
+        systems: clone(definition.systems || [definition.provider]), crossSystemHandoffs: clone(definition.crossSystemHandoffs || [])
+      },
       currentNode: currentNode ? { id: currentNode.id, label: currentNode.label, type: currentNode.type } : null,
       evidence: { sourceSystem: definition.provider, sourceDefinitionId: definition.sourceId, sourceVersion: definition.version, observedAt: workspace.lastSyncAt }
     };

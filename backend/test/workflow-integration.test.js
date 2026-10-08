@@ -13,7 +13,7 @@ import {
   workflowWebhookOperations
 } from '../src/domains/workflow-integration/public-api.js';
 import { handleWorkflowIntegrationRoutes } from '../src/routes/workflow-integration-routes.js';
-import { routeAgentTask } from '../src/services/agent-orchestration-service.js';
+import { routeAgentTask, shouldHonorDeterministicWorkflowRead } from '../src/services/agent-orchestration-service.js';
 import { authorizeZhiNaoTask } from '../src/services/zhinao-authorization-service.js';
 import { executeReadOnlyTool } from '../src/services/agent-tool-registry.js';
 import { roles } from '../src/data/seed.js';
@@ -28,12 +28,24 @@ const within = (tenantId, work) => runWithSemanticTenant(identity(tenantId), wor
 
 test.beforeEach(() => resetRuntimeState(['workflow_integration', 'workflow_webhook_inbox']));
 
+test('模型理解失败时仅为带明确编号的流程查询保留确定性读取', () => {
+  assert.equal(shouldHonorDeterministicWorkflowRead('生产工单 MO-20261008-021 现在到哪个流程节点？'), true);
+  assert.equal(shouldHonorDeterministicWorkflowRead('运单 WB-20261008-778 的物流异常流程进展是什么？'), true);
+  assert.equal(shouldHonorDeterministicWorkflowRead('生产流程是什么？'), false, '没有业务编号时不得读取企业流程数据');
+  assert.equal(shouldHonorDeterministicWorkflowRead('分析生产批次 RC-2026-0041'), false, '非流程领域编号不得误走流程工具');
+});
+
 test('首次装载形成管理、业务和混合流程目录，流程结构来自确定性连接器', () => within('workflow-a', () => {
   const overview = getWorkflowIntegrationOverview();
-  assert.equal(overview.metrics.definitions, 3);
-  assert.equal(overview.metrics.published, 3);
+  assert.equal(overview.metrics.definitions, 5);
+  assert.equal(overview.metrics.published, 5);
   assert.equal(overview.metrics.reviewRequired, 0);
   assert.deepEqual(new Set(overview.definitions.map(item => item.category)), new Set(['management', 'business', 'hybrid']));
+  assert.deepEqual(new Set(overview.definitions.map(item => item.processType)), new Set(['internal_affairs', 'procurement', 'production_manufacturing', 'logistics']));
+  assert.equal(overview.metrics.crossSystemDefinitions, 5);
+  assert.equal(overview.syncPolicy.realTime.enabled, true);
+  assert.equal(overview.syncPolicy.scheduled.mode, 'incremental_reconciliation');
+  assert.equal(overview.syncPolicy.manual.permission, 'meta_model.draft.save');
   assert.equal(overview.boundary.mode, 'read_only');
 
   const purchase = getWorkflowDefinition('DINGTALK-PURCHASE');
@@ -49,7 +61,7 @@ test('增量同步发现新流程和破坏性变更，但不会自动替换智�
   assert.equal(result.syncRun.changed, 1);
   const overview = getWorkflowIntegrationOverview();
   assert.equal(overview.metrics.reviewRequired, 2);
-  assert.equal(overview.metrics.published, 3, '存在候选版本时，旧生效版本仍应计入智脑可读取流程');
+  assert.equal(overview.metrics.published, 5, '存在候选版本时，旧生效版本仍应计入智脑可读取流程');
 
   const purchase = getWorkflowDefinition('DINGTALK-PURCHASE');
   assert.equal(purchase.activeVersion, '3');
@@ -71,7 +83,7 @@ test('运营人员发布候选版本后智脑读取面切换版本，重复同�
   const second = syncWorkflowDefinitions({ scenario: 'changed' });
   assert.equal(second.syncRun.changed, 0);
   assert.equal(second.syncRun.discovered, 0);
-  assert.equal(second.syncRun.unchanged, 4);
+  assert.equal(second.syncRun.unchanged, 6);
   const inFlight = queryPublishedWorkflowContext({ query: 'PO-20261008-001', identityScope: identity('workflow-c') });
   assert.equal(inFlight.matches.length, 1, '新版本发布后，仍在旧版本上运行的实例不能消失');
   assert.equal(inFlight.matches[0].definition.version, '3');
@@ -121,7 +133,7 @@ test('自然语言流程问题路由到流程语义工具，并只使用已发�
 test('流程目录问题返回已发布定义，但不暴露管理流程表单或候选版本', () => within('workflow-catalog', () => {
   syncWorkflowDefinitions({ scenario: 'changed' });
   const result = queryPublishedWorkflowContext({ query: '现在有哪些流程？', identityScope: identity('workflow-catalog') });
-  assert.equal(result.definitions.length, 3);
+  assert.equal(result.definitions.length, 5);
   assert.ok(result.definitions.every(item => !Object.hasOwn(item, 'fields')));
   const purchase = result.definitions.find(item => item.code === 'DINGTALK-PURCHASE');
   assert.equal(purchase.version, '3');
@@ -141,7 +153,23 @@ test('智脑完整对话链能回答审批进度和流程目录，不附带无�
   const catalog = await runWithSemanticTenant(catalogScope, () => runPrivateAgent('现在有哪些流程？', roles.procurement_manager, catalogScope));
   assert.match(catalog.text, /员工请假审批/u);
   assert.match(catalog.text, /采购申请审批/u);
+  assert.match(catalog.text, /生产工单投产与放行/u);
+  assert.match(catalog.text, /物流异常协同处置/u);
   assert.ok(catalog.evidence.some(item => item.id === 'DINGTALK-PURCHASE'));
+});
+
+test('跨系统 Mock 生产与物流流程可由智脑 Agent 读取和解释', async () => {
+  const productionScope = { ...identity('workflow-agent-production'), subjectId: 'production@demo.local', roleId: 'production_manager' };
+  const production = await runWithSemanticTenant(productionScope, () => runPrivateAgent('生产工单 MO-20261008-021 现在到哪个流程节点？涉及哪些系统？', roles.production_manager, productionScope));
+  assert.match(production.text, /QMS 质量放行校验/u);
+  assert.match(production.text, /OA → ERP → WMS → QMS → MES/u);
+  assert.ok(production.evidence.some(item => item.id === 'OA-PROD-20261008-021'));
+
+  const logisticsScope = { ...identity('workflow-agent-logistics'), subjectId: 'procurement@demo.local' };
+  const logistics = await runWithSemanticTenant(logisticsScope, () => runPrivateAgent('运单 WB-20261008-778 的物流异常流程进展和跨系统链路是什么？', roles.procurement_manager, logisticsScope));
+  assert.match(logistics.text, /物流负责人确认处置/u);
+  assert.match(logistics.text, /DINGTALK → OMS → WMS → TMS/u);
+  assert.ok(logistics.evidence.some(item => item.id === 'DT-LOG-20261008-016'));
 });
 
 test('HTTP 路由对同步和发布使用不同权限闸门', async () => within('workflow-e', async () => {
@@ -201,7 +229,7 @@ test('受控真实连接器只从服务端凭据拉取规范化定义，并生�
       return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
     }
   });
-  assert.equal(result.syncRun.mode, 'configured_incremental');
+  assert.equal(result.syncRun.mode, 'scheduled_configured_incremental');
   assert.equal(requests.length, 2);
   assert.equal(requests[0].options.headers.Authorization, 'Bearer server-secret');
   assert.equal(new URL(requests[1].url).searchParams.get('cursor'), 'page-2');

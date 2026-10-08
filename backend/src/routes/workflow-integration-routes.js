@@ -23,7 +23,7 @@ export async function handleWorkflowIntegrationRoutes({ req, res, url, role, age
     const actionRole = selectActionRole('meta_model.draft.save');
     if (!actionRole) { denyButton('meta_model.draft.save'); return true; }
     const body = await readBody(req);
-    const syncInput = { actor: { type: 'user', id: agentIdentity.subjectId || actionRole.id } };
+    const syncInput = { actor: { type: 'user', id: agentIdentity.subjectId || actionRole.id }, trigger: 'manual' };
     const result = body?.mode === 'configured'
       ? await syncConfiguredWorkflowDefinitions(syncInput)
       : syncWorkflowDefinitions({ ...syncInput, scenario: body?.scenario || 'baseline' });

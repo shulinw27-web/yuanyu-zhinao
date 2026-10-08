@@ -270,7 +270,13 @@ test('流程语义中心：流程图、变更校对和只读边界必须在独�
   assert.match(workflowSource, /结构事实由连接器确定性解析/);
   assert.match(workflowSource, /不会自动提交、审批或撤回/);
   assert.match(workflowSource, /client\.syncWorkflows\(mode === 'configured' \? \{ mode \} : \{ scenario \}\)/);
-  assert.match(workflowSource, />同步已配置连接器</);
+  assert.match(workflowSource, />立即同步真实连接器</);
+  assert.match(workflowSource, /立即手动同步 Mock/);
+  assert.match(workflowSource, />实时事件同步</);
+  assert.match(workflowSource, />定时增量对账</);
+  assert.match(workflowSource, />跨系统流程链路</);
+  assert.match(workflowSource, /latest\.crossSystemHandoffs/);
+  assert.match(workflowSource, /processType/);
   assert.match(workflowSource, /client\.reviewWorkflowVersion\(selectedCode\.value, latest\.value\.version, action\)/);
   assert.match(workflowSource, /当前 v\{\{ detail\.activeVersion \}\} 仍为智脑生效版本/);
   assert.match(workflowSource, /latest\.diff\?\.changes/);

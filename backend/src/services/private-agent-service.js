@@ -1,6 +1,6 @@
 import { buildPreflightContext, executeReadOnlyTool, executeTool, getRegisteredTools } from './agent-tool-registry.js';
 import { memoryFingerprint } from './agent-memory-review.js';
-import { buildAgentPlan, buildAgentTaskContract, routeAgentTask } from './agent-orchestration-service.js';
+import { buildAgentPlan, buildAgentTaskContract, routeAgentTask, shouldHonorDeterministicWorkflowRead } from './agent-orchestration-service.js';
 import { runAgentReadLoop } from './agent-read-loop-service.js';
 import { selectAgentGoalMemory } from './agent-memory-selection-service.js';
 import { describeQueryCoverage, extractQueryBusinessIds, MAX_QUERY_BUSINESS_IDS, validateAgentReadInput, validateAgentQueryAnswer } from './agent-query-service.js';
@@ -62,7 +62,6 @@ export { getConversationUserContext };
 
 // 仅在本服务内部用于“已识别动作”的二次判定，不参与对外契约。
 const discussesWriteOnly = (input) => /不要|不用|别(?:再|帮我)?|禁止|暂不|不需要|无需|怎么|如何|能否|是否|为什么|吗[？?]?|\b(?:do not|don't|never|how|whether)\b/i.test(input);
-
 export async function getPrivateAgentStatus(roleId, identityScope) {
   const model = getLocalModelRuntime();
   return {
@@ -267,10 +266,11 @@ export async function runPrivateAgent(request, role, identityScope, options = {}
   // from silently creating a new action.
   const inheritedUserContext = conversationUserContext || longTermUserContext;
   const currentBusinessIds = extractQueryBusinessIds(input);
+  const deterministicTargetedWorkflowRead = shouldHonorDeterministicWorkflowRead(input);
   // A newly specified target takes precedence over earlier chat targets. Do
   // not send previous identifiers along with the current exact query.
   const reportClarification = turn ? turn.intent === 'dialogue' && turn.needsClarification : !currentBusinessIds.length && isBroadReportRequest(input);
-  const dialogueOnly = turn ? turn.intent === 'dialogue' : explanationFollowUp || reportClarification;
+  const dialogueOnly = (turn ? turn.intent === 'dialogue' : explanationFollowUp || reportClarification) && !deterministicTargetedWorkflowRead;
   // Model interpretation may narrow or resolve a read, never introduce an ID
   // absent from the user's current/authorized historical text.
   const permittedIds = new Set(extractQueryBusinessIds(`${input}\n${options.conversationContext?.userPrompt || ''}\n${inheritedUserContext}`));

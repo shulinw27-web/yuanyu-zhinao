@@ -19,7 +19,7 @@
 
 ```text
 Mock 钉钉审批 / Mock OA-BPM / 受控连接器适配网关
-          │ 定期对账（静态 Bearer / OAuth Client Credentials）
+          │ 手动立即同步 + 定期对账（静态 Bearer / OAuth Client Credentials）
           ├──────────────────────────────────────────┐
           │                                          │ 签名变更通知
           ▼                                          ▼
@@ -33,6 +33,8 @@ workflow-integration 独立领域
   ├─ 租户级流程目录
   ├─ 定义版本与结构指纹
   ├─ 节点/字段/流转差异
+  ├─ 内部事务/采购/生产/物流流程类别
+  ├─ 参与系统与跨系统交接规则
   ├─ 候选校对与发布闸门
   └─ 已发布流程只读查询投影
           │
@@ -56,6 +58,8 @@ workflow-integration 独立领域
 | 对象 | 含义 |
 | --- | --- |
 | 流程定义与版本 | 编码、来源 ID、来源版本、用途、业务域、风险和数据分级 |
+| 流程类别 | 管理/业务/混合用于权限边界，内部事务/采购供应/生产制造/物流履约用于业务目录 |
+| 跨系统交接 | 参与系统、交接方向、触发条件、对象类型和语义业务键 |
 | 节点 | 开始、结束、审批、条件、并行和服务任务 |
 | 流转关系 | 起点、终点以及源系统给出的条件表达式 |
 | 表单字段 | 字段名、类型、必填性、敏感等级及世界模型目标 |
@@ -63,7 +67,7 @@ workflow-integration 独立领域
 | 运行实例 | 实例 ID、业务键、当前节点、状态、更新时间和有界流转记录 |
 | 来源证据 | 来源系统、来源定义 ID、来源版本和本次观测时间 |
 
-内置 Mock 场景包括员工请假、员工入职协同、采购申请审批；变更场景会把采购审批从 v3 更新为 v4，并新增供应商准入审批。
+内置 Mock 场景包括员工请假、员工入职协同、采购申请审批、生产工单投产放行和物流异常协同处置。生产场景跨 OA、ERP、MES、QMS、WMS；物流场景跨钉钉、OMS、WMS、TMS。变更场景会把采购审批从 v3 更新为 v4，并新增供应商准入审批。
 
 ## 4. 版本同步和发布
 
@@ -89,7 +93,7 @@ workflow-integration 独立领域
 ]
 ```
 
-将上述数组放入 `WORKFLOW_CONNECTORS_CONFIG_JSON`，密钥放入 `DINGTALK_WORKFLOW_TOKEN`。外网地址还需显式设置 `WORKFLOW_CONNECTORS_ALLOW_EXTERNAL=true`。运营端点击“同步已配置连接器”会发送 `{ "mode": "configured" }`。
+将上述数组放入 `WORKFLOW_CONNECTORS_CONFIG_JSON`，密钥放入 `DINGTALK_WORKFLOW_TOKEN`。外网地址还需显式设置 `WORKFLOW_CONNECTORS_ALLOW_EXTERNAL=true`。运营端点击“立即同步真实连接器”会发送 `{ "mode": "configured" }`，并在同步记录中标记人工触发。
 
 `responseProfile` 支持 `canonical_v1`、`dingtalk_gateway_v1` 和 `oa_bpm_gateway_v1`。后两项是元域适配网关契约：网关负责调用厂商官方 API，平台负责把稳定的网关字段确定性转换为统一流程对象。它不声称任意厂商原始响应都能免配置直连。
 
@@ -126,7 +130,18 @@ Client ID、Secret 和短时访问令牌都只在服务端使用；令牌刷新�
       "version": "5",
       "purpose": "采购申请校验与多级审批",
       "category": "business",
+      "processType": "procurement",
       "businessDomain": "采购与供应链",
+      "systems": ["dingtalk-live", "finance", "erp", "wms"],
+      "crossSystemHandoffs": [
+        {
+          "fromSystem": "dingtalk-live",
+          "toSystem": "erp",
+          "trigger": "审批通过后创建正式采购订单",
+          "objectType": "PurchaseOrder",
+          "semanticKey": "purchaseOrderNo"
+        }
+      ],
       "riskLevel": "high",
       "dataClassification": "business_restricted",
       "updatedAt": "2026-10-08T06:00:00.000Z",
@@ -190,6 +205,16 @@ Client ID、Secret 和短时访问令牌都只在服务端使用；令牌刷新�
 
 失败采用有界指数退避，5 次失败进入死信。元域智语展示待处理/处理中/死信数量；具备 `event.outbox.replay` 的人员可以重新入队。重放仍只触发拉取，不直接采纳原始回调。
 
+### 4.2 实时、定时与手动同步
+
+| 方式 | 触发 | 用途 |
+| --- | --- | --- |
+| 实时同步 | 钉钉/OA 签名 Webhook 进入租户事件收件箱 | 优先发现定义和实例变化；回调只是拉取信号 |
+| 定时同步 | `workflow-sync-worker` 按租户执行增量对账 | 修复漏事件、上游回调丢失或长时间断网差异 |
+| 手动同步 | 语义运营端“立即手动同步 Mock/真实连接器” | 实施联调、问题复核和运营人员主动对账 |
+
+三种方式使用同一个幂等同步核心，都不会自动发布候选版本。运营端同时展示三种方式、最后同步时间和同步记录。
+
 周期对账可运行：
 
 ```powershell
@@ -203,15 +228,15 @@ npm run run:workflow-sync-worker
 
 管理流程和混合流程默认按个人敏感数据处理。查询人不是流程申请人时，会隐藏申请人、金额、表单摘要、流转参与人和意见。业务流程同时按角色和业务域裁剪：管理层可读取授权业务流程；采购、质量、生产、市场角色只在匹配业务域内读取受限字段。未知角色或跨业务域只保留实例编号、业务键、状态、节点、时间和已脱敏流转标签。目标企业的组织范围和 HR 专属角色仍需用真实 IAM 数据验收。
 
-业务流程保留业务编号、当前节点、规范化流转记录和来源证据，用于解释“采购单为何尚未下单”“谁审批过”等问题。智脑已经注册 `read_workflow_context` 只读工具，可识别“审批到哪一步”“当前节点”“审批记录”“有哪些流程”等诉求；候选版本不会进入该工具。管理/混合流程对非本人隐藏申请人、摘要和流转参与人。流程标题不构成业务效果证据：只有流程实例到 PurchaseOrder 等对象的明确绑定，才能说明审批对 ERP 建单产生的约束。
+业务流程保留业务编号、具体流程类别、跨系统链路、当前节点、规范化流转记录和来源证据，用于解释“采购单为何尚未下单”“生产工单卡在哪个系统”“物流异常是出库还是运输环节”等问题。智脑已经注册 `read_workflow_context` 只读工具，可识别审批进度、流转历史、流程目录以及生产工单/运单编号问法；候选版本不会进入该工具。管理/混合流程对非本人隐藏申请人、摘要和流转参与人。流程标题不构成业务效果证据：只有流程实例到 PurchaseOrder 等对象的明确绑定，才能说明审批对 ERP 建单产生的约束。
 
 ## 6. 接口与权限
 
 | 接口 | 权限与行为 |
 | --- | --- |
-| `GET /api/semantic-operations/workflows` | 元域智语页面权限；读取目录和同步状态 |
+| `GET /api/semantic-operations/workflows` | 元域智语页面权限；读取流程类别、跨系统目录和三种同步状态 |
 | `GET /api/semantic-operations/workflows/:code` | 读取最新候选、版本历史、流程图和实例 |
-| `POST /api/semantic-operations/workflows/sync` | `meta_model.draft.save`；Mock 使用 `scenario`，真实入口使用 `mode=configured`；均只发现候选，不发布 |
+| `POST /api/semantic-operations/workflows/sync` | `meta_model.draft.save`；手动立即同步，Mock 使用 `scenario`，真实入口使用 `mode=configured`；均只发现候选，不发布 |
 | `POST /api/semantic-operations/workflows/:code/versions/:version/review` | `meta_model.publish`；明确发布或拒绝候选 |
 | `POST /api/integrations/workflows/webhooks/:providerId` | 无用户会话但必须 HMAC 验签；按部署绑定租户入队，只触发受控拉取 |
 | `POST /api/semantic-operations/workflows/events/:eventId/replay` | `event.outbox.replay`；仅重放当前租户死信 |
@@ -219,7 +244,7 @@ npm run run:workflow-sync-worker
 
 ## 7. 当前验证
 
-专项测试 15 项覆盖：三类流程目录、确定性流程结构、增量发现、破坏性变更、候选不自动生效、人工发布切换、旧版本在途实例保留、重复同步幂等、管理/跨业务域字段脱敏、自然语言进度/历史路由、已发布版本读取、静态 Bearer 与 OAuth 服务主体、钉钉网关响应档案、地址/来源契约闸门、实例分页、节点/流转记录校验、候选实例隔离、循环游标拒绝、多连接器实例快照隔离、Webhook 签名与防重放、租户队列、重试/死信/人工重放，以及同步/发布权限分离。
+专项测试 17 项覆盖：三类权限流程目录、四类具体业务流程、生产/物流跨系统 Mock 的智脑联调、模型理解失败时明确流程编号仍走确定性只读工具、确定性流程结构、增量发现、破坏性变更、候选不自动生效、人工发布切换、旧版本在途实例保留、重复同步幂等、管理/跨业务域字段脱敏、自然语言进度/历史路由、已发布版本读取、静态 Bearer 与 OAuth 服务主体、钉钉网关响应档案、地址/来源契约闸门、实例分页、节点/流转记录校验、候选实例隔离、循环游标拒绝、多连接器实例快照隔离、Webhook 签名与防重放、租户队列、重试/死信/人工重放，以及同步/发布权限分离。
 
 运行：
 
@@ -227,6 +252,8 @@ npm run run:workflow-sync-worker
 npm run test:workflow-integration
 npm run build:semantic-ops
 ```
+
+2026-10-08 本机 HTTP 验收：运营端读取到 5 个已发布流程、5 个跨系统流程、0 个待校对版本；再次执行 Mock 手动增量同步返回 `discovered=0`、`changed=0`、`unchanged=5`，证明重复同步幂等。智脑按 `MO-20261008-021` 返回 `OA → ERP → WMS → QMS → MES` 及当前 QMS 放行节点，按 `WB-20261008-778` 返回 `DINGTALK → OMS → WMS → TMS` 及 TMS 延误节点。验收时方舟账户不可用，模型润色降级提示被如实展示，但确定性流程工具仍返回已发布证据；这证明只读业务能力可降级运行，不代表云模型连通性通过。
 
 ## 8. 需要目标企业环境完成的验收
 

@@ -93,15 +93,17 @@ export async function readWorkflowContext(roleId, identityScope, query) {
   const statusLabel = value => ({ running: '处理中', completed: '已完成', rejected: '已拒绝', cancelled: '已取消' })[value] || value;
   const wantsTimeline = /(?:记录|历史|轨迹|流转|经过|谁审批过)/u.test(String(query || ''));
   const timelineText = item => (item.timeline || []).slice(-5).map(event => `${event.occurredAt} ${event.actorDisplay || '系统'}：${event.label}`).join('；');
+  const routeText = item => item.definition?.systems?.length > 1 ? `跨系统链路 ${item.definition.systems.map(system => system.toUpperCase()).join(' → ')}` : '';
   const instanceLines = instances.map(item => {
     const history = wantsTimeline && item.timeline?.length ? `\n流转记录：${timelineText(item)}` : '';
-    return `${item.definition.name} ${item.businessKey || item.id}：${statusLabel(item.status)}，当前节点${item.currentNode?.label || '未知'}；${item.summary}${history}`;
+    const route = routeText(item);
+    return `${item.definition.name} ${item.businessKey || item.id}（${item.definition.processTypeLabel || '未分类'}）：${statusLabel(item.status)}，当前节点${item.currentNode?.label || '未知'}；${item.summary}${route ? `\n${route}` : ''}${history}`;
   });
-  const definitionLines = definitions.map(item => `${item.name}（${item.provider}/${item.code}/v${item.version}）：${item.purpose}`);
+  const definitionLines = definitions.map(item => `${item.name}（${item.processTypeLabel || '未分类'}，${item.provider}/${item.code}/v${item.version}）：${item.purpose}${item.systems?.length > 1 ? `；跨系统链路 ${item.systems.map(system => system.toUpperCase()).join(' → ')}` : ''}`);
   const summary = [...instanceLines, ...definitionLines].join('\n') || '当前已发布流程中没有找到匹配的流程定义或实例；这不代表来源系统中不存在，可能尚未同步或当前用户不可见。';
   const evidence = [
-    ...instances.map(item => ({ source: `${item.evidence.sourceSystem.toUpperCase()} 流程实例`, id: item.id, title: item.title, statement: `${item.status}；当前节点：${item.currentNode?.label || '未知'}；${item.summary}${wantsTimeline && item.timeline?.length ? `；流转记录：${timelineText(item)}` : ''}`, version: item.definition.version })),
-    ...definitions.map(item => ({ source: `${item.provider.toUpperCase()} 流程定义`, id: item.code, title: item.name, statement: item.purpose, version: item.version }))
+    ...instances.map(item => ({ source: `${item.evidence.sourceSystem.toUpperCase()} 流程实例`, id: item.id, title: item.title, statement: `${item.status}；当前节点：${item.currentNode?.label || '未知'}；${item.summary}${routeText(item) ? `；${routeText(item)}` : ''}${wantsTimeline && item.timeline?.length ? `；流转记录：${timelineText(item)}` : ''}`, version: item.definition.version })),
+    ...definitions.map(item => ({ source: `${item.provider.toUpperCase()} 流程定义`, id: item.code, title: item.name, statement: `${item.purpose}；类别：${item.processTypeLabel}；系统：${item.systems?.join(', ') || item.provider}`, version: item.version }))
   ];
   return { summary, evidence, matchedBusinessIds: instances.flatMap(item => [item.id, item.businessKey].filter(Boolean)) };
 }

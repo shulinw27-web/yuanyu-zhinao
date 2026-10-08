@@ -54,7 +54,7 @@ paths:
     get:
       tags: [SemanticOperations]
       operationId: getWorkflowIntegrationOverview
-      description: 读取当前租户的流程目录、提供方能力和同步记录；候选版本不等于已发布。
+      description: 读取当前租户的流程目录、具体流程类别、参与系统、跨系统数量、实时/定时/手动同步策略和同步记录；候选版本不等于已发布。
       responses:
         '200': { description: 流程目录、指标、提供方与同步记录 }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -62,7 +62,7 @@ paths:
     post:
       tags: [SemanticOperations]
       operationId: syncWorkflowDefinitions
-      description: 需meta_model.draft.save。发现新定义或版本并生成候选，不自动发布给智脑。
+      description: 需meta_model.draft.save。运营人员手动立即同步 Mock 或已配置真实连接器；发现新定义或版本并生成候选，不自动发布给智脑。Webhook 实时触发与 Worker 定时对账使用同一同步内核。
       requestBody:
         content:
           application/json:
@@ -83,7 +83,7 @@ paths:
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
       responses:
-        '200': { description: 最新定义、版本历史、流程图和运行实例 }
+        '200': { description: 最新定义、流程类别、参与系统、跨系统交接、版本历史、流程图和运行实例 }
         '404': { description: 流程不可见或不存在 }
   /semantic-operations/workflows/{code}/versions/{version}/review:
     post:
@@ -123,7 +123,7 @@ paths:
     get:
       tags: [Agent]
       operationId: queryPublishedWorkflowContext
-      description: 只读查询已发布流程、运行实例和有界流转记录。管理流程按主体隐藏个人数据，业务流程按角色和业务域裁剪申请人、金额、意见及参与人；不执行审批动作。
+      description: 只读查询已发布流程、具体流程类别、跨系统链路、运行实例和有界流转记录。管理流程按主体隐藏个人数据，业务流程按角色和业务域裁剪申请人、金额、意见及参与人；不执行审批动作。
       parameters:
         - { name: query, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 240 } }
       responses:
