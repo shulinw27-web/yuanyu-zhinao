@@ -7,6 +7,8 @@
 - [Mock 企业接入：材料、连接与业务对齐](MOCK_ENTERPRISE_ONBOARDING.md)
 - [元域智脑客户端兼容与发布矩阵](CLIENT_COMPATIBILITY_MATRIX.md)
 - [本体建模改进与验收记录](ONTOLOGY_MODELING_ACCEPTANCE.md)
+- [Ontology Playground 融合实施与回归记录](ONTOLOGY_PLAYGROUND_IMPLEMENTATION_REPORT.md)
+- [本体工作区深化补强：计划与阶段记录](ONTOLOGY_WORKSPACE_UPGRADE.md)
 - [钉钉 H5 接入测试报告](DINGTALK_ACCEPTANCE_2026-09-08.md)
 - [身份源适配回归报告](IDENTITY_PROVIDER_ACCEPTANCE_2026-09-08.md)
 - [真实开发与系统联调准备事项](DEVELOPMENT_READINESS.md)

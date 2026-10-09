@@ -253,6 +253,173 @@ paths:
         '409': { description: 草稿、权限、模型或确认变化；READ_PLAN_JOIN_SELECTION_REQUIRED携带joinChoices，要求人工选择关联后重新确认，不返回方案 }
         '422': { description: READ_PLAN_NEEDS_CLARIFICATION携带reason和questions；待核实缺口，不自动保存或重试 }
         '502': { description: 提案无法通过校验，不保存为成功 }
+  /semantic-operations/knowledge-library/model-links:
+    get:
+      tags: [SemanticOperations]
+      operationId: listSemanticKnowledgeModelLinks
+      description: 当前租户、主体、角色的资料依据图；复验模型及来源，失效记录不返回摘录。不是团队共享授权。
+      responses:
+        '200': { description: 关联记录、当前模型指纹与对象/关系目标目录 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 同次读取期间模型或证据发生变化 }
+    post:
+      tags: [SemanticOperations]
+      operationId: saveSemanticKnowledgeModelLink
+      description: 要求草稿保存权限及人工确认。关联绑定当前模型指纹与复验引用，不改变模型或发布。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [objectId, modelFingerprint, relationType, citation, confirmed]
+              properties:
+                objectId: { type: string, maxLength: 256, description: 对象编码，或服务器目标目录中的关系标识 }
+                modelFingerprint: { type: string, pattern: '^[a-f0-9]{24}$' }
+                relationType: { type: string, enum: [definition, rule, field, workflow] }
+                citation: { $ref: '#/components/schemas/KnowledgeCitation' }
+                confirmed: { type: boolean, const: true }
+      responses:
+        '200': { description: 保存结果，重复确认幂等 }
+        '400': { description: 输入或引用无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 模型、证据或权限发生变化 }
+        '413': { description: 关联记录超过256条 }
+  /semantic-operations/knowledge-library/model-links/suggest:
+    post:
+      tags: [SemanticOperations]
+      operationId: suggestSemanticKnowledgeModelLinks
+      description: 默认对选定引用做名称匹配；model模式须管理员允许及匹配当前提供方/模型的显式同意，分析已检索资料与目标目录。调用前后重新核验引用、权限和模型，返回至多24条候选，不自动保存。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [citations, modelFingerprint, confirmed]
+              properties:
+                citations: { type: array, minItems: 1, maxItems: 8, items: { $ref: '#/components/schemas/KnowledgeCitation' } }
+                modelFingerprint: { type: string, pattern: '^[a-f0-9]{24}$' }
+                confirmed: { type: boolean, const: true }
+                mode: { type: string, enum: [exact, model], default: exact }
+                targetIds: { type: array, minItems: 1, maxItems: 16, uniqueItems: true, items: { type: string }, description: 仅model模式可选；必须来自当前模型，用于缩小分析目录 }
+                consent:
+                  type: object
+                  additionalProperties: false
+                  required: [provider, model, confirmed]
+                  properties:
+                    provider: { type: string }
+                    model: { type: string }
+                    confirmed: { type: boolean, const: true }
+      responses:
+        '200': { description: 未持久化的候选与明确匹配方法 }
+        '400': { description: 确认或引用无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 模型或证据已变化 }
+        '413': { description: 目标目录超过本轮安全预算 }
+        '502': { description: 模型答复或关联目标契约无效 }
+        '503': { description: 模型暂不可用，不降级冒充AI分析 }
+  /semantic-operations/knowledge-library/model-views:
+    get:
+      tags: [SemanticOperations]
+      operationId: listPrivateOntologyViews
+      description: 仅当前租户、用户及角色的个人视图元信息，最多20个，不返回历史模型或原始资料。
+      responses:
+        '200': { description: 当前指纹及个人视图元信息 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 模型在读取中变化 }
+    post:
+      tags: [SemanticOperations]
+      operationId: savePrivateOntologyView
+      description: 需要草稿保存权限。保存选中对象和有界坐标，事务内校验模型指纹与视图修订，不改变语义模型。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedRevision, label, selectedId, modelFingerprint, layout]
+              properties:
+                id: { type: string, format: uuid }
+                expectedRevision: { type: integer, minimum: 0 }
+                label: { type: string, minLength: 1, maxLength: 80 }
+                selectedId: { type: string }
+                modelFingerprint: { type: string, pattern: '^[a-f0-9]{24}$' }
+                layout:
+                  type: object
+                  additionalProperties: false
+                  required: [fingerprint, positions, scale, offset]
+                  properties:
+                    fingerprint: { type: string, pattern: '^[a-f0-9]{24}$' }
+                    positions:
+                      type: object
+                      maxProperties: 500
+                      additionalProperties:
+                        type: object
+                        additionalProperties: false
+                        required: [x, y]
+                        properties:
+                          x: { type: number, minimum: 0, maximum: 10000 }
+                          y: { type: number, minimum: 0, maximum: 50000 }
+                    scale: { type: number, minimum: 0.5, maximum: 2.5 }
+                    offset:
+                      type: object
+                      additionalProperties: false
+                      required: [x, y]
+                      properties:
+                        x: { type: number, minimum: -10000, maximum: 10000 }
+                        y: { type: number, minimum: -10000, maximum: 10000 }
+      responses:
+        '200': { description: 保存后的个人视图及修订 }
+        '400': { description: 坐标、选中对象或输入格式无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 当前私有范围内未找到该视图 }
+        '409': { description: 模型或视图修订冲突 }
+        '413': { description: 个人视图超过20个 }
+  /semantic-operations/knowledge-library/model-views/{id}:
+    get:
+      tags: [SemanticOperations]
+      operationId: readPrivateOntologyView
+      description: 登录并重新校验权限、私有范围和当前模型指纹。旧模型视图返回冲突；链接不授予读取权限。
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: 当前授权版本的布局与选中对象 }
+        '400': { description: 视图标识无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 私有范围内无该视图 }
+        '409': { description: 模型已变化，不能恢复旧布局 }
+  /semantic-operations/knowledge-library/model-links/{id}/retract:
+    post:
+      tags: [SemanticOperations]
+      operationId: retractSemanticKnowledgeModelLink
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedRevision]
+              properties:
+                expectedRevision: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: 按修订撤回，保留历史记录 }
+        '400': { description: 修订格式无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 当前范围中无该关联 }
+        '409': { description: 修订冲突，需重新核对 }
         '503': { description: 模型未返回有效来源结果 }
   /agent/knowledge-library/joint-plans:
     get:
@@ -1819,6 +1986,14 @@ components:
       properties:
         text: { type: string, maxLength: 4000 }
         parentTaskId: { type: string }
+        parentProposalRevision: { type: integer, minimum: 1, description: 自然语言修订当前候选时必需的版本比较值 }
+        workspaceContext:
+          type: object
+          additionalProperties: false
+          required: [fingerprint, objectId]
+          properties:
+            fingerprint: { type: string }
+            objectId: { type: string }
         attachments:
           type: array
           maxItems: 5

@@ -9,7 +9,6 @@ export { proposeSemanticReadPlan } from '../../services/semantic-read-plan-propo
 export { buildKnowledgeBusinessBrief, listKnowledgeBusinessPlans } from '../../services/knowledge-business-brief-service.js';
 export { previewKnowledgeMaterial } from '../../services/knowledge-material-review-service.js';
 export { knowledgePrincipalKey } from '../../services/weknora-knowledge-provider.js';
-export { previewLibraryDocument, saveLibraryDocument, retractLibraryDocument, listLibraryDocuments, readLibraryDocument, searchLibraryDocuments } from '../../services/knowledge-library-service.js';
 export { runOntologyCaseReplay, runOntologyReadReplay, getOntologyCaseReplay, publishGovernedOntology } from '../../services/ontology-runtime-service.js';
 export { getWorldModel } from '../../services/risk-service.js';
 export { getEnterpriseKnowledgeCatalog, retrieveEnterpriseKnowledge } from '../../services/enterprise-knowledge-service.js';
@@ -30,7 +29,8 @@ export {
   getOAMetaModelDraft,
   getOAMetaModelSimulation,
   publishOAMetaModel,
-  saveOAMetaModelDraft,
+  getOAMetaModelRuntimeTransactionEntry,
+  getOAMetaModelDraftFromRuntime,
   simulateBuildOAMetaModel,
   validateOAMetaModelDraft
 } from '../../services/meta-model-service.js';

@@ -162,6 +162,12 @@ test('multiple published plans require explicit selection and per-plan replay; m
     assert.equal((await read({})).code, 'ONTOLOGY_PLAN_SELECTION_REQUIRED');
     assert.equal((await read({ planId: 'not-published' })).code, 'ONTOLOGY_PLAN_SELECTION_REQUIRED');
     const alternateResult = await read({ planId: alternative.id });
+    assert.equal(alternateResult.graph.mode, 'authorized_instance_snapshot');
+    assert.equal(alternateResult.graph.objects.length, alternateResult.records.length);
+    assert.equal(alternateResult.graph.modelFingerprint, ontology.published.fingerprint);
+    assert.ok(alternateResult.graph.relationships.length > 0);
+    const graphIds = new Set(alternateResult.graph.objects.map(item => item.id));
+    assert.ok(alternateResult.graph.relationships.every(item => graphIds.has(item.from) && graphIds.has(item.to)));
     assert.equal(alternateResult.results.find(item => item.id === 'credit').value, creditV2);
     assert.equal(alternateResult.metadata.selectedReadPlan.id, alternative.id);
     const partial = await read({ planId: positive.planId, input: '完整影响范围' });

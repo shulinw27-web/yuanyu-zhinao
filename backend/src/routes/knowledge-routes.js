@@ -1,5 +1,5 @@
-import { previewLibraryDocument, saveLibraryDocument, retractLibraryDocument, listLibraryDocuments, readLibraryDocument, searchLibraryDocuments,
-  listKnowledgeStudies, saveKnowledgeStudy, readKnowledgeStudy, restoreKnowledgeStudy, prepareKnowledgeStudy,
+import { previewLibraryDocument, saveLibraryDocument, retractLibraryDocument, listLibraryDocuments, readLibraryDocument, searchLibraryDocuments, knowledgeModelLinks } from '../domains/knowledge/public-api.js';
+import { listKnowledgeStudies, saveKnowledgeStudy, readKnowledgeStudy, restoreKnowledgeStudy, prepareKnowledgeStudy,
   createLocalKnowledgeProvider, buildKnowledgeBrief, getEffectiveAccess, loadWeKnoraRuntimeProvider, answerKnowledgeQuestion, supplementKnowledgeSources, proposeSemanticReadPlan, knowledgeAnswerPolicy, previewKnowledgeMaterial, knowledgePrincipalKey, buildKnowledgeBusinessBrief, listKnowledgeBusinessPlans } from '../domains/governance/public-api.js';
 
 export async function handleKnowledgeRoutes({ req, res, url, role, agentIdentity, effectiveAccess, selectActionRole, denyButton, readBody, send }) {
@@ -15,6 +15,23 @@ export async function handleKnowledgeRoutes({ req, res, url, role, agentIdentity
   const reply = result => { send(res, result.error ? result.status || 400 : 200, result); return true; };
   // POST read operations also require a page grant; app's GET guard alone is insufficient.
   if (!(effectiveAccess || getEffectiveAccess(role, agentIdentity)).pagePermissionIds.includes(page)) return reply({ error: 'PAGE_PERMISSION_DENIED', status: 403 });
+  if (semantic && url.pathname === `${base}/model-views` && req.method === 'GET') return reply(await knowledgeModelLinks.views.list({ context, canRead }));
+  const modelView = semantic && url.pathname.slice(base.length).match(/^\/model-views\/([a-f0-9-]{36})$/);
+  if (modelView && req.method === 'GET') return reply(await knowledgeModelLinks.views.read({ context, id: modelView[1], canRead }));
+  if (semantic && url.pathname === `${base}/model-views` && req.method === 'POST') {
+    if (!selectActionRole(writePermission)) { denyButton(writePermission); return true; }
+    return reply(await knowledgeModelLinks.views.save({ context, body: await readBody(req), canRead: () => { const access = getEffectiveAccess(role, agentIdentity); return access.pagePermissionIds.includes(page) && access.buttonPermissionIds.includes(writePermission); } }));
+  }
+  if (semantic && url.pathname === `${base}/model-links` && req.method === 'GET') return reply(await knowledgeModelLinks.list({ context, resolveProvider, canRead }));
+  const linkRetract = semantic && url.pathname.slice(base.length).match(/^\/model-links\/([a-f0-9-]{36})\/retract$/);
+  const linkSuggest = semantic && url.pathname === `${base}/model-links/suggest`;
+  if (semantic && (url.pathname === `${base}/model-links` || linkRetract || linkSuggest) && req.method === 'POST') {
+    if (!selectActionRole(writePermission)) { denyButton(writePermission); return true; }
+    const canWrite = () => { const access = getEffectiveAccess(role, agentIdentity); return access.pagePermissionIds.includes(page) && access.buttonPermissionIds.includes(writePermission); };
+    const body = await readBody(req);
+    if (linkSuggest) return reply(await knowledgeModelLinks.suggest({ context, body, resolveProvider, canRead: canWrite }));
+    return reply(linkRetract ? await knowledgeModelLinks.retract({ context, id: linkRetract[1], body, canRead: canWrite }) : await knowledgeModelLinks.save({ context, body, resolveProvider, canRead: canWrite }));
+  }
   if (req.method === 'GET' && url.pathname === `${base}/joint-plans` && !semantic) {
     return reply(await listKnowledgeBusinessPlans({ context, canRead }));
   }

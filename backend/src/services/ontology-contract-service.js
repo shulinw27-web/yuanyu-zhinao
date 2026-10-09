@@ -14,6 +14,7 @@ export function validateOntologyContract(draft) {
   const check = (name, passed, detail) => checks.push({ name, status: passed ? 'passed' : 'failed', detail });
   const readPlans = validateOntologyReadPlans(draft);
   check('受控关联查询与计算', readPlans.status === 'passed', readPlans.code || '仅支持显式 FK、有限只读运算及绑定版本的案例回放；不执行任意脚本。');
+  if (readPlans.targets) checks[checks.length - 1].targets = readPlans.targets;
   check('建模场景', modelingProfiles.includes(draft.modelingProfile), '选择通用业务场景或 OA 审批模板；模板选择不改变平台权限。');
   if (draft.modelingProfile === 'general') check('业务目标与验收问题', typeof scenario.objective === 'string' && Boolean(scenario.objective.trim())
     && Array.isArray(scenario.questions) && scenario.questions.length > 0 && scenario.questions.every((item) => typeof item === 'string' && item.trim()), '通用场景必须说明解决什么问题，并至少提供一个可验收的业务问题。');
@@ -39,6 +40,20 @@ export function validateOntologyContract(draft) {
       && (!start || !end || Date.parse(start) < Date.parse(end))
       && (relation.provenanceType !== 'confirmed' || Boolean(relation.evidence?.trim()));
   }), '关系来源必须明确；有效期使用可解析时间且结束晚于开始。人工确认必须保留证据说明；这不是实例级历史追溯验收。');
+  const sections = { '状态机引用': ['stateMachines'], '判断能力绑定': ['decisionBindings'], '动作能力绑定': ['actionBindings'] };
+  const validEntry = {
+    stateMachines: machine => ids.has(machine.object) && Array.isArray(machine.states) && machine.states.includes(machine.initial) && Array.isArray(machine.terminal) && machine.terminal.every(state => machine.states.includes(state)),
+    decisionBindings: binding => ids.has(binding?.objectType) && catalog.some(item => item.id === binding.capabilityId && item.version === binding.version) && validateDecisionBinding(binding, draft.objectTypes.find(object => object.id === binding.objectType)) && decisions.filter(item => item.objectType === binding.objectType && item.capabilityId === binding.capabilityId).length === 1,
+    actionBindings: binding => ids.has(binding?.objectType) && decisions.some(decision => decision.objectType === binding.objectType && decision.capabilityId === binding.decisionId) && catalog.some(item => item.id === binding.decisionId && item.toolIds.includes(binding.toolId))
+  };
+  for (const item of checks.filter(item => item.status === 'failed' && sections[item.name])) {
+    item.targets = sections[item.name].flatMap(section => {
+      const entries = ['decisionBindings', 'actionBindings'].includes(section) ? scenario[section] : draft[section];
+      return (Array.isArray(entries) ? entries : []).flatMap((entry, index) => validEntry[section](entry) ? [] : [{ kind: 'section', section, index, field: 'definition' }]);
+    });
+  }
+  const evidence = checks.find(item => item.name === '关系证据与有效期');
+  if (evidence.status === 'failed') evidence.targets = draft.relationshipTypes.filter(relation => !['declared', 'observed', 'inferred', 'confirmed'].includes(relation.provenanceType || 'declared') || relation.provenanceType === 'confirmed' && !relation.evidence?.trim() || relation.validFrom && !Number.isFinite(Date.parse(relation.validFrom)) || relation.validTo && !Number.isFinite(Date.parse(relation.validTo)) || relation.validFrom && relation.validTo && Date.parse(relation.validFrom) >= Date.parse(relation.validTo)).map(relation => ({ kind: 'relation', from: relation.from, predicate: relation.predicate, to: relation.to, field: 'evidence / validFrom / validTo' }));
   return checks;
 }
 

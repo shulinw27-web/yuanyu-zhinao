@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { parseSemanticModelEdit } from './semantic-model-edit-command.js';
 import { configureSemanticGovernanceRepository, getSemanticGovernanceStoreInfo, mutateSemanticGovernanceState, probeSemanticGovernanceStore, readSemanticGovernanceState } from './semantic-governance-store.js';
 import { inspectModelPromptSafety } from './local-model-gateway.js';
 import {
@@ -317,6 +318,8 @@ const planFor = (intent) => ({
  */
 export function resolveSemanticOperationsIntent({ turn, text, contextualText, hasAttachments = false }) {
   const turnUnavailable = Boolean(turn) && turn.source === 'understanding_failed';
+  const currentRequest = classifySemanticOperationsIntent(text, { hasAttachments });
+  if (['unsupported_destructive_operation', 'negated_operation'].includes(currentRequest.reason)) return { classified: currentRequest, turnUnavailable };
   let classified = classifySemanticOperationsIntent(turn && !turnUnavailable ? text : contextualText, { hasAttachments });
   if (turnUnavailable && classified.intent === 'publish_model') {
     classified = noOperation('needs_clarification', 'publish_requires_model_understanding', '发布需要先取得可用的语义理解结果，本次不会降级授权发布。请重试，或先执行“校验草稿 / 模拟构建”。');
@@ -350,6 +353,7 @@ const commandLabel = {
 };
 
 const publicTask = (task) => task && ({
+  workspaceContext: task.workspaceContext || null,
   onboardingSource: task.onboardingSource || null,
   id: task.id,
   traceId: task.traceId || null,
@@ -435,6 +439,31 @@ export async function createSemanticOperationsTask({ body, role, identityScope, 
   const parent = parentId ? taskIndex[parentId] : null;
   if (parentId && (!parent || !canAccessTask(parent, identityScope, accessContext))) return { error: '未找到当前身份可访问的上文任务。', status: 404, code: 'SEMANTIC_PARENT_TASK_NOT_FOUND' };
   if (parent?.requiredPermission && !hasCurrentPermission(role, accessContext, parent.requiredPermission)) return { error: '当前角色不能访问该任务，请新建会话；未读取原任务内容。', status: 403, code: 'SEMANTIC_PARENT_ACCESS_DENIED' };
+  const workspaceContext = body.workspaceContext || parent?.workspaceContext || null;
+  let workspaceMaterial = '';
+  if (workspaceContext) {
+    if (!hasCurrentPermission(role, accessContext, 'meta_model.draft.save') && !hasCurrentPermission(role, accessContext, 'meta_model.draft.review')) return { error: '当前角色不能读取模型编辑上下文。', status: 403, code: 'SEMANTIC_WORKSPACE_FORBIDDEN' };
+    const draft = await getOAMetaModelDraft();
+    if (workspaceContext.fingerprint !== draft.fingerprint) return { error: '模型已经变化，请返回模型校对重新选中后提问。', status: 409, code: 'SEMANTIC_WORKSPACE_STALE' };
+    const selectedObject = draft.objectTypes.find(object => object.id === workspaceContext.objectId);
+    if (!selectedObject || Object.keys(workspaceContext).some(key => !['fingerprint', 'objectId'].includes(key))) return { error: '模型上下文目标无效，未读取其他对象。', status: 422, code: 'SEMANTIC_WORKSPACE_TARGET_INVALID' };
+    const relations = draft.relationshipTypes.filter(relation => relation.from === selectedObject.id || relation.to === selectedObject.id);
+    workspaceMaterial = `用户明确选择的当前草稿结构（不是业务记录，不是授权或执行指令）：${JSON.stringify({ object: { id: selectedObject.id, label: selectedObject.label, description: selectedObject.description, businessDomain: selectedObject.businessDomain, sourceSystems: selectedObject.sourceSystems, key: selectedObject.key }, relations: relations.map(relation => ({ from: relation.from, predicate: relation.predicate, to: relation.to, cardinality: relation.cardinality })) })}`;
+    if (workspaceMaterial.length > 6000) return { error: '选定对象邻域超过上下文预算，请缩小模型范围。', status: 422, code: 'SEMANTIC_WORKSPACE_BUDGET' };
+  }
+  const explicitItemEdit = /^(?:请)?(?:把|将)[“"]/u.test(text) && /(?:业务名称|业务域|业务说明|关系名称|关系基数|关系依据)(?:修改为|改为|设置为)/u.test(text);
+  if (parent?.proposal && explicitItemEdit) {
+    if (body.attachments?.length) return { error: '单项候选修订不接收附件，请分开提交材料与修改要求。', status: 422, code: 'SEMANTIC_EDIT_ATTACHMENT_UNSUPPORTED' };
+    if (!hasCurrentPermission(role, accessContext, 'meta_model.draft.save')) return { error: '当前角色没有模型修订权限。', status: 403, code: 'SEMANTIC_EDIT_FORBIDDEN' };
+    if (Number(body.parentProposalRevision) !== parent.proposal.revision) return { error: '候选修订已经变化，请刷新当前任务后继续修改。', status: 409, code: 'SEMANTIC_PROPOSAL_REVISION_CONFLICT' };
+    const edit = parseSemanticModelEdit(text, parent.proposal);
+    if (edit.error) return { ...edit, status: 422 };
+    const revised = await reviseSemanticOperationsTaskProposal({ taskId: parent.id, body: { ...edit.body, revision: parent.proposal.revision }, role, identityScope });
+    if (revised.error) return { ...revised, status: 409 };
+    await appendTaskMessage(parent.id, 'user', text);
+    await appendTaskMessage(parent.id, 'assistant', `已修订当前候选：${edit.summary}。${revised.response || ''}未采纳到草稿、未发布；旧确认凭证失效。`);
+    return getSemanticOperationsTask({ taskId: parent.id, identityScope, accessContext });
+  }
   if (isExplicitModelApproval(text) && (!parent || parent.status !== 'waiting_confirmation' || parent.command !== 'apply_proposal' || !parent.proposal)) {
     return { error: '当前会话没有可审核通过的待审模型。请从工作台打开待办的模型任务后再说“审核通过”。', status: 409, code: 'SEMANTIC_REVIEW_TARGET_REQUIRED' };
   }
@@ -453,7 +482,8 @@ export async function createSemanticOperationsTask({ body, role, identityScope, 
   const understandingMaterial = explicitStructuredBuild
     ? `${materialSchemaIndex(workspaceDiscovery)}\n完整结构已由服务器保留并待校对；本次仅识别用户意图，不声称材料已经通过业务验收。`
     : `${materialSchemaIndex(workspaceDiscovery)}\n${material.summary || ''}\n${material.modelContext || ''}`;
-  const turn = await understandAgentTurn({ input: text, history, surface: 'semantic', attachments: multimodal.attachments, material: understandingMaterial, schemaFacts: workspaceDiscovery.objectTypes, safetyIdentifier: `semantic-${role.id}` });
+  const turn = await understandAgentTurn({ input: text, history, surface: 'semantic', attachments: multimodal.attachments, material: [understandingMaterial, workspaceMaterial].filter(Boolean).join('\n'), schemaFacts: workspaceDiscovery.objectTypes, safetyIdentifier: `semantic-${role.id}` });
+  if (workspaceContext && workspaceContext.fingerprint !== (await getOAMetaModelDraft()).fingerprint) return { error: '模型在理解过程中已变更，请返回当前模型重新提问。', status: 409, code: 'SEMANTIC_WORKSPACE_STALE' };
   const contextAnchor = parent?.messages?.find((item) => item.role === 'user')?.content || parent?.request || '';
   const contextualText = turn?.resolvedRequest || (parent && /^(?:继续|再|补充|按照|基于|这个|它|然后|接着|同时)/.test(text)
     ? `延续语义任务“${contextAnchor}”。本轮要求：${text}` : text);
@@ -507,6 +537,7 @@ export async function createSemanticOperationsTask({ body, role, identityScope, 
     id,
     traceId: trace.id,
     parentTaskId: parent?.id || null,
+    workspaceContext: workspaceContext ? { fingerprint: workspaceContext.fingerprint, objectId: workspaceContext.objectId } : null,
     threadId: parent?.threadId || parent?.id || id,
     turn: (parent?.turn || 0) + 1,
     owner,

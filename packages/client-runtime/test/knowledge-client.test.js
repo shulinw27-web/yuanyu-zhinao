@@ -29,9 +29,28 @@ for (const surface of ['agent', 'semantic-operations']) {
     await client.supplement({ question: '审批回执', citations: [], confirmed: true });
     assert.ok(calls.at(-1).path.endsWith('/answer-sources'));
     if (surface === 'semantic-operations') {
+      await client.modelLinks();
+      assert.equal(calls.at(-1).path, '/semantic-operations/knowledge-library/model-links');
+      await client.saveModelLink({ objectId: 'Organization', confirmed: true });
+      assert.equal(calls.at(-1).method, 'POST');
+      await client.suggestModelLinks({ citations: [], confirmed: true });
+      assert.ok(calls.at(-1).path.endsWith('/model-links/suggest'));
+      await client.retractModelLink('link/foreign', 3);
+      assert.ok(calls.at(-1).path.endsWith('/model-links/link%2Fforeign/retract'));
+      assert.deepEqual(JSON.parse(calls.at(-1).body), { expectedRevision: 3 });
       await client.proposeReadPlan({ request: '生成额度计算预览' });
       assert.ok(calls.at(-1).path.endsWith('/read-plan-proposal'));
-    } else assert.equal(client.proposeReadPlan, undefined);
+      await client.modelViews(); assert.ok(calls.at(-1).path.endsWith('/model-views'));
+      await client.modelView('view/foreign'); assert.ok(calls.at(-1).path.endsWith('/model-views/view%2Fforeign'));
+      await client.saveModelView({ expectedRevision: 0 }); assert.equal(calls.at(-1).method, 'POST');
+    } else {
+      assert.equal(client.proposeReadPlan, undefined);
+      assert.equal(client.modelLinks, undefined);
+      assert.equal(client.saveModelLink, undefined);
+      assert.equal(client.suggestModelLinks, undefined);
+      assert.equal(client.retractModelLink, undefined);
+      assert.equal(client.modelViews, undefined); assert.equal(client.modelView, undefined); assert.equal(client.saveModelView, undefined);
+    }
     if (surface === 'agent') {
       await client.jointPlans();
       assert.equal(calls.at(-1).path, '/agent/knowledge-library/joint-plans');

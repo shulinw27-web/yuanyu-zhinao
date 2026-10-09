@@ -1,5 +1,7 @@
 # 使用指南
 
+- [图谱建模工作台](ONTOLOGY_GRAPH_WORKSPACE_GUIDE.md)：对象关系、系统字段映射、模板、格式交换、资料依据、模型分享及智脑实例图。
+
 - [Mock 企业接入与业务对齐](../development/MOCK_ENTERPRISE_ONBOARDING.md)：空白项目、材料、本地接口、映射表单、原文引用、Agent 建模交接及缺主键补充操作。
 
 - [企业沙箱初始化与运行准入](TENANT_RUNTIME_CONTROL.md)：OIDC/钉钉映射审核、原子初始化、请求额度、撤权复验及门户申请界面。
@@ -24,6 +26,7 @@
 
 - [智脑桌面工作台执行协议 v0.1](DESKTOP_WORKBENCH_EXECUTION.md)
 - [业务场景建模与质量判断使用指南](ONTOLOGY_SCENARIO_MODELING.md)
+- [主数据对照映射执行指南](ONTOLOGY_MASTER_DATA_MAPPING.md)
 - [元域智脑各端接入指南](CLIENT_ACCESS_GUIDE.md)
 - [国内协同平台接入指南（钉钉、企微、飞书、WeLink、WPS）](DOMESTIC_PLATFORM_ACCESS_GUIDE.md)
 - [钉钉智脑工作台接入指南](DINGTALK_INTEGRATION.md)

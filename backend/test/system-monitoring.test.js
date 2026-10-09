@@ -259,7 +259,7 @@ const runLeaseProcess = ({ databasePath, workerId, nowAt }) => new Promise((reso
   child.stdout.on('data', chunk => { stdout += chunk; });
   child.stderr.on('data', chunk => { stderr += chunk; });
   child.once('error', reject);
-  child.once('exit', code => {
+  child.once('close', code => {
     if (code !== 0) return reject(new Error(`lease worker ${workerId} failed (${code}): ${stderr}`));
     try { resolve(JSON.parse(stdout.trim().split(/\r?\n/u).at(-1))); } catch { reject(new Error(`lease worker ${workerId} returned invalid JSON: ${stdout}\n${stderr}`)); }
   });
@@ -275,7 +275,8 @@ test('共享 SQLite 下多进程同租户只能有一个监控 Leader', async ()
     assert.equal(takeover.acquired, true);
     assert.equal(takeover.leaderWorkerId, 'takeover');
   } finally {
-    await rm(directory, { recursive: true, force: true });
+    // Windows may release SQLite handles shortly after child stdio closes.
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
 

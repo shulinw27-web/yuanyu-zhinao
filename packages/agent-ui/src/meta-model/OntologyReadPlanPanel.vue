@@ -110,7 +110,7 @@ const expression = (e, depth = 0) => {
     <article v-for="plan in pending || plans" :key="plan.id">
       <h4>{{ plan.label }} · {{ pending ? '尚未采用' : '当前草稿' }}</h4>
       <p>覆盖：{{ plan.coverage ? '仅声明关系图内的有界完整性，非全企业实时真相' : '仅当前计划，不承诺完整影响范围' }} · {{ plan.analysis?.enabled ? '计算后按当前问题解释证据' : '仅确定性计算' }}</p>
-      <ol><li v-for="ds in plan.datasets" :key="ds.id"><b>{{ ds.objectType }}</b> · {{ ds.id }}<small v-for="(filter, index) in ds.where" :key="index">{{ filter.field }} ← {{ filter.target ? '用户本轮明确编号' : `${filter.dataset}.${filter.sourceField}` }}</small></li></ol>
+      <ol><li v-for="ds in plan.datasets" :key="ds.id"><b>{{ ds.objectType }}</b> · {{ ds.id }}<small v-for="(filter, index) in ds.where" :key="index">{{ filter.field }} ← {{ filter.target ? '用户本轮明确编号' : `${filter.dataset}.${filter.sourceField}` }}<span v-if="filter.mapping">（经 {{ filter.mapping.objectType }} · {{ filter.mapping.fromField }} → {{ filter.mapping.toField }} 转换；确认状态须为confirmed；UTC {{ filter.mapping.asOf }}，尚需授权、校验和回放）</span></small></li></ol>
       <details v-for="item in plan.outputs" :key="item.id"><summary>{{ item.label }} · {{ item.unit || '判断' }}</summary><p>{{ expression(item.expression) }}</p></details>
       <section v-if="plan.preconditions?.length" aria-label="计算前置条件"><b>计算前必须全部满足，否则停止</b><ul><li v-for="(condition, index) in plan.preconditions" :key="index">{{ expression(condition) }}</li></ul></section>
       <p v-for="ds in plan.datasets.filter(d => d.expand)" :key="`${ds.id}-expansion`">{{ ds.id }} 向后展开 {{ ds.expand.edgeObjectType }}：{{ ds.expand.fromField }} → {{ ds.expand.toField }}，状态 {{ Array.isArray(ds.expand.activeStates) ? ds.expand.activeStates.join('、') : '待补充有效状态' }}，最多 {{ ds.expand.maxDepth }} 层；环、断链或未完成时停止计算。</p>

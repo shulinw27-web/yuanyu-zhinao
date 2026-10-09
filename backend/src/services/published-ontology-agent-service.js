@@ -6,6 +6,7 @@ import { admitSemanticRecord } from './semantic-record-contract-service.js';
 import { modelFailureDiagnostics, prohibitsAction } from './agent-turn-understanding-service.js';
 import { encodeOntologyAnalysisEvidence, buildOntologyAnalysisPrompt, ontologyAnalysisComparisons } from './ontology-analysis-evidence.js';
 import { createOntologyClaimContext, validateOntologyClaims, renderOntologyClaims } from './ontology-analysis-claims.js';
+import { buildOntologyResultGraph } from './ontology-result-graph.js';
 
 // Current explicit factual follow-ups can require a fresh read even when the
 // model proposes dialogue. Never promote failed understanding or write intent.
@@ -109,7 +110,8 @@ export async function runPublishedOntologyRead({ ontology, roleId, scope, target
     // Recheck AFTER model latency too: no revoked data or stale model answers.
     await validatePublishedReadEvidence({ ontology, roleId, scope, records });
     const status = partial || analysis.status === 'incomplete' ? 'partial' : 'completed';
-    return { status, code: status === 'partial' ? 'ONTOLOGY_READ_PARTIAL' : 'ONTOLOGY_READ_COMPLETED', results, queries, records, coverage, analysis, timing,
+    const graph = buildOntologyResultGraph(ontology.published.draft, records, ontology.published.version, ontology.published.fingerprint, comparisons.map(comparison => comparison.mappingEvidence));
+    return { status, code: status === 'partial' ? 'ONTOLOGY_READ_PARTIAL' : 'ONTOLOGY_READ_COMPLETED', results, queries, records, coverage, analysis, timing, graph,
       comparisons: comparisons.map(c => ({ target: c.target, results: c.results, coverage: c.coverage })),
       metadata: { ...ontology.metadata, selectedReadPlan: { id: plans[0].id, label: plans[0].label } },
       text: `${partial ? '当前只完成声明计划的局部读取，不能代表完整影响范围。\n' : ''}${analysis.status === 'incomplete' ? '计算已完成，但解释未通过校验或预算限制，尚未完成分析。\n' : ''}${answer}\n\n依据：已发布模型 ${ontology.published.version}（${ontology.published.fingerprint}）；${records.length} 条授权来源记录、${queries.length} 个关联查询步骤。\n记录时间：${dates.join('、')}。这是来源快照计算，不作实时履约承诺；本次未执行任何业务写入。` };

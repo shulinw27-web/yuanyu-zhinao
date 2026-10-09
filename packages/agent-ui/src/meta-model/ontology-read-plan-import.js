@@ -12,6 +12,13 @@ function safePlanShape(plan) {
     if (!object(ds) || !id(ds.id) || !id(ds.objectType) || !Array.isArray(ds.where) || ds.where.length !== 1) return false;
     const clause = ds.where[0];
     if (!object(clause) || !id(clause.field) || !(clause.target === true || clause.target === undefined && id(clause.dataset) && id(clause.sourceField))) return false;
+    if (clause.mapping !== undefined) {
+      const m = clause.mapping; const fields = ['objectType', 'fromField', 'toField', 'statusField', 'versionField', 'validFromField', 'validToField'];
+      if (clause.target || !object(m) || !fields.every(key => id(m[key])) || !text(m.predicate, 48) || !m.predicate
+        || Object.keys(m).some(key => ![...fields, 'predicate', 'asOf'].includes(key))
+        || !text(m.asOf, 30) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(m.asOf) || !Number.isFinite(Date.parse(m.asOf))
+        || new Date(m.asOf).toISOString() !== (m.asOf.includes('.') ? m.asOf : m.asOf.replace('Z', '.000Z'))) return false;
+    }
     if (ds.filter !== undefined && (!object(ds.filter) || !id(ds.filter.field) || !Array.isArray(ds.filter.values) || !ds.filter.values.length || ds.filter.values.length > 16 || !ds.filter.values.every(scalar))) return false;
     if (ds.expand !== undefined) {
       const expand = ds.expand;

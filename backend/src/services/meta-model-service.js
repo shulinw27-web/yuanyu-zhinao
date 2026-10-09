@@ -4,6 +4,7 @@ import { buildOntologyImpact, inferObjectGranularity, modelingProfiles, objectGr
 import { getBusinessDecisionCatalog } from './business-decision-service.js';
 import { semanticFingerprint } from './semantic-model-fingerprint.js';
 import { assertSemanticTenant, currentSemanticTenant } from './semantic-tenant-context.js';
+import { sanitizeKeyMapping } from '../domain-contracts/key-mapping.js';
 
 const now = () => new Date().toISOString();
 
@@ -178,6 +179,32 @@ const validateDraft = (draft) => {
     { name: '数据契约与质量规则', status: Boolean(draft.dataContracts?.length) && draft.dataContracts.every((item) => item.id && item.sourceSystem && objectIds.has(item.objectType) && item.schemaVersion) && Boolean(draft.qualityRules?.length) && draft.qualityRules.every((item) => item.id && objectIds.has(item.objectType) && item.rule) ? 'passed' : 'failed', detail: '来源对象必须有版本化数据契约，并配置可执行的数据质量规则。' },
     { name: '术语、访问与血缘', status: Boolean(draft.glossaryTerms?.length) && draft.glossaryTerms.every((item) => item.term && item.definition && objectIds.has(item.objectType)) && Boolean(draft.accessPolicies?.length) && draft.accessPolicies.every((item) => objectIds.has(item.objectType) && item.effect) && Boolean(draft.lineageEdges?.length) && draft.lineageEdges.every((item) => item.from && objectIds.has(item.to)) ? 'passed' : 'failed', detail: '核心业务术语、对象访问策略和来源血缘必须明确。' }
   ];
+  for (const check of checks.filter(item => item.status === 'failed')) {
+    const targets = [];
+    for (const object of draft.objectTypes) {
+      const fields = check.name === '语义锚点与来源' ? [!object.semanticType && 'semanticType', !object.coreObject && 'coreObject', (!object.sourceSystems?.length || object.sourceSystems.includes('待观察')) && 'sourceSystems']
+        : check.name === '数据分级' ? [!object.classification && 'classification']
+          : check.name === '业务对象与主键' ? [!object.label && 'label', !object.key && 'key', (!object.fields?.length || !object.fields.includes(object.key)) && 'fields'] : [];
+      for (const field of fields.filter(Boolean)) targets.push({ kind: 'object', targetId: object.id, field });
+    }
+    if (check.name === '关系闭环') for (const relation of draft.relationshipTypes) {
+      if (!objectIds.has(relation.from) || !objectIds.has(relation.to) || !relation.predicate) targets.push({ kind: 'relation', from: relation.from, predicate: relation.predicate, to: relation.to, field: !objectIds.has(relation.from) ? 'from' : !objectIds.has(relation.to) ? 'to' : 'predicate' });
+    }
+    const sections = { '指标口径': ['metrics'], '数据契约与质量规则': ['dataContracts', 'qualityRules'], '术语、访问与血缘': ['glossaryTerms', 'accessPolicies', 'lineageEdges'] };
+    const validAsset = {
+      metrics: item => item.id && item.label && item.grain && objectIds.has(item.grain) && item.expression && item.aggregation,
+      dataContracts: item => item.id && item.sourceSystem && objectIds.has(item.objectType) && item.schemaVersion,
+      qualityRules: item => item.id && objectIds.has(item.objectType) && item.rule,
+      glossaryTerms: item => item.term && item.definition && objectIds.has(item.objectType),
+      accessPolicies: item => objectIds.has(item.objectType) && item.effect,
+      lineageEdges: item => item.from && objectIds.has(item.to)
+    };
+    if (sections[check.name]) for (const section of sections[check.name]) {
+      if (Array.isArray(draft[section]) && !draft[section].length) targets.push({ kind: 'section', section, index: -1, field: 'definition' });
+      (draft[section] || []).forEach((item, index) => { if (!validAsset[section](item)) targets.push({ kind: 'section', section, index, field: 'definition' }); });
+    }
+    if (targets.length) check.targets = targets;
+  }
   return { status: checks.every((item) => item.status === 'passed') ? 'passed' : 'failed', checks, checkedAt: now() };
 };
 
@@ -206,7 +233,7 @@ const sanitizeObjectTypes = (value) => (Array.isArray(value) ? value : []).slice
     };
   });
   return {
-    id, label, source, key, fields, fieldDefinitions,
+    id, label, source, key, fields, fieldDefinitions, businessDomain: String(item.businessDomain || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 48),
     granularity: item.granularity || inferObjectGranularity(id),
     classification: String(item.classification || '内部受限').trim().slice(0, 32), semanticType: String(item.semanticType || id).trim().slice(0, 48),
     coreObject: String(item.coreObject || coreBindingDefaults[id] || id).trim().slice(0, 32), description: String(item.description || '').trim().slice(0, 180), sourceSystems
@@ -215,7 +242,7 @@ const sanitizeObjectTypes = (value) => (Array.isArray(value) ? value : []).slice
 
 const sanitizeRelationshipTypes = (value, objectTypes) => {
   const allowed = new Set(objectTypes.map((item) => item.id));
-  return (Array.isArray(value) ? value : []).slice(0, 40).map((item) => ({ predicate: String(item.predicate || '').replace(/[^\p{L}\p{N}_]/gu, '').slice(0, 48), from: String(item.from || ''), to: String(item.to || ''), label: String(item.label || '').trim().slice(0, 60), cardinality: ['1:1', '1:n', 'n:1', 'n:n'].includes(item.cardinality) ? item.cardinality : '1:n', evidence: String(item.evidence ?? '建模草稿').trim().slice(0, 100), provenanceType: item.provenanceType || 'declared', validFrom: item.validFrom || null, validTo: item.validTo || null })).filter((item) => allowed.has(item.from) && allowed.has(item.to));
+  return (Array.isArray(value) ? value : []).slice(0, 40).map((item) => ({ predicate: String(item.predicate || '').replace(/[^\p{L}\p{N}_]/gu, '').slice(0, 48), from: String(item.from || ''), to: String(item.to || ''), label: String(item.label || '').trim().slice(0, 60), cardinality: ['1:1', '1:n', 'n:1', 'n:n'].includes(item.cardinality) ? item.cardinality : '1:n', evidence: String(item.evidence ?? '建模草稿').trim().slice(0, 100), provenanceType: item.provenanceType || 'declared', validFrom: item.validFrom || null, validTo: item.validTo || null, ...(item.keyMapping ? { keyMapping: sanitizeKeyMapping(item.keyMapping) } : {}) })).filter((item) => allowed.has(item.from) && allowed.has(item.to));
 };
 
 const makeInstances = () => ({
@@ -292,6 +319,8 @@ export const buildOAMetaModelDraftRuntimeChange = (runtime, input, role, { actio
   const ids = new Set(objectTypes.map((item) => item.id));
   if (!Array.isArray(rawRelationships) || rawRelationships.length > 40 || rawRelationships.some((item) => !item || !ids.has(item.from) || !ids.has(item.to) || !/^[\p{L}\p{N}_]{1,48}$/u.test(item.predicate || '') || !['1:1', '1:n', 'n:1', 'n:n'].includes(item.cardinality || '1:n'))) return { error: '关系必须连接现有对象并声明有效基数；不会静默丢弃无效关系。' };
   const relationKeys = rawRelationships.map((item) => JSON.stringify([item.from, item.predicate, item.to]));
+  if (rawRelationships.some(item => item.keyMapping !== undefined && item.keyMapping !== null && !sanitizeKeyMapping(item.keyMapping))) return { error: '主数据映射定义无效；必须声明两端字段、依据、责任人与版本，不会静默移除映射约束。', code: 'READ_MAPPING_BINDING_INVALID' };
+  if (rawRelationships.some(item => item.keyMapping && (!objectTypes.find(type => type.id === item.from)?.fields.includes(item.keyMapping.fromField) || !objectTypes.find(type => type.id === item.to)?.fields.includes(item.keyMapping.toField)))) return { error: '主数据映射两端字段必须存在于对应模型对象中。', code: 'READ_MAPPING_FIELDS_INVALID' };
   if (new Set(relationKeys).size !== relationKeys.length) return { error: '关系不能重复。' };
   const relationshipTypes = sanitizeRelationshipTypes(input?.relationshipTypes ?? base.relationshipTypes, objectTypes);
   const policies = Array.isArray(input?.policies) ? input.policies.map((item) => String(item).trim()).filter(Boolean).slice(0, 12) : base.policies;
@@ -317,7 +346,7 @@ export const buildOAMetaModelDraftRuntimeChange = (runtime, input, role, { actio
 export const saveOAMetaModelDraft = (input, role) => {
   return mutateSemanticGovernanceState(OA_NAMESPACE, OA_KEY, initialOARuntime, (runtime) => {
     const change = buildOAMetaModelDraftRuntimeChange(runtime, input, role);
-    if (change.error) return { commit: false, result: { error: change.error } };
+    if (change.error) return { commit: false, result: { error: change.error, ...(change.code ? { code: change.code } : {}) } };
     return { value: change.runtime, result: change.result };
   });
 };

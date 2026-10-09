@@ -1,0 +1,44 @@
+<script setup>
+import { computed, onUnmounted, ref, watch } from 'vue';
+import OntologyGraph from './OntologyGraph.vue';
+import { BUSINESS_TEMPLATES, buildSystemMappingGraph, navigateOntologyQuestion, previewBusinessTemplate, modelViewLink, readModelViewLink } from './ontology-tools.js';
+import { exportOntologyProfile, importOntologyProfile } from './ontology-exchange-profiles.js';
+import { ONTOLOGY_MOCK_PACKS, buildOntologyMockPack } from './ontology-mock-packs.js';
+const props = defineProps({ draft: { type: Object, required: true }, canEdit: Boolean, selectedId: { type: String, default: '' } });
+const emit = defineEmits(['ask', 'material', 'locate']);
+const mappingObject = ref(''); const question = ref(''); const navigation = ref(null); const templateId = ref('procurement');
+const imported = ref(null); const original = ref(''); const error = ref(''); const share = ref(''); let importTicket = 0;
+const exchangeProfile = ref('neutral-jsonld'); const exportLosses = ref([]);
+const mapping = computed(() => buildSystemMappingGraph(props.draft.objectTypes, mappingObject.value));
+const preview = computed(() => previewBusinessTemplate(templateId.value, props.draft));
+const mockPack = computed(() => buildOntologyMockPack(templateId.value));
+function handoffPack() { if (!props.canEdit) return; emit('material', { name: `${mockPack.value.id}-mock-pack.json`, text: JSON.stringify(mockPack.value), prompt: '使用附件中的合成方案包建模和验证。请先核对 API、数据字典和需求材料，列出映射缺口及分叉；不得将 Mock 数据当企业事实，不自动授予权限或发布。我会选择来源系统并审核。' }); }
+const steps = computed(() => [ ['选场景与材料', Boolean(props.draft.objectTypes.length)], ['在任务图中核对关系', Boolean(props.draft.relationshipTypes.length)], ['校验模型', props.draft.validation?.status === 'passed'], ['模拟构建和发布', false] ]);
+function navigate() { navigation.value = navigateOntologyQuestion(props.draft.objectTypes, props.draft.relationshipTypes, question.value, { selectedId: props.selectedId, glossaryTerms: props.draft.glossaryTerms || [] }); if (navigation.value.from) emit('locate', navigation.value.from); }
+function download() { try { const result = exportOntologyProfile(props.draft, exchangeProfile.value); exportLosses.value = result.losses; const url = URL.createObjectURL(new Blob([result.text], { type: result.extension === 'rdf' ? 'application/rdf+xml' : 'application/json' })); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `yuanyu-${result.profile}.${result.extension}`; anchor.click(); URL.revokeObjectURL(url); const reportURL = URL.createObjectURL(new Blob([JSON.stringify({ profile: result.profile, losses: result.losses }, null, 2)], { type: 'application/json' })); anchor.href = reportURL; anchor.download = `yuanyu-${result.profile}-losses.json`; anchor.click(); URL.revokeObjectURL(reportURL); } catch (cause) { error.value = cause.message; } }
+async function loadFile(event) {
+  const file = event.target.files?.[0]; event.target.value = ''; const ticket = ++importTicket; imported.value = null; original.value = ''; error.value = '';
+  if (!file) return;
+  try { if (file.size > 240000) throw new Error('文件超过 240KB。'); const text = await file.text(); const result = importOntologyProfile(text); if (ticket === importTicket) { imported.value = result; original.value = text; } } catch (cause) { if (ticket === importTicket) error.value = cause.message; }
+}
+function handoff() { if (!props.canEdit || !imported.value) return; emit('material', { name: 'ontology-import.json', text: JSON.stringify({ original: original.value, conversion: imported.value }), prompt: '请将附件中的本体交换转换结果作为候选建设语义模型。先指出冲突和缺失来源映射，不覆盖同名对象、不直接发布。我会显式选择来源系统并审核。' }); }
+function shareLink() { try { share.value = `${location.href.split('#')[0]}${modelViewLink(props.draft.fingerprint, props.selectedId)}`; } catch (cause) { error.value = cause.message; } }
+watch(() => props.draft, () => { navigation.value = null; share.value = ''; imported.value = null; original.value = ''; importTicket++; const link = readModelViewLink(location.hash, props.draft.fingerprint, props.draft.objectTypes); if (link?.error) error.value = link.error; else if (link?.selectedId) emit('locate', link.selectedId); }, { immediate: true });
+onUnmounted(() => { importTicket++; });
+</script>
+<template>
+  <section class="ontology-tools" aria-label="模型探索与交换">
+    <p>以下探索、方案包和交换操作使用已保存草稿。未保存的修改请先在上方工作区保存。</p>
+    <details><summary>行业 Mock 方案包 · API、字典、需求与验证问题</summary><label>方案<select v-model="templateId"><option v-for="pack in ONTOLOGY_MOCK_PACKS" :key="pack.id" :value="pack.id">{{ pack.label }}</option></select></label><p>合成系统：{{ mockPack.systems.join(' / ') }}；材料：{{ mockPack.materials.map(item => item.name).join('、') }}</p><ul><li v-for="branch in mockPack.branches" :key="branch">{{ branch }}</li></ul><p v-for="item in mockPack.acceptance" :key="item.question">{{ item.question }} — 验收预期：{{ item.expected }}</p><button :disabled="!canEdit" @click="handoffPack">将完整 Mock 材料交给 Agent 核对</button><p>不配置真实连接、不带权限授权，不自动写入模型或业务数据。</p></details>
+    <details><summary>跨系统来源与字段映射</summary><p>仅展开一个对象的映射，避免把字段铺满画布。来源声明不等于连接已验证。</p><label>业务对象<select v-model="mappingObject"><option value="">请选择</option><option v-for="object in draft.objectTypes" :key="object.id" :value="object.id">{{ object.label }} · {{ object.id }}</option></select></label><OntologyGraph v-if="mappingObject" compact :objects="mapping.objects" :relationships="mapping.relationships" :ask-enabled="false" title="系统—对象—字段引用图" /></details>
+    <details><summary>用问题定位模型路径</summary><label>问题<input v-model="question" placeholder="采购订单与供应商有什么关系？" @keyup.enter="navigate" /></label><button @click="navigate">定位</button><p v-if="navigation">{{ navigation.message }}</p><OntologyGraph v-if="navigation?.mode === 'path'" compact :objects="draft.objectTypes" :relationships="draft.relationshipTypes" :path-selection="navigation" :ask-enabled="false" title="问题关联路径" /><button v-if="navigation?.mode === 'requires_business_read'" @click="emit('ask', question)">向运营 Agent 咨询只读方案</button></details>
+    <details><summary>从业务模板开始 · 候选不自动写入</summary><select v-model="templateId"><option v-for="item in BUSINESS_TEMPLATES" :key="item.id" :value="item.id">{{ item.label }}</option></select><p>建议系统：{{ preview.template.systems.join(' / ') }}；需要用户在任务中显式选择。</p><p v-if="preview.conflicts.length">同名冲突：{{ preview.conflicts.join('、') }}，不自动覆盖。</p><OntologyGraph compact :objects="preview.objects" :relationships="preview.relationships" :ask-enabled="false" title="业务模板候选图" /><button :disabled="!canEdit" @click="emit('ask', preview.template.prompt)">带入 Agent 输入框</button></details>
+    <details><summary>建模上手路线</summary><ol><li v-for="[label, done] in steps" :key="label">{{ label }} · {{ done ? '已有对应内容，仍需人工核对' : '请在受控任务中完成' }}</li></ol><p>依次选择材料、审阅图、要求修改、保存提案、校验、模拟构建，再由发布角色确认。这里不代替审核或发布状态。</p></details>
+    <details><summary>模型交换 · 平台包 / JSON-LD / RDF/XML</summary><p>支持限定的类、关系、字段类型与单位等注解；不执行 OWL 推理、不加载远程资源、不导出凭据或授权。平台包保留声明性系统映射，不能视为已验证连接。</p><label>导出配置<select v-model="exchangeProfile"><option value="platform-package">平台结构包（含映射声明）</option><option value="neutral-jsonld">中立 JSON-LD（不含映射）</option><option value="playground-rdfxml">Playground 参考 RDF/XML 子集</option></select></label><button @click="download">导出模型与损失报告</button><p v-for="loss in exportLosses" :key="loss">{{ loss }}</p><label>导入预览<input type="file" accept=".json,.jsonld,.rdf,.owl,.xml" @change="loadFile" /></label><template v-if="imported"><p>识别配置：{{ imported.profile }}</p><p v-for="loss in imported.losses" :key="loss">{{ loss }}</p><OntologyGraph compact :objects="imported.objectTypes" :relationships="imported.relationshipTypes" :ask-enabled="false" title="格式转换候选 · 尚未写入" /><button :disabled="!canEdit" @click="handoff">保留原文与转换报告，交给 Agent 核对</button></template></details>
+    <details><summary>分享当前模型定位</summary><p>链接仅包含模型指纹和选中对象；接收人仍需登录并取得权限。版本不匹配时拒绝定位，不展示旧模型。</p><button @click="shareLink">生成定位链接</button><input v-if="share" :value="share" readonly aria-label="模型定位链接" @focus="$event.target.select()" /></details>
+    <p v-if="error" role="alert">{{ error }}</p>
+  </section>
+</template>
+<style scoped>
+.ontology-tools{margin:16px 0;display:grid;gap:10px;color:#d7edef}.ontology-tools details{border:1px solid #315764;border-radius:10px;padding:12px;background:#0a202b;min-width:0}.ontology-tools summary{cursor:pointer;font-weight:600}.ontology-tools p{font-size:12px;line-height:1.8;color:#91b2bf}.ontology-tools input,.ontology-tools select,.ontology-tools button{font:inherit;border:1px solid #375f70;background:#112f3c;color:inherit;padding:9px;border-radius:7px;max-width:100%;box-sizing:border-box;margin:8px 8px 8px 0}.ontology-tools input[readonly]{width:100%}.ontology-tools label{display:block}.ontology-tools button:disabled{opacity:.5}.ontology-tools li{line-height:2;font-size:12px}.ontology-tools :focus-visible{outline:2px solid #71e0c5}
+</style>

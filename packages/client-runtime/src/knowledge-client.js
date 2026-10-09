@@ -6,6 +6,13 @@ export function createKnowledgeClient(request, surface) {
   const documentPath = id => `/documents/${encodeURIComponent(id)}`;
   return {
     list: () => request(base),
+    modelLinks: surface === 'semantic-operations' ? () => request(`${base}/model-links`) : undefined,
+    modelViews: surface === 'semantic-operations' ? () => request(`${base}/model-views`) : undefined,
+    modelView: surface === 'semantic-operations' ? id => request(`${base}/model-views/${encodeURIComponent(id)}`) : undefined,
+    saveModelView: surface === 'semantic-operations' ? body => post('/model-views', body) : undefined,
+    saveModelLink: surface === 'semantic-operations' ? body => post('/model-links', body) : undefined,
+    suggestModelLinks: surface === 'semantic-operations' ? body => post('/model-links/suggest', body) : undefined,
+    retractModelLink: surface === 'semantic-operations' ? (id, expectedRevision) => post(`/model-links/${encodeURIComponent(id)}/retract`, { expectedRevision }) : undefined,
     studies: () => request(`${base}/studies`),
     study: (id, revision) => request(`${base}/studies/${encodeURIComponent(id)}${revision === undefined ? '' : `?revision=${encodeURIComponent(revision)}`}`),
     prepareStudy: body => post('/studies/prepare', body),

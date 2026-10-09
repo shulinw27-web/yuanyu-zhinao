@@ -223,7 +223,7 @@ export async function runPrivateAgent(request, role, identityScope, options = {}
       appendAgentEvidenceEvent(traceId, { type: 'published_ontology_read', stage: 'read', status: result.status, actor: { type: 'service', id: 'ontology-read-runtime' }, summary: '按发布模型执行有界授权关联查询与只读计算。', details: { code: result.code, model: publishedOntology.metadata, queries: result.queries || [], results: result.results || [] }, evidence });
       setAgentEvidenceTraceStatus(traceId, result.status, { completed: true });
       return traceResponse({ text: result.text, agent: { ...agent, inferenceSource: 'controlled_semantic_read' }, evidence, command: null,
-        semanticContext: { ...publishedOntology.metadata, facts: evidence, relations: [], calculations: result.results || [], querySteps: result.queries || [], coverage: result.coverage, analysis: result.analysis, comparisons: result.comparisons, timing: result.timing },
+        semanticContext: { ...publishedOntology.metadata, facts: evidence, relations: [], graph: result.graph || null, calculations: result.results || [], querySteps: result.queries || [], coverage: result.coverage, analysis: result.analysis, comparisons: result.comparisons, timing: result.timing },
         plan: [{ tool: 'published_ontology_read', status: result.status, owner: '语义只读运行时' }],
         task: { goal: explicitIds.length ? input : options.conversationContext?.taskGoal || input, phase: result.status, status: result.status, writeRequested: false },
         lifecycle: lifecycle(result.status, result.status === 'completed' ? '模型关联核验完成（只读）' : '模型关联核验未完成', { dataAccess: result.queries?.length ? 'source_read' : 'not_confirmed' }),

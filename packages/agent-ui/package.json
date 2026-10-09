@@ -11,12 +11,15 @@
     "./agent": "./src/agent/index.js",
     "./system-access": "./src/system-access/index.js",
     "./ontology-scenario": "./src/meta-model/ontology-scenario.js",
+    "./ontology-mock-packs": "./src/meta-model/ontology-mock-packs.js",
     "./ontology-read-plan": "./src/meta-model/ontology-read-plan-import.js",
+    "./ontology-mapping-wizard": "./src/meta-model/ontology-mapping-wizard.js",
     "./styles/main.css": "./src/styles/main.css",
     "./styles/meta-model.css": "./src/styles/meta-model.css",
     "./styles/core-meta-objects.css": "./src/styles/core-meta-objects.css"
   },
   "dependencies": {
+    "@xmldom/xmldom": "0.9.12",
     "vue": "^3.5.13"
   }
 }

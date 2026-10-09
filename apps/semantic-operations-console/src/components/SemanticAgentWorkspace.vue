@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { canExecuteSemanticTask } from '../task-guards.js';
 import { resolveSemanticTaskSelection } from '../task-selection.js';
+import { OntologyGraph } from '@healthcare-ai/agent-ui/meta-model';
 
 const props = defineProps({ client: { type: Object, required: true }, initialTaskId: { type: String, default: '' }, canReview: { type: Boolean, default: false } });
 const desktopBridge = globalThis.semanticOperationsDesktop || null;
@@ -12,6 +13,7 @@ const selected = ref(null);
 const selectedTrace = ref(null);
 const exportedReport = ref(null);
 const input = ref('');
+const workspaceContext = ref(null);
 const adoptionMode = ref('merge');
 const files = ref([]);
 const busy = ref(false);
@@ -322,7 +324,6 @@ const graphNodes = computed(() => (proposalEditor.value?.objectTypes || []).map(
   const validationStatus = selected.value?.proposal?.mappingValidation?.objects?.find((object) => object.objectId === item.id)?.status || 'unverified';
   return { ...item, x: 125 + (index % 3) * 285, y: 72 + Math.floor(index / 3) * 118, pendingMappings, mappedFields: fieldDefinitions.length - pendingMappings, validationStatus };
 }));
-const graphHeight = computed(() => Math.max(210, 145 + Math.floor(Math.max(0, graphNodes.value.length - 1) / 3) * 118));
 const graphEdges = computed(() => (proposalEditor.value?.relationshipTypes || []).map((item, index) => ({ ...item, key: `${item.from}-${item.predicate}-${item.to}-${index}`, fromNode: graphNodes.value.find((node) => node.id === item.from), toNode: graphNodes.value.find((node) => node.id === item.to) })).filter((item) => item.fromNode && item.toNode));
 const reviewSystemLinks = computed(() => graphEdges.value.map((edge) => {
   const fromSystems = edge.fromNode.sourceSystems || [];
@@ -345,7 +346,16 @@ const intentLabel = { build_model: '建设模型', discover_sources: '来源预�
 const formatTaskTime = value => new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai' });
 
 const setInput = (value) => { input.value = String(value || ''); };
-defineExpose({ setInput, openTask });
+function setWorkspaceQuestion(value, context) { selected.value = null; selectedTrace.value = null; proposalEditor.value = null; editorDirty.value = false; workspaceContext.value = context; setInput(value); }
+async function setMaterial(material) {
+  if (busy.value || typeof material?.text !== 'string' || material.text.length > 500000 || files.value.length >= 5) { message.value = '材料过大或当前任务忙碌，未导入。'; return; }
+  const currentClient = props.client;
+  const dataUrl = await readAsDataUrl(new Blob([material.text], { type: 'application/json' }));
+  if (busy.value || currentClient !== props.client || files.value.length >= 5) return;
+  files.value.push({ name: 'ontology-import.json', mimeType: 'application/json', dataUrl });
+  setInput(material.prompt);
+}
+defineExpose({ setInput, setMaterial, openTask, setWorkspaceQuestion });
 
 const readAsDataUrl = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader();
@@ -703,9 +713,10 @@ async function createTask() {
   try {
     // 范围始终随请求提交（含空数组）：客户端不替服务端决定范围语义，
     // 空范围应交由服务端按意图判定是否 400，而不是让前端猜哪些意图需要范围。
-    const task = await props.client.createTask({ text: input.value.trim(), attachments: files.value, adoptionMode: adoptionMode.value, systemCodes: [...selectedSystems.value], ...(selected.value ? { parentTaskId: selected.value.id } : {}) });
+    const task = await props.client.createTask({ text: input.value.trim(), attachments: files.value, adoptionMode: adoptionMode.value, systemCodes: [...selectedSystems.value], ...(workspaceContext.value ? { workspaceContext: workspaceContext.value } : {}), ...(selected.value ? { parentTaskId: selected.value.id, parentProposalRevision: selected.value.proposal?.revision } : {}) });
     await loadTasks(task.id);
     input.value = ''; files.value = [];
+    workspaceContext.value = null;
     if (selected.value?.id !== task.id) { selected.value = task; tasks.value = [task, ...tasks.value.filter(item => item.id !== task.id)]; }
     if (task.proposal && task.status === 'waiting_confirmation') emit('review-created', task.id);
     message.value = task.status === 'completed' ? task.response : ['conversation', 'needs_clarification', 'unsupported_operation', 'permission_denied'].includes(task.intent)
@@ -740,6 +751,7 @@ async function executeTask() {
 }
 
 function newTask() {
+  workspaceContext.value = null;
   selected.value = null; selectedTrace.value = null; input.value = ''; files.value = []; message.value = ''; proposalEditor.value = null; editorDirty.value = false; editorMessage.value = ''; selectedGraphObjectId.value = ''; systemScopeError.value = '';
 }
 
@@ -780,6 +792,7 @@ watch(() => props.initialTaskId, id => loadTasks(id || undefined).catch(error =>
 watch([taskStatus, showArchived], () => loadTasks().catch((error) => { message.value = error.message; }));
 watch([() => selected.value?.id, () => selected.value?.proposal?.revision], initializeProposalEditor);
 watch(() => selected.value?.id, loadSelectedTrace);
+watch(() => selected.value?.id, () => { workspaceContext.value = null; }, { flush: 'sync' });
 watch(() => selected.value?.id, () => nextTick(() => {
   if (transcript.value) transcript.value.scrollTop = 0;
 }));
@@ -814,19 +827,8 @@ watch(() => selected.value?.id, () => nextTick(() => {
         <article v-for="(item, index) in selected.messages" :key="`${item.time}-${index}`" :class="['task-message', item.role === 'user' ? 'user' : 'agent']"><span>{{ item.role === 'user' ? '运营人员' : '元域智语 Agent' }} · 第 {{ Math.floor(index / 2) + 1 }} 轮</span><p>{{ item.content }}</p></article>
         <section v-if="selected.proposal" class="semantic-model-review-card">
           <header><div><span>待审核语义模型 · 第 {{ selected.proposal.revision }} 版</span><small>{{ selected.proposal.objectTypes.length }} 个业务对象 · {{ selected.proposal.relationshipTypes.length }} 条对象关系 · 来源 {{ [...new Set(selected.proposal.objectTypes.flatMap(item => item.sourceSystems || []).filter(system => system && system !== 'UNASSIGNED'))].join(' / ') || '待确认' }}</small></div><b :class="selected.proposal.critic.status">{{ selected.proposal.critic.status === 'passed' ? '结构检查通过' : '需要修改' }}</b></header>
-          <div class="review-graph-wrap" role="img" aria-label="待审核语义模型对象关系图">
-            <svg :viewBox="`0 0 820 ${graphHeight}`" preserveAspectRatio="xMidYMid meet">
-              <defs><marker id="review-arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z"/></marker></defs>
-              <line v-for="edge in graphEdges" :key="edge.key" :x1="edge.fromNode.x" :y1="edge.fromNode.y" :x2="edge.toNode.x" :y2="edge.toNode.y" marker-end="url(#review-arrow)"/>
-              <text v-for="edge in graphEdges" :key="`${edge.key}-label`" :x="(edge.fromNode.x + edge.toNode.x) / 2" :y="(edge.fromNode.y + edge.toNode.y) / 2 - 8" text-anchor="middle">{{ edge.label || edge.predicate }} · {{ edge.cardinality }}</text>
-              <g v-for="node in graphNodes" :key="node.id">
-                <rect :x="node.x - 100" :y="node.y - 34" width="200" height="68" rx="10"/>
-                <text :x="node.x" :y="node.y - 8" text-anchor="middle" class="review-node-title">{{ node.label }}</text>
-                <text :x="node.x" :y="node.y + 12" text-anchor="middle" class="review-node-source">{{ node.sourceSystems?.join(' / ') || '来源待确认' }}</text>
-              </g>
-            </svg>
-          </div>
-          <div class="review-system-chain"><b>底层系统关联</b><article v-for="item in reviewSystemLinks" :key="item.key"><span>{{ item.from }} {{ item.relation }} {{ item.to }} · {{ item.cardinality }}</span><small>{{ item.handoffs.length ? item.handoffs.join('　·　') : '对象关系已识别，系统来源尚待确认' }}</small></article><p v-if="!reviewSystemLinks.length">当前模型没有候选关系，无法形成系统链路。</p></div>
+          <OntologyGraph compact :objects="selected.proposal.objectTypes" :relationships="selected.proposal.relationshipTypes" :diff="selected.proposal.diff || {}" title="待审核语义模型对象关系图" @ask="input = $event" />
+          <div class="review-system-chain"><b>底层系统关联</b><article v-for="item in reviewSystemLinks" :key="item.key"><span>{{ item.from }} {{ item.relation }} {{ item.to }} · {{ item.cardinality }}</span><small>{{ item.handoffs.length ? item.handoffs.join(' · ') : '对象关系已识别，系统来源尚待确认' }}</small></article><p v-if="!reviewSystemLinks.length">当前模型没有候选关系，无法形成系统链路。</p></div>
           <footer><span>{{ selected.proposal.mappingValidation?.blocked ? '样本映射存在阻断，修改后再审核。' : selected.proposal.critic.status !== 'passed' ? '请先用自然语言指出需要调整的对象或关系。' : canReview ? '可直接用自然语言审核通过，也可以描述关系修改。' : '模型已进入审核队列；当前角色没有审核权限。' }}</span><button v-if="canReview && selected.status === 'waiting_confirmation' && selected.proposal.critic.status === 'passed' && !selected.proposal.mappingValidation?.blocked" @click="input = '审核通过'; nextTick(() => transcript?.scrollTo({ top: transcript.scrollHeight, behavior: 'smooth' }))">输入“审核通过”</button></footer>
         </section>
         <details v-if="selected.materialReview" class="task-message agent">
@@ -969,17 +971,7 @@ watch(() => selected.value?.id, () => nextTick(() => {
             <p>对象编码和来源系统用于治理追踪；修改字段名后请重新检查主键与关系。这里保存的是提案修订，不会直接发布模型。</p>
             <div class="proposal-graph">
               <header><div><b>候选语义关系图</b><span>点击节点联动下方字段与映射编辑器</span></div><div><b>{{ mappingSummary.ready }}/{{ mappingSummary.total }}</b><span>字段映射就绪</span></div></header>
-              <svg :viewBox="`0 0 820 ${graphHeight}`" role="img" aria-label="Agent候选语义模型关系图">
-                <defs><marker id="proposal-arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z"/></marker></defs>
-                <line v-for="edge in graphEdges" :key="edge.key" :x1="edge.fromNode.x" :y1="edge.fromNode.y" :x2="edge.toNode.x" :y2="edge.toNode.y" marker-end="url(#proposal-arrow)"/>
-                <text v-for="edge in graphEdges" :key="`${edge.key}-label`" :x="(edge.fromNode.x + edge.toNode.x) / 2" :y="(edge.fromNode.y + edge.toNode.y) / 2 - 7" class="edge-label">{{ edge.predicate }} · {{ edge.cardinality }}</text>
-                <g v-for="node in graphNodes" :key="node.id" :class="['proposal-graph-node', { selected: selectedGraphObjectId === node.id, warning: node.pendingMappings || node.validationStatus === 'unverified', validationFailed: node.validationStatus === 'failed' }]" role="button" tabindex="0" @click="selectedGraphObjectId = node.id" @keydown.enter="selectedGraphObjectId = node.id">
-                  <rect :x="node.x - 100" :y="node.y - 34" width="200" height="68" rx="8"/>
-                  <text :x="node.x" :y="node.y - 10" text-anchor="middle" class="node-label">{{ node.label }}</text>
-                  <text :x="node.x" :y="node.y + 7" text-anchor="middle" class="node-meta">{{ node.id }} · {{ node.sourceSystems.join('/') }}</text>
-                  <text :x="node.x" :y="node.y + 23" text-anchor="middle" class="node-mapping">{{ node.pendingMappings ? `${node.pendingMappings} 个映射待确认` : `${node.mappedFields} 个字段已映射` }}</text>
-                </g>
-              </svg>
+              <OntologyGraph :objects="proposalEditor.objectTypes" :relationships="proposalEditor.relationshipTypes" :diff="editorDirty ? {} : selected.proposal.diff || {}" :selected-id="selectedGraphObjectId" title="Agent候选语义模型关系图" @select-object="selectedGraphObjectId = $event" @ask="input = $event" />
             </div>
             <section v-if="unconfirmedCandidates.length || outOfScopeCandidates.length || sourceAssignments.length" class="source-attribution">
               <header><div><span>SOURCE ATTRIBUTION</span><b>来源归属确认</b></div><small>{{ sourceAssignments.length }} 个对象已确认归属</small></header>

@@ -2,6 +2,7 @@
 // can originate from a model. All joins and arithmetic are checked server-side.
 import { createHash } from 'node:crypto';
 import { admitSemanticRecord } from './semantic-record-contract-service.js';
+import { ontologyMappingBinding, resolveOntologyMappingRows, ontologyMappingEvidence } from './ontology-mapping-execution.js';
 
 const fail = code => { throw new Error(code); };
 const identifier = v => typeof v === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(v);
@@ -12,41 +13,60 @@ const scalar = v => v === null || typeof v === 'string' || typeof v === 'boolean
 const binary = new Set(['add', 'sub', 'mul', 'max', 'eq', 'ne', 'and', 'or', 'gt']);
 
 export function validateOntologyReadPlans(draft) {
+  let location = { kind: 'section', section: 'readPlans', index: -1, field: 'definition' };
   try {
+    const requiresMapping = (from, fromField, to, toField) => (draft.relationshipTypes || []).some(relation => {
+      const mapping = relation.keyMapping; if (!mapping) return false;
+      const fieldsMatch = (a, b) => (!mapping.fromField || mapping.fromField === a) && (!mapping.toField || mapping.toField === b);
+      return relation.from === from && relation.to === to && fieldsMatch(fromField, toField)
+        || relation.from === to && relation.to === from && fieldsMatch(toField, fromField);
+    });
     const plans = draft.scenario?.readPlans || [];
     if (!Array.isArray(plans) || plans.length > 3 || new Set(plans.map(p => p?.id)).size !== plans.length) fail('READ_PLAN_FORMAT');
     if (plans.length && (draft.scenario?.decisionBindings?.length || draft.scenario.requireCaseReplay !== true)) fail('READ_PLAN_REPLAY_REQUIRED');
     for (const plan of plans) {
+      location = { kind: 'section', section: 'readPlans', index: plans.indexOf(plan), field: 'definition' };
       if (!identifier(plan.id) || !Array.isArray(plan.datasets) || !plan.datasets.length || plan.datasets.length > 24
         || !Array.isArray(plan.outputs) || !plan.outputs.length || plan.outputs.length > 24 || typeof plan.label !== 'string') fail('READ_PLAN_FORMAT');
       const aliases = new Map();
       for (const [index, ds] of plan.datasets.entries()) {
+        location = { kind: 'section', section: 'readPlans', index: plans.indexOf(plan), datasetId: ds.id, field: 'datasets' };
         const type = object(draft, ds.objectType);
         if (!identifier(ds.id) || aliases.has(ds.id) || !type || type.sourceSystems.length !== 1 || !Array.isArray(ds.where) || ds.where.length !== 1) fail('READ_DATASET_FORMAT');
         const f = ds.where[0];
+        location.field = 'where';
         if (!type.fields.includes(f.field)) fail('READ_FIELD_UNKNOWN');
         if (index === 0) {
-          if (f.target !== true || f.field !== type.key) fail('READ_ROOT_KEY_REQUIRED');
+          if (f.target !== true || f.field !== type.key || f.mapping) fail('READ_ROOT_KEY_REQUIRED');
         } else {
           const from = aliases.get(f.dataset); const fromType = from && object(draft, from.objectType);
           if (!fromType?.fields.includes(f.sourceField) || f.target) fail('READ_JOIN_UNKNOWN');
           const forward = type.fieldDefinitions?.some(x => x.name === f.field && x.reference === fromType.id && (x.referenceField || fromType.key) === f.sourceField);
           const backward = fromType.fieldDefinitions?.some(x => x.name === f.sourceField && x.reference === type.id && (x.referenceField || type.key) === f.field);
-          if (!forward && !backward) fail('READ_JOIN_NOT_DECLARED');
+          if (f.mapping) ontologyMappingBinding(draft, fromType, type, f);
+          else {
+            if (!forward && !backward) fail('READ_JOIN_NOT_DECLARED');
+            if (requiresMapping(fromType.id, f.sourceField, type.id, f.field)) fail('READ_MAPPING_EXECUTION_REQUIRED');
+          }
         }
         aliases.set(ds.id, ds);
+        location.field = 'filter';
         if (ds.filter && (!type.fields.includes(ds.filter.field) || !Array.isArray(ds.filter.values) || !ds.filter.values.length || ds.filter.values.length > 16 || ds.filter.values.some(v => !scalar(v)))) fail('READ_DATASET_FILTER_INVALID');
         if (ds.expand) {
+          location.field = 'expand';
           const x = ds.expand; const edge = object(draft, x.edgeObjectType);
           if (!edge || edge.sourceSystems.length !== 1 || !Number.isInteger(x.maxDepth) || x.maxDepth < 1 || x.maxDepth > 8
             || !edge.fields.includes(x.stateField) || !Array.isArray(x.activeStates) || !x.activeStates.length || !Array.isArray(x.inactiveStates)
             || x.activeStates.length + x.inactiveStates.length > 32 || [...x.activeStates, ...x.inactiveStates].some(v => typeof v !== 'string' || v.length > 80)
             || x.activeStates.some(v => x.inactiveStates.includes(v))
             || ![x.fromField, x.toField].every(name => edge.fieldDefinitions?.some(f => f.name === name && f.reference === type.id && (f.referenceField || type.key) === type.key))) fail('READ_EXPANSION_INVALID');
+          if ([x.fromField, x.toField].some(name => requiresMapping(edge.id, name, type.id, type.key))) fail('READ_MAPPING_EXECUTION_REQUIRED');
         }
       }
+      location = { kind: 'section', section: 'readPlans', index: plans.indexOf(plan), field: 'coverage' };
       if (plan.coverage && (plan.coverage.mode !== 'bounded_declared_graph' || !Array.isArray(plan.coverage.requiredExpansions)
         || !plan.coverage.requiredExpansions.length || plan.coverage.requiredExpansions.some(id => !aliases.get(id)?.expand))) fail('READ_COVERAGE_INVALID');
+      location.field = 'analysis';
       if (plan.analysis && (typeof plan.analysis !== 'object' || typeof plan.analysis.enabled !== 'boolean')) fail('READ_ANALYSIS_INVALID');
       const outputs = new Set(); let nodes = 0;
       const check = (e, row = new Set(), depth = 0) => {
@@ -71,15 +91,17 @@ export function validateOntologyReadPlans(draft) {
           check(e.condition, row, depth + 1); check(e.then, row, depth + 1); check(e.else, row, depth + 1);
         } else fail('READ_OPERATOR_UNKNOWN');
       };
+      location.field = 'preconditions';
       if (plan.preconditions && (!Array.isArray(plan.preconditions) || plan.preconditions.length > 24)) fail('READ_PRECONDITION_FORMAT');
       for (const condition of plan.preconditions || []) check(condition);
       for (const output of plan.outputs) {
+        location.field = 'outputs'; location.outputId = output.id;
         if (!identifier(output.id) || outputs.has(output.id) || typeof output.label !== 'string' || output.label.length > 100 || typeof output.unit !== 'string') fail('READ_OUTPUT_FORMAT');
         check(output.expression); outputs.add(output.id);
       }
     }
     return { status: 'passed', count: plans.length };
-  } catch (error) { return { status: 'failed', code: error.message }; }
+  } catch (error) { return { status: 'failed', code: error.message, ...(location ? { targets: [location] } : {}) }; }
 }
 
 export function getOntologyRuntimeGrant(scope, roleId, env = process.env) {
@@ -171,7 +193,7 @@ export function calculateOntologyReadPlan(plan, datasets) {
 export async function executeOntologyReadPlan({ draft, plan, target, roleId, scope, retrieve }) {
   if (validateOntologyReadPlans(draft).status !== 'passed' || !plan || !identifier(plan.id) || !draft.scenario.readPlans.some(p => fingerprint(p) === fingerprint(plan)) || typeof target !== 'string' || !target || target.length > 100) fail('READ_PLAN_INVALID');
   // Preflight every object before the first source request. Recheck each hop.
-  const requiredTypes = [...new Set(plan.datasets.flatMap(ds => [ds.objectType, ...(ds.expand ? [ds.expand.edgeObjectType] : [])]))];
+  const requiredTypes = [...new Set(plan.datasets.flatMap(ds => [ds.objectType, ...(ds.expand ? [ds.expand.edgeObjectType] : []), ...(ds.where[0].mapping ? [ds.where[0].mapping.objectType] : [])]))];
   requiredTypes.forEach(type => requireOntologyObjectAccess(draft, type, roleId, scope));
   const datasets = {}; const queries = []; const started = Date.now(); const extraRecords = new Map(); let processed = 0;
   const fetchRows = async (ds, query) => {
@@ -183,11 +205,34 @@ export async function executeOntologyReadPlan({ draft, plan, target, roleId, sco
     queries.push({ dataset: ds.id, objectType: ds.objectType, sourceSystem: object(draft, ds.objectType).sourceSystems[0], filterField: query.filter.field, valueCount: query.filter.values.length, recordCount: admitted.length });
     return admitted;
   };
-  const expansions = [];
+  const expansions = []; const mappingRuns = [];
   for (const ds of plan.datasets) {
     if (Date.now() - started > 60000) fail('READ_DEADLINE');
-    const query = ontologyDatasetQuery(draft, ds, datasets, target);
+    let query = ontologyDatasetQuery(draft, ds, datasets, target); let mapped = null;
+    const clause = ds.where[0];
+    if (clause.mapping) {
+      const source = datasets[clause.dataset];
+      const contract = ontologyMappingBinding(draft, object(draft, plan.datasets.find(item => item.id === clause.dataset).objectType), object(draft, ds.objectType), clause);
+      const rows = await fetchRows({ id: `${ds.id}:mapping`, objectType: contract.type.id }, { schemaVersion: 'ontology-query.v1', objectType: contract.type.id, fields: contract.type.fields, filter: { field: clause.mapping.fromField, values: query.filter.values }, limit: 100 });
+      for (const row of rows) {
+        const key = `${row.system}:${row.objectType}:${row.id}`; const old = extraRecords.get(key);
+        if (old && fingerprint(old) !== fingerprint(row)) fail('READ_RECORD_CONFLICT');
+        extraRecords.set(key, row);
+      }
+      mapped = { contract, pairs: resolveOntologyMappingRows(contract, source, rows), source };
+      query = { ...query, filter: { field: clause.field, values: [...new Set(mapped.pairs.map(pair => pair.target))] } };
+    }
     datasets[ds.id] = (await fetchRows(ds, query)).filter(r => !ds.filter || ds.filter.values.includes(r.payload[ds.filter.field]));
+    if (mapped) {
+      for (const pair of mapped.pairs) {
+        const targets = datasets[ds.id].filter(record => record.payload[clause.field] === pair.target);
+        if (!targets.length) fail('READ_MAPPING_TARGET_MISSING');
+        for (const from of mapped.source.filter(record => record.payload[clause.sourceField] === pair.source)) for (const to of targets) {
+          mappingRuns.push({ from: JSON.stringify(['instance', from.system, from.objectType, from.id]), to: JSON.stringify(['instance', to.system, to.objectType, to.id]), predicate: mapped.contract.relation.predicate, fromType: from.objectType, toType: to.objectType, mappingVersion: mapped.contract.relation.keyMapping.version, asOf: clause.mapping.asOf });
+          if (mappingRuns.length > 2000) fail('READ_MAPPING_PAIR_LIMIT');
+        }
+      }
+    }
     if (ds === plan.datasets[0] && datasets[ds.id].length !== 1) fail('READ_ROOT_NOT_FOUND');
     if (ds.expand) {
       const x = ds.expand; const type = object(draft, ds.objectType); const edgeType = object(draft, x.edgeObjectType);
@@ -233,5 +278,5 @@ export async function executeOntologyReadPlan({ draft, plan, target, roleId, sco
   if (Date.now() - started > 60000) fail('READ_DEADLINE');
   if (records.some(r => !admitSemanticRecord(r, roleId, scope, true))) fail('READ_RECORD_SCOPE');
   const results = calculateOntologyReadPlan(plan, datasets);
-  return { results, queries, datasets, records, coverage: { status: plan.coverage ? 'complete_for_declared_graph' : 'declared_plan_only', expansions, globalEnterpriseCoverage: false }, sourceMode: 'scoped_source_snapshot_not_realtime_promise', executionAuthorized: false };
+  return { results, queries, datasets, records, mappingEvidence: ontologyMappingEvidence.create(draft, records, mappingRuns), coverage: { status: plan.coverage ? 'complete_for_declared_graph' : 'declared_plan_only', expansions, mappings: mappingRuns.length, globalEnterpriseCoverage: false }, sourceMode: 'scoped_source_snapshot_not_realtime_promise', executionAuthorized: false };
 }

@@ -1,4 +1,6 @@
 import { systemConfigurations } from '../data/seed.js';
+import { KEY_MAPPING_BASES, KEY_MAPPING_OWNER_MAX, KEY_MAPPING_VERSION_MAX, KEY_MAPPING_SOURCE_MAX, sanitizeKeyMapping } from '../domain-contracts/key-mapping.js';
+export { sanitizeKeyMapping };
 
 /**
  * 来源系统字段目录与跨系统标识对应（阶段 4a）。
@@ -229,12 +231,6 @@ const linkEligibilityOf = (candidateObjectIds, fromEndpoint, toEndpoint) => {
 };
 
 /** 「为什么两个键能对上」的分类。机器不判对错，只要求人从这四类里选一个（ADR-019 决策 3）。 */
-const KEY_MAPPING_BASES = Object.freeze({
-  master_data_lookup: '主数据对照表',
-  manual_register: '人工维护的对照登记',
-  derived_rule: '规则派生（补零 / 加前缀等）',
-  external_system: '外部系统提供的映射'
-});
 const SHAPE_VALUES = Object.freeze(['agent', 'business']);
 
 /**
@@ -987,9 +983,6 @@ export function resolveDeclarationRulings({ items = [], inherited = [], requeste
 /** 与草稿层 `relationSignature` 保持同一口径；两处不一致会让「已存在同一条边」判断失效。 */
 const relationshipSignatureOf = (item) => `${item?.from}:${item?.predicate}:${item?.to}`;
 
-const KEY_MAPPING_OWNER_MAX = 48;
-const KEY_MAPPING_VERSION_MAX = 24;
-const KEY_MAPPING_SOURCE_MAX = 120;
 
 /**
  * `keyMapping` 的**白名单清洗**（导出给草稿净化使用）。
@@ -1000,20 +993,6 @@ const KEY_MAPPING_SOURCE_MAX = 120;
  *
  * 两个函数共用同一份枚举与同一组长度上限，**不存在第二份清单**。
  */
-export function sanitizeKeyMapping(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const fromField = cleanRulingText(value?.fromField, 64);
-  const toField = cleanRulingText(value?.toField, 64);
-  if (!fromField || !toField) return null;
-  const basis = cleanRulingText(value?.basis, 32);
-  if (!Object.prototype.hasOwnProperty.call(KEY_MAPPING_BASES, basis)) return null;
-  const lookupSource = cleanRulingText(value?.lookupSource, KEY_MAPPING_SOURCE_MAX);
-  if (basis === 'master_data_lookup' && !lookupSource) return null;
-  const owner = cleanRulingText(value?.owner, KEY_MAPPING_OWNER_MAX);
-  const version = cleanRulingText(value?.version, KEY_MAPPING_VERSION_MAX);
-  if (!owner || !version) return null;
-  return { fromField, toField, basis, ...(lookupSource ? { lookupSource } : {}), owner, version };
-}
 
 /**
  * 规范化并校验「结构化映射定义」（阶段 4d / ADR-019 决策 3）。

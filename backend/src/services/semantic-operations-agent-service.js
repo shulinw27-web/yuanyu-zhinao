@@ -21,6 +21,7 @@ import { isRegisteredSystemCode } from './semantic-source-discovery-service.js';
 // 搬出去的理由不是分文件，而是让「兜底路径能命中什么、命中不到什么」可以被**单独取证**——
 // 它此前与提案组装、标识推导、审阅说明生成混在同一个文件里，没有独立的取证入口。
 import { CANDIDATE_CATALOG_SIZE, listCatalogGaps, listUncoveredMentions, matchCandidateCatalog } from './semantic-candidate-catalog-service.js';
+import { relationshipDiff } from './semantic-model-diff.js';
 
 const PROPOSAL_NAMESPACE = 'semantic_operations_agent_proposals';
 const SNAPSHOT_NAMESPACE = 'semantic_operations_agent_snapshots';
@@ -71,7 +72,7 @@ const canonicalFieldDefinitions = (item) => (item.fieldDefinitions || []).map((f
   enum: field.enum || null,
   description: field.description || null
 }));
-const objectSignature = (item) => JSON.stringify({ id: item.id, label: item.label, source: item.source, key: item.key, fields: item.fields, fieldDefinitions: canonicalFieldDefinitions(item), classification: item.classification, semanticType: item.semanticType, coreObject: item.coreObject, sourceSystems: item.sourceSystems, granularity: item.granularity || inferObjectGranularity(item.id) });
+const objectSignature = (item) => JSON.stringify({ id: item.id, label: item.label, description: item.description || '', businessDomain: item.businessDomain || '', source: item.source, key: item.key, fields: item.fields, fieldDefinitions: canonicalFieldDefinitions(item), classification: item.classification, semanticType: item.semanticType, coreObject: item.coreObject, sourceSystems: item.sourceSystems, granularity: item.granularity || inferObjectGranularity(item.id) });
 const relationSignature = (item) => `${item.from}:${item.predicate}:${item.to}`;
 const cleanText = (value, maxLength) => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength);
 const cleanIdentifier = (value, maxLength = 64) => cleanText(value, maxLength).replace(/[^\p{L}\p{N}_]/gu, '');
@@ -113,6 +114,7 @@ const sanitizeProposalDraft = (input, originalDraft) => {
       id,
       granularity: item?.granularity || original?.granularity || inferObjectGranularity(id),
       label: cleanText(item?.label, 48),
+      businessDomain: cleanText(item?.businessDomain ?? original?.businessDomain, 48),
       source: cleanText(item?.source || original?.source, 80),
       key: normalizedFields.key,
       fields: normalizedFields.fields,
@@ -179,6 +181,7 @@ const buildEditDiff = (original, current) => {
   });
   const beforeRelations = new Set((original.relationshipTypes || []).map(relationSignature));
   const afterRelations = new Set((current.relationshipTypes || []).map(relationSignature));
+  const relationshipChanges = relationshipDiff(original.relationshipTypes, current.relationshipTypes, true);
   return {
     summary: {
       addedObjects: objectChanges.filter((item) => item.change === 'added').length,
@@ -187,7 +190,7 @@ const buildEditDiff = (original, current) => {
       addedRelationships: [...afterRelations].filter((item) => !beforeRelations.has(item)).length,
       removedRelationships: [...beforeRelations].filter((item) => !afterRelations.has(item)).length
     },
-    objectChanges
+    objectChanges, relationshipChanges
   };
 };
 
@@ -225,17 +228,16 @@ const buildImpactAnalysis = (original, current, editDiff = buildEditDiff(origina
 
 const buildDiff = (base, draft, adoptionMode = 'merge') => {
   const baseObjects = new Map((base.objectTypes || []).map((item) => [item.id, item]));
-  const baseRelations = new Set((base.relationshipTypes || []).map(relationSignature));
   const objectChanges = (draft.objectTypes || []).map((item) => {
     const before = baseObjects.get(item.id);
     return { id: item.id, label: item.label, change: !before ? 'added' : objectSignature(before) === objectSignature(item) ? 'unchanged' : 'updated', fields: item.fields, sourceSystems: item.sourceSystems };
   });
-  const relationshipChanges = (draft.relationshipTypes || []).map((item) => ({ ...item, change: baseRelations.has(relationSignature(item)) ? 'unchanged' : 'added' }));
+  const relationshipChanges = relationshipDiff(base.relationshipTypes, draft.relationshipTypes, adoptionMode === 'replace');
   const addedObjects = objectChanges.filter((item) => item.change === 'added').length;
   const updatedObjects = objectChanges.filter((item) => item.change === 'updated').length;
   const addedRelationships = relationshipChanges.filter((item) => item.change === 'added').length;
   const removals = adoptionMode === 'replace' ? (base.objectTypes || []).filter(o => !draft.objectTypes.some(x => x.id === o.id)).map(o => ({ id: o.id, label: o.label, change: 'removed', fields: o.fields, sourceSystems: o.sourceSystems })) : [];
-  return { adoptionMode, baseFingerprint: semanticFingerprint(base), summary: { addedObjects, updatedObjects, addedRelationships, removedObjects: removals.length }, objectChanges: [...objectChanges, ...removals], relationshipChanges };
+  return { adoptionMode, baseFingerprint: semanticFingerprint(base), summary: { addedObjects, updatedObjects, addedRelationships, removedObjects: removals.length, removedRelationships: relationshipChanges.filter(item => item.change === 'removed').length, updatedRelationships: relationshipChanges.filter(item => item.change === 'updated').length }, objectChanges: [...objectChanges, ...removals], relationshipChanges };
 };
 
 const critiqueProposalDraft = (draft, base, discovery, primaryKeyCorrections = [], sourceAssignments = []) => {
@@ -992,7 +994,8 @@ export function applySemanticOperationsProposal({ proposalId, role, identityScop
   proposal.draft.objectTypes.forEach((item) => existing.set(item.id, { ...existing.get(item.id), ...item, fields: [...new Set([...(existing.get(item.id)?.fields || []), ...item.fields])] }));
   const relationshipTypes = replacing ? [] : [...base.relationshipTypes];
   proposal.draft.relationshipTypes.forEach((item) => {
-    if (!relationshipTypes.some((current) => current.from === item.from && current.predicate === item.predicate && current.to === item.to)) relationshipTypes.push(item);
+    const index = relationshipTypes.findIndex(current => relationSignature(current) === relationSignature(item));
+    if (index === -1) relationshipTypes.push(item); else relationshipTypes[index] = item;
   });
   const mergedInput = { objectTypes: [...existing.values()], relationshipTypes, policies: base.policies, ...(proposal.draft.worldModel ? {
     worldModel: proposal.draft.worldModel, modelingProfile: proposal.draft.modelingProfile, scenario: proposal.draft.scenario

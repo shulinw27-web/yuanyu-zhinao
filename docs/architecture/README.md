@@ -25,3 +25,4 @@
 - [元域智脑多端 Agent 架构技术说明书](ZHINAO_AGENT_ARCHITECTURE_V2.md)
 - [元域智脑学习与数据使用控制面](ZHINAO_LEARNING_GOVERNANCE.md)
 - [参考 WeKnora 升级：采纳点、设计理由与验证路线](WEKNORA_UPGRADE_REFERENCE.md)
+- [Ontology Playground 融合方案](ONTOLOGY_PLAYGROUND_INTEGRATION_PLAN.md)：OP-01～12 首版及 Mock/组件回归状态，包含系统映射、资料依据、实例子图和受限格式交换。

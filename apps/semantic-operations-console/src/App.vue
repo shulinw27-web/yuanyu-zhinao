@@ -6,8 +6,9 @@ import SemanticOperationsCenter from './components/SemanticOperationsCenter.vue'
 import SemanticOnboardingWorkspace from './components/SemanticOnboardingWorkspace.vue';
 import SystemAccessWorkspace from './components/SystemAccessWorkspace.vue';
 import WorkflowSemanticCenter from './components/WorkflowSemanticCenter.vue';
-import { OAMetaModelStudio, semanticSimulationMessage } from '@healthcare-ai/agent-ui/meta-model';
+import { OAMetaModelStudio, OntologyWorkspaceTools, OntologySavedViewsPanel, OntologyGraph, semanticSimulationMessage } from '@healthcare-ai/agent-ui/meta-model';
 import { KnowledgeLibraryPanel } from '@healthcare-ai/agent-ui/knowledge';
+import { restoreSemanticSession, semanticConnectionMessage } from './session-bootstrap.js';
 
 const runtimePlatform = globalThis.semanticOperationsDesktop?.runtime === 'electron' ? 'semantic-electron' : 'semantic-web';
 const client = createSemanticOperationsClient({ platform: runtimePlatform, appVersion: '0.2.0' });
@@ -29,6 +30,12 @@ const snapshots = ref([]);
 const rollbackTarget = ref(null);
 const rollbackPhrase = ref('');
 const agentPanel = ref(null);
+const graphSelectedId = ref('');
+const graphLayout = ref(null);
+const embedOntology = new URLSearchParams(location.search).get('embed') === 'ontology';
+const restoredView = ref(null);
+function restoreModelView(view) { if (view.modelFingerprint !== draft.value?.fingerprint) return; graphLayout.value = view.layout; graphSelectedId.value = view.selectedId; restoredView.value = view; }
+async function handoffOntologyMaterial(material) { activeView.value = 'agent'; await nextTick(); await agentPanel.value?.setMaterial(material); }
 const operationsCenter = ref(null);
 const activeView = ref('agent');
 const accessTab = ref('systems');
@@ -77,6 +84,7 @@ async function refreshSemanticStatus() {
 async function loadWorkspace({ preserveMessage = false } = {}) {
   const generation = ++loadGeneration;
   loading.value = true; error.value = ''; if (!preserveMessage) message.value = '';
+  restoredView.value = null; graphLayout.value = null;
   try {
     const accessValue = unwrapAccess(await client.effectiveAccess());
     if (!Array.isArray(accessValue?.buttonPermissionIds)) throw new Error('当前身份的权限信息无效。');
@@ -90,10 +98,20 @@ async function loadWorkspace({ preserveMessage = false } = {}) {
     access.value = accessValue;
     profile.value = profileValue;
     draft.value = draftValue;
+    graphSelectedId.value = '';
+    if (location.hash.startsWith('#model-view=')) activeView.value = 'model';
     metaModels.value = modelsValue;
     simulation.value = simulationValue;
     semanticContext.value = contextValue;
     snapshots.value = snapshotValue.snapshots || [];
+    if (location.hash.startsWith('#saved-model-view=')) {
+      const id = decodeURIComponent(location.hash.slice('#saved-model-view='.length));
+      if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error('模型视图链接格式无效。');
+      const result = await client.knowledge.modelView(id);
+      if (generation !== loadGeneration) return;
+      if (result.view.modelFingerprint !== draftValue.fingerprint) throw new Error('模型版本已变化，不能套用旧视图。');
+      restoreModelView(result.view); activeView.value = 'model';
+    } else if (embedOntology) throw new Error('只读嵌入需要有效的个人模型视图链接。');
   } catch (err) {
     if (generation === loadGeneration) error.value = err.message || '元域智语端加载失败。';
   } finally {
@@ -124,6 +142,10 @@ async function openSemanticReviewTask(taskId) {
   activeView.value = 'agent';
   await nextTick();
   await agentPanel.value?.openTask?.(taskId);
+}
+async function askOntologyWorkspace(question) {
+  activeView.value = 'agent'; await nextTick();
+  agentPanel.value?.setWorkspaceQuestion(question, { fingerprint: draft.value?.fingerprint, objectId: graphSelectedId.value || draft.value?.objectTypes?.[0]?.id });
 }
 async function refreshSemanticNotifications() { await operationsCenter.value?.refresh?.(); }
 
@@ -157,6 +179,7 @@ const rollbackSnapshot = async () => {
 };
 
 async function finishAuthentication(result) {
+  graphLayout.value = null;
   currentUser.value = result.user;
   role.value = result.user?.roleId || client.roleId || result.access?.primaryRoleId || '';
   await client.registerDevice();
@@ -165,10 +188,11 @@ async function finishAuthentication(result) {
 }
 
 async function login() {
+  if (authenticating.value) return;
   if (!account.value.trim() || !password.value) { error.value = '请输入运营账号和密码。'; return; }
   authenticating.value = true; error.value = '';
   try { await finishAuthentication(authMode.value === 'oa' ? await client.loginOA({ account: account.value.trim(), password: password.value }) : await client.loginLocal({ account: account.value.trim(), password: password.value })); }
-  catch (err) { error.value = err.message || '身份认证失败。'; }
+  catch (err) { authenticated.value = false; currentUser.value = null; role.value = ''; access.value = null; error.value = semanticConnectionMessage(err); }
   finally { authenticating.value = false; loading.value = false; }
 }
 
@@ -176,13 +200,15 @@ async function logout() {
   await client.logout(); authenticated.value = false; currentUser.value = null; role.value = ''; access.value = null; password.value = ''; error.value = '';
 }
 
-onMounted(async () => {
-  try {
-    roles.value = await client.roles();
-    const session = client.identitySessionId ? await client.identitySession() : await client.enterpriseSession();
-    await finishAuthentication(session);
-  } catch { loading.value = false; authenticated.value = false; }
-});
+async function restoreSession() {
+  if (authenticating.value) return;
+  authenticating.value = true; error.value = '';
+  const result = await restoreSemanticSession({ client, finishAuthentication });
+  roles.value = result.roles;
+  if (!result.authenticated) { authenticated.value = false; currentUser.value = null; role.value = ''; access.value = null; restoredView.value = null; graphLayout.value = null; error.value = result.message; }
+  authenticating.value = false; loading.value = false;
+}
+onMounted(restoreSession);
 </script>
 
 <template>
@@ -193,9 +219,10 @@ onMounted(async () => {
         <p>运营权限由企业身份和设备会话共同确定，界面不再允许手动切换角色。</p>
         <div class="auth-mode"><button type="button" :class="{ active: authMode === 'local' }" @click="authMode = 'local'">平台账号</button><button type="button" :class="{ active: authMode === 'oa' }" @click="authMode = 'oa'">OA 账号</button></div>
         <label>账号<input v-model="account" autocomplete="username" /></label><label>密码<input v-model="password" type="password" autocomplete="current-password" /></label>
-        <div v-if="error" class="ops-error">{{ error }}</div><button class="auth-submit" :disabled="authenticating">{{ authenticating ? '正在校验身份与设备…' : '进入元域智语工作台' }}</button>
+        <div v-if="error" class="ops-error" role="alert">{{ error }}<button type="button" :disabled="authenticating" @click="restoreSession">重试连接</button></div><button class="auth-submit" :disabled="authenticating">{{ authenticating ? '正在校验身份与设备…' : '进入元域智语工作台' }}</button>
       </form>
     </section>
+    <section v-else-if="embedOntology" class="ontology-embed"><p v-if="loading">正在核验身份、模型版本与视图…</p><p v-else-if="error" role="alert">{{ error }}</p><template v-else-if="restoredView"><h1>{{ restoredView.label }} · 只读模型视图</h1><p>当前登录身份授权的结构视图，不包含业务记录或原始资料。</p><OntologyGraph :objects="draft.objectTypes" :relationships="draft.relationshipTypes" :selected-id="graphSelectedId" :saved-layout="graphLayout" :model-fingerprint="draft.fingerprint" :ask-enabled="false" :layout-save-enabled="false" /></template></section>
     <template v-else>
     <aside class="ops-rail">
       <div class="ops-brand"><span>Σ</span><div><b>元域智脑</b><small>SEMANTIC OPERATIONS</small></div></div>
@@ -251,9 +278,9 @@ onMounted(async () => {
             <div class="ops-section-head"><div><span>SEMANTIC MODEL OVERVIEW</span><h2>语义模型关系总览</h2><p>这里先看业务对象和对象关系。字段映射、主键、回放与 Semantica 细节保留在下方高级校验区。</p></div><button class="outline-button" @click="activeView = 'agent'">在 Agent 工作台审核与修改</button></div>
             <section class="model-overview-card">
               <header><div><span>{{ model?.name || '当前语义模型' }}</span><small>{{ model?.code || '模型草稿' }} · {{ draft?.objectTypes?.length || 0 }} 个对象 · {{ draft?.relationshipTypes?.length || 0 }} 条关系</small></div><b>{{ deploymentDriftLabel }}</b></header>
-              <div class="model-object-list"><article v-for="object in draft?.objectTypes || []" :key="object.id"><b>{{ object.label || object.id }}</b><small>{{ object.sourceSystems?.join(' / ') || '来源待核对' }}</small></article></div>
-              <div class="model-relationship-list"><article v-for="(relationship, index) in draft?.relationshipTypes || []" :key="`${relationship.from}-${relationship.predicate}-${relationship.to}-${index}`"><b>{{ draft.objectTypes?.find(item => item.id === relationship.from)?.label || relationship.from }}</b><span>— {{ relationship.label || relationship.predicate }} · {{ relationship.cardinality || '基数待核对' }} →</span><b>{{ draft.objectTypes?.find(item => item.id === relationship.to)?.label || relationship.to }}</b><small>{{ draft.objectTypes?.find(item => item.id === relationship.from)?.sourceSystems?.join('/') || '来源待核对' }} → {{ draft.objectTypes?.find(item => item.id === relationship.to)?.sourceSystems?.join('/') || '来源待核对' }}</small></article><p v-if="!draft?.relationshipTypes?.length">当前模型尚无已确认关系。</p></div>
-              <details class="model-advanced"><summary>高级校验与字段映射</summary><OAMetaModelStudio :meta-model="model" :draft="draft" :authoring-profile="profile" :simulation="simulation" :semantic-context="semanticContext" :role="role" :message="message" :replay-cases="client.replayOntologyCases" :knowledge-client="client.knowledge" :button-permission-ids="buttonPermissionIds" @save-draft="saveDraft" @validate-draft="validateDraft" @simulate-build="simulateBuild" @publish="publishModel"/></details>
+              <OAMetaModelStudio :meta-model="model" :draft="draft" :authoring-profile="profile" :simulation="simulation" :semantic-context="semanticContext" :role="role" :message="message" :replay-cases="client.replayOntologyCases" :knowledge-client="client.knowledge" :button-permission-ids="buttonPermissionIds" :focused-object-id="graphSelectedId" :saved-layout="graphLayout" @save-layout="graphLayout = $event" @select-object="graphSelectedId = $event" @save-draft="saveDraft" @validate-draft="validateDraft" @simulate-build="simulateBuild" @publish="publishModel" @ask="askOntologyWorkspace"/>
+              <OntologyWorkspaceTools v-if="draft" :draft="draft" :can-edit="canModel" :selected-id="graphSelectedId" @locate="graphSelectedId = $event" @material="handoffOntologyMaterial" @ask="askOntologyWorkspace" />
+              <OntologySavedViewsPanel v-if="draft" :client="client.knowledge" :draft="draft" :layout="graphLayout" :selected-id="graphSelectedId" :can-edit="canModel" @restore="restoreModelView" />
             </section>
           </template>
 
@@ -294,6 +321,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.ontology-embed{padding:18px;width:100%;min-width:0;box-sizing:border-box}.ontology-embed h1{font-size:18px}.ontology-embed p{font-size:12px;color:#91b2bf}
 .ops-onboarding-pane { min-width: 0; padding: 24px; }
 .model-overview-card{display:grid;gap:16px;padding:18px;border:1px solid #274e60;border-radius:12px;background:linear-gradient(145deg,#0c2634,#081a25)}
 .model-overview-card>header{display:flex;align-items:center;justify-content:space-between;gap:12px}.model-overview-card>header>div{display:grid;gap:5px}.model-overview-card>header span{color:#e2f2f4;font-size:16px;font-weight:750}.model-overview-card>header small{color:#83a4b2;font-size:11px}.model-overview-card>header>b{padding:6px 9px;border-radius:999px;color:#73d5bd;background:#103a35;font-size:10px}

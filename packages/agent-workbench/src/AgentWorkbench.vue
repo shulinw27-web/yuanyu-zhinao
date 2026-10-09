@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { createAgentClient } from '@healthcare-ai/agent-sdk';
 import { KnowledgeLibraryPanel, MemoryReviewPanel } from '@healthcare-ai/agent-ui/knowledge';
 import { AnomalyAssistantPanel } from '@healthcare-ai/agent-ui/agent';
+import { OntologyGraph } from '@healthcare-ai/agent-ui/meta-model';
 
 const props = defineProps({
   layout: { type: String, default: 'desktop' },
@@ -351,6 +352,11 @@ async function send(text = input.value) {
     });
     state.pending = response.command ? { ...response.command, runId: response.runId } : null;
     if (response.conversation) mergeConversation(response.conversation);
+    // Do not persist a stale authority snapshot into historical conversations.
+    if (response.semanticContext?.graph?.mode === 'authorized_instance_snapshot') {
+      const latest = state.messages.findLast(message => message.type === 'agent');
+      if (latest) latest.ontologyGraph = response.semanticContext.graph;
+    }
     await Promise.all([refresh({ quiet: true }), scrollToLatest()]);
   } catch (cause) {
     setError(cause, '智脑暂时无法响应。');
@@ -782,6 +788,7 @@ onUnmounted(() => {
               <article v-for="(message, index) in messages" :key="`${message.createdAt}-${index}`" :class="['chat-message', message.type]">
                 <div class="message-author"><span>{{ message.type === 'agent' ? 'Z' : message.type === 'user' ? (profile?.name?.slice(0, 1) || '我') : '!' }}</span><b>{{ message.type === 'agent' ? '智脑' : message.type === 'user' ? '我' : '系统' }}</b><time>{{ formatTime(message.createdAt) }}</time></div>
                 <div class="message-body"><p>{{ message.text }}</p><small v-if="message.attachmentCount">已提交 {{ message.attachmentCount }} 个受控材料</small>
+                  <details v-if="message.ontologyGraph?.mode === 'authorized_instance_snapshot'"><summary>本轮授权读取的业务实例关联图 · {{ message.ontologyGraph.modelVersion }}</summary><p>{{ message.ontologyGraph.interpretation }} 刷新或重新登录后需重新查询，不复用旧图授权。</p><OntologyGraph compact :objects="message.ontologyGraph.objects" :relationships="message.ontologyGraph.relationships" :ask-enabled="false" title="业务实例快照 · 不是类型模型" /><ul v-if="message.ontologyGraph.relationshipCoverage?.length"><li v-for="(coverage, index) in message.ontologyGraph.relationshipCoverage" :key="index">{{ coverage.from }} → {{ coverage.to }} · {{ coverage.predicate }}：{{ { mapped_in_snapshot: '快照内已通过确认的主数据映射关联', matched_in_snapshot: '快照内已匹配', no_match_in_snapshot: '快照内无匹配，不代表企业内不存在', requires_mapping_execution: '需要执行主数据映射，尚未对齐', ambiguous_mapping: '字段映射不唯一，待核对', mapping_not_declared: '尚未声明字段引用' }[coverage.status] || coverage.status }}<span v-if="coverage.matchedPairs !== undefined"> · {{ coverage.matchedPairs }} 对</span></li></ul></details>
                   <section v-if="message.type === 'agent' && (message.inferenceSource || message.evidenceTrace || message.lifecycle)" class="task-result-status">
                     <header><span :class="['model-source', message.inferenceSource || 'deterministic']">{{ message.inferenceSource === 'ark' ? '火山方舟已生成' : message.inferenceSource === 'local' ? '本地模型已生成' : ['openai', 'deepseek', 'compatible', 'workbuddy'].includes(message.inferenceSource) ? '云端模型已生成' : ['fallback', 'circuit_breaker', 'model_governance'].includes(message.inferenceSource) ? '模型未返回回答 · 备用说明' : message.inferenceSource === 'output_safety' ? '模型回答未通过校验' : '受控任务结果' }}</span><b v-if="message.runtime">{{ modelLabel(message.runtime) }}</b></header>
                     <div v-if="message.lifecycle" class="lifecycle-state"><b>{{ message.lifecycle.label }}</b><small>数据：{{ message.lifecycle.dataAccess === 'read_completed' ? '已按权限读取' : message.lifecycle.dataAccess === 'read_partial' ? '已尝试读取，部分核验未通过' : '未读取' }} · 写入：{{ writeStateLabel(message.lifecycle.businessWrite) }}</small></div>

@@ -15,6 +15,15 @@ const SCOPE_MISSING_TEXT = '建立语义模型。';
 const failedTurn = { intent: 'dialogue', answer: '', resolvedRequest: '', needsClarification: false, source: 'understanding_failed', failureCode: 'MODEL_RESULT_UNAVAILABLE_FALLBACK' };
 const resolve = (turn, text) => resolveSemanticOperationsIntent({ turn, text, contextualText: text, hasAttachments: false });
 
+test('禁止的整模型删除与否定指令不能被修订规则或模型意图覆盖', () => {
+  for (const turn of [null, failedTurn, { intent: 'build_model', source: 'mock-understanding', answer: '', needsClarification: false }]) {
+    assert.equal(resolve(turn, '删除当前模型').classified.intent, 'unsupported_operation');
+    const negated = resolve(turn, '不要修改模型').classified;
+    assert.equal(negated.intent, 'conversation');
+    assert.equal(negated.permission, null);
+  }
+});
+
 test('模型不可用 + 明确建模诉求：回落确定性分类，产出可执行计划而不是死路', () => {
   const { classified, turnUnavailable } = resolve(failedTurn, BUILD_TEXT);
   assert.equal(turnUnavailable, true);
