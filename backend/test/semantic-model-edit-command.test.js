@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { isSemanticModelEditCommand, parseSemanticModelEdit } from '../src/services/semantic-model-edit-command.js';
 import { inspectCandidateFieldRemoval } from '../src/services/semantic-field-removal.js';
+import { inspectCandidateObjectRemoval } from '../src/services/semantic-object-removal.js';
 
 const fixture = () => ({ objectTypes: [{ id: 'Stock', label: '库存', key: 'id', fields: ['id', 'qty', 'status'], sourceSystems: ['WMS'], fieldDefinitions: [
   { name: 'id', type: 'string', required: true, primaryKey: true, sourceField: 'stock_id', mappingStatus: 'mapped' },
@@ -20,6 +21,39 @@ test('batch edits stage ordered changes, preserve quoted semicolons and never mu
 
 const relationCommand = (predicate = 'reserves', from = 'Stock', to = 'Stock') => `新增关系“${predicate}”，从“${from}”到“${to}”，名称“预留库存”，基数“一对多”，依据“测试制度定义；尚未验证实例”`;
 const objectCommand = '新增对象“Customer”，名称“客户”，主键“customer_id”，类型“文本”，业务域“销售”，字段“name”，字段类型“文本”';
+
+test('object withdrawal is single, non-cascading and leaves the baseline and input unchanged', () => {
+  const baseline = fixture(); const added = parseSemanticModelEdit(objectCommand, baseline).body; const before = structuredClone(added);
+  const removed = parseSemanticModelEdit('撤回候选对象“Customer”', added, baseline);
+  assert.ok(!removed.error, removed.error); assert.deepEqual(removed.body, baseline); assert.deepEqual(added, before);
+  assert.deepEqual(removed.objectWithdrawal, { objectId: 'Customer' });
+  assert.equal(isSemanticModelEditCommand('撤回候选对象'), true);
+  for (const text of ['撤回候选对象', '撤回候选对象“客户”', '撤回候选对象“Customer”，发布模型']) assert.ok(parseSemanticModelEdit(text, added, baseline).error);
+  assert.equal(parseSemanticModelEdit(`撤回候选对象“Customer”；${objectCommand}`, added, baseline).code, 'SEMANTIC_EDIT_BATCH_WITHDRAWAL_FORBIDDEN');
+  assert.equal(inspectCandidateObjectRemoval(added, baseline, 'Stock').code, 'SEMANTIC_OBJECT_REMOVAL_EXISTING_FORBIDDEN');
+  assert.equal(inspectCandidateObjectRemoval(added, baseline, 'Customer', before).code, 'SEMANTIC_OBJECT_REMOVAL_EXISTING_FORBIDDEN');
+  assert.equal(inspectCandidateObjectRemoval(added, null, 'Customer').code, 'SEMANTIC_OBJECT_REMOVAL_TARGET_INVALID');
+  assert.equal(inspectCandidateObjectRemoval({ ...added, objectTypes: [added.objectTypes[1]] }, baseline, 'Customer').code, 'SEMANTIC_OBJECT_REMOVAL_TARGET_INVALID');
+});
+
+test('object withdrawal rejects mapping, references, configurations and excessive dependency depth', () => {
+  const baseline = fixture(); const fresh = () => parseSemanticModelEdit(objectCommand, baseline).body;
+  for (const mutate of [
+    model => { model.relationshipTypes.push({ from: 'Stock', to: 'Customer', predicate: 'owns' }); },
+    model => { model.objectTypes[0].fieldDefinitions[1].reference = 'Customer'; },
+    model => { model.metrics = [{ expression: 'count(Customer)' }]; },
+    model => { model.scenario = { readPlans: [{ objectType: 'Customer' }] }; },
+    model => { model.accessPolicies = [{ description: '客户访问规则' }]; },
+    model => { model.policies = ['客户修改必须审核']; },
+    model => { model.sourceAssignments = [{ objectId: 'Customer', system: 'ERP' }]; }
+  ]) { const model = fresh(); mutate(model); assert.equal(inspectCandidateObjectRemoval(model, baseline, 'Customer').code, 'SEMANTIC_OBJECT_REMOVAL_DEPENDENCIES'); }
+  for (const mutate of [model => { model.objectTypes[1].sourceSystems = ['ERP']; }, model => { model.objectTypes[1].fieldDefinitions[0].sourceField = 'id'; }, model => { model.objectTypes[1].fieldDefinitions[1].mappingStatus = 'mapped'; }]) {
+    const model = fresh(); mutate(model); assert.equal(inspectCandidateObjectRemoval(model, baseline, 'Customer').code, 'SEMANTIC_OBJECT_REMOVAL_MAPPED_FORBIDDEN');
+  }
+  const deep = fresh(); deep.worldModel = {}; let node = deep.worldModel; for (let i = 0; i < 26; i++) { node.next = {}; node = node.next; }
+  assert.equal(inspectCandidateObjectRemoval(deep, baseline, 'Customer').code, 'SEMANTIC_OBJECT_REMOVAL_BUDGET');
+  const neighbor = fresh(); neighbor.metrics = [{ expression: 'count(CustomerExtra)' }]; assert.equal(inspectCandidateObjectRemoval(neighbor, baseline, 'Customer').allowed, true);
+});
 
 test('explicit object addition preserves input and leaves source and key mapping pending without grants', () => {
   const proposal = fixture(); const before = structuredClone(proposal);

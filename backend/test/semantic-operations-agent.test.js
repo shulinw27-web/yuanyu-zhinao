@@ -16,6 +16,44 @@ import { CANDIDATE_CATALOG, CANDIDATE_CATALOG_SIZE, listCatalogGaps, listUncover
 
 const identity = { tenantId: 'semantic-test', subjectId: 'architect-01', deviceId: 'device-01' };
 
+test('explicit object withdrawal restores the candidate without touching the draft and invalidates confirmation', async () => {
+  resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);
+  const role = getRole('executive'); const baseline = await getOAMetaModelDraft();
+  let task = await createSemanticOperationsTask({ body: { text: '建立供应商语义模型。', systemCodes: ['ERP'] }, role, identityScope: identity });
+  const edit = text => createSemanticOperationsTask({ body: { text, parentTaskId: task.id, parentProposalRevision: task.proposal.revision }, role, identityScope: identity });
+  task = await edit('新增对象“Customer”，名称“客户”，主键“customer_id”，类型“文本”，业务域“销售”，字段“name”，字段类型“文本”');
+  assert.ok(!task.error, task.error);
+  const original = structuredClone(task.proposal.objectTypes.filter(item => item.id !== 'Customer'));
+  const token = await issueSemanticOperationsTaskConfirmation({ taskId: task.id, identityScope: identity });
+  const revision = task.proposal.revision;
+  task = await edit('撤回候选对象“Customer”'); assert.ok(!task.error, task.error);
+  assert.equal(task.proposal.revision, revision + 1); assert.deepEqual(task.proposal.objectTypes, original);
+  assert.equal((await executeSemanticOperationsTask({ taskId: task.id, role, identityScope: identity, confirmationToken: token.confirmationToken })).code, 'SEMANTIC_TASK_CONFIRMATION_INVALID');
+  assert.equal((await getOAMetaModelDraft()).fingerprint, baseline.fingerprint);
+  assert.equal((await listSemanticOperationsSnapshots({ identityScope: identity })).length, 0);
+});
+
+test('object withdrawal rechecks hidden governance and original candidates server-side', async () => {
+  resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks', 'oa_meta_model_runtime']);
+  const role = getRole('executive');
+  let task = await createSemanticOperationsTask({ body: { text: '建立供应商和采购订单语义模型。', systemCodes: ['ERP'] }, role, identityScope: identity });
+  task = await createSemanticOperationsTask({ body: { text: '新增对象“Customer”，名称“客户”，主键“customer_id”，类型“文本”，业务域“销售”，字段“name”，字段类型“文本”', parentTaskId: task.id, parentProposalRevision: task.proposal.revision }, role, identityScope: identity });
+  assert.ok(!task.error, task.error);
+  const body = { objectTypes: task.proposal.objectTypes.filter(item => item.id !== 'Customer'), relationshipTypes: task.proposal.relationshipTypes, revision: task.proposal.revision, candidateObjectWithdrawal: { objectId: 'Customer' } };
+  assert.equal((await updateSemanticOperationsProposal({ proposalId: task.proposal.id, ...body, candidateObjectWithdrawal: { objectId: 'Customer', cascade: true }, role, identityScope: identity })).code, 'SEMANTIC_OBJECT_REMOVAL_TARGET_INVALID');
+  assert.equal((await updateSemanticOperationsProposal({ proposalId: task.proposal.id, ...body, objectTypes: task.proposal.objectTypes, role, identityScope: identity })).code, 'SEMANTIC_OBJECT_REMOVAL_TARGET_INVALID');
+  // Keep valid relation endpoints but add another ID: not a single-object withdrawal.
+  const extra = structuredClone(body.objectTypes); extra.push({ ...structuredClone(extra[0]), id: 'ExtraSupplier', label: '额外供应商', coreObject: 'ExtraSupplier' });
+  assert.equal((await updateSemanticOperationsProposal({ proposalId: task.proposal.id, ...body, objectTypes: extra, role, identityScope: identity })).code, 'SEMANTIC_OBJECT_REMOVAL_TARGET_INVALID');
+  await mutateSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${task.proposal.id}`, null, stored => { stored.draft.metrics = [{ expression: 'count(Customer)' }]; return { value: stored }; });
+  assert.equal((await updateSemanticOperationsProposal({ proposalId: task.proposal.id, ...body, role, identityScope: identity })).code, 'SEMANTIC_OBJECT_REMOVAL_DEPENDENCIES');
+  let stored = await readSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${task.proposal.id}`);
+  assert.equal(stored.revision, task.proposal.revision); assert.ok(stored.draft.objectTypes.some(item => item.id === 'Customer'));
+  await mutateSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${task.proposal.id}`, null, current => { current.draft.metrics = []; current.originalDraft.objectTypes.push(structuredClone(current.draft.objectTypes.find(item => item.id === 'Customer'))); return { value: current }; });
+  assert.equal((await updateSemanticOperationsProposal({ proposalId: task.proposal.id, ...body, role, identityScope: identity })).code, 'SEMANTIC_OBJECT_REMOVAL_EXISTING_FORBIDDEN');
+  stored = await readSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${task.proposal.id}`); assert.equal(stored.revision, task.proposal.revision);
+});
+
 test('explicit object addition follows task identity/CAS, invalidates old confirmation and blocks unmapped adoption', async () => {
   resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);
   const role = getRole('executive'); const baseline = await getOAMetaModelDraft();

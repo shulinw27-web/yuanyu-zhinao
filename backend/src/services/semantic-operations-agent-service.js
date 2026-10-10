@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { inspectCandidateFieldRemoval } from './semantic-field-removal.js';
+import { inspectCandidateObjectRemoval } from './semantic-object-removal.js';
 import { mutateSemanticGovernanceState, mutateSemanticGovernanceStates, readSemanticGovernanceState } from './semantic-governance-store.js';
 import { buildOAMetaModelDraftRuntimeChange, getOAMetaModelDraft, getOAMetaModelDraftFromRuntime, getOAMetaModelRuntimeTransactionEntry } from './meta-model-service.js';
 import { inspectMultimodalInput, extractMultimodalEvidence } from './multimodal-input-service.js';
@@ -697,7 +698,7 @@ function applySourceAssignmentsToDraft({ draft, originalDraft, previous = [], en
   return changed;
 }
 
-export function updateSemanticOperationsProposal({ proposalId, revision, objectTypes, relationshipTypes, primaryKeyCorrections, identityLinkConfirmations, identityConflictRulings, declarationRulings, sourceAssignments, candidateFieldWithdrawal, role, identityScope }) {
+export function updateSemanticOperationsProposal({ proposalId, revision, objectTypes, relationshipTypes, primaryKeyCorrections, identityLinkConfirmations, identityConflictRulings, declarationRulings, sourceAssignments, candidateFieldWithdrawal, candidateObjectWithdrawal, role, identityScope }) {
   assertSemanticTenant(identityScope);
   return mapMaybe(readSemanticGovernanceState(PROPOSAL_NAMESPACE, proposalKey(proposalId)), (proposal) => {
   if (!proposal || !semanticOperationsOwnerMatches(proposal.owner, identityScope)) return { error: '未找到可修订的语义建模提案，或该提案不属于当前身份。', code: 'SEMANTIC_PROPOSAL_NOT_FOUND' };
@@ -836,6 +837,15 @@ export function updateSemanticOperationsProposal({ proposalId, revision, objectT
     previous: proposal.primaryKeyCorrections, requested: primaryKeyCorrections, actor: identityScope?.subjectId, roleId: role.id, revision: currentRevision + 1, time: now() });
   if (correctionResult.error) return { error: correctionResult.error, code: 'SEMANTIC_PRIMARY_KEY_CORRECTION_INVALID' };
   return mapMaybe(getOAMetaModelDraft(), (base) => mapMaybe(validateProposalSamples(merged.draft, { sampleRefs: proposal.sampleRefs, roleId: role.id, identityScope, requireEvidence: Boolean(proposal.schemaDiscovery?.schemas?.length) }), (mappingValidation) => {
+  if (candidateObjectWithdrawal) {
+    const target = candidateObjectWithdrawal;
+    if (typeof target !== 'object' || Object.keys(target).some(key => key !== 'objectId') || typeof target.objectId !== 'string') return { error: '候选对象撤回目标无效。', code: 'SEMANTIC_OBJECT_REMOVAL_TARGET_INVALID' };
+    const checked = inspectCandidateObjectRemoval({ ...proposal.draft, sourceAssignments: proposal.sourceAssignments, primaryKeyCorrections: proposal.primaryKeyCorrections, identityLinkConfirmations: proposal.identityLinkConfirmations }, base, target.objectId, proposal.originalDraft || proposal.draft);
+    if (!checked.allowed) return checked;
+    if (merged.draft.objectTypes.some(item => item.id === target.objectId)) return { error: '候选对象尚未从本次修订移除。', code: 'SEMANTIC_OBJECT_REMOVAL_TARGET_INVALID' };
+    const expectedIds = proposal.draft.objectTypes.filter(item => item.id !== target.objectId).map(item => item.id);
+    if (merged.draft.objectTypes.length !== expectedIds.length || merged.draft.objectTypes.some(item => !expectedIds.includes(item.id))) return { error: '一次撤回只能移除指定候选对象，不能夹带其他对象增删。', code: 'SEMANTIC_OBJECT_REMOVAL_TARGET_INVALID' };
+  }
   if (candidateFieldWithdrawal) {
     const target = candidateFieldWithdrawal;
     if (typeof target !== 'object' || Object.keys(target).some(key => !['objectId', 'fieldName'].includes(key)) || typeof target.objectId !== 'string' || typeof target.fieldName !== 'string') return { error: '候选字段撤回目标无效。', code: 'SEMANTIC_FIELD_REMOVAL_TARGET_INVALID' };

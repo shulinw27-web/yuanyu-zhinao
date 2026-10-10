@@ -2,6 +2,7 @@
 import { inspectCandidateFieldRemoval } from './semantic-field-removal.js';
 import { parseExplicitRelationshipAddition } from './semantic-relationship-edit-command.js';
 import { parseExplicitObjectAddition } from './semantic-object-edit-command.js';
+import { inspectCandidateObjectRemoval } from './semantic-object-removal.js';
 const propertyNames = '业务名称|业务域|业务说明|关系名称|关系基数|关系依据|字段说明|字段单位|字段类型|字段必填|字段枚举';
 const propertyPattern = new RegExp(`^(?:请)?(?:把|将)([“"])([^”"\\r\\n]{1,100})([”"])(?:的)?(${propertyNames})(?:修改为|改为|设置为)([“"])([^”"\\r\\n]{1,300})([”"])(?:[。！!])?$`, 'u');
 const typeAliases = { 文本: 'string', 字符串: 'string', 数值: 'number', 整数: 'integer', 布尔: 'boolean', 日期: 'date', 日期时间: 'datetime' };
@@ -14,7 +15,7 @@ export function isSemanticModelEditCommand(text) {
   const value = String(text).trim();
   return /^(?:请)?(?:把|将)[“"]/u.test(value) && new RegExp(`(?:${propertyNames})(?:修改为|改为|设置为)`, 'u').test(value)
     || /^(?:请)?(?:给|为)[“"]/u.test(value) && /(?:新增|添加)字段/u.test(value)
-    || /^(?:请)?(?:撤回|删除)候选字段/u.test(value)
+    || /^(?:请)?(?:撤回|删除)候选(?:字段|对象)/u.test(value)
     || /^(?:请)?新增(?:关系|对象)/u.test(value);
 }
 
@@ -52,7 +53,7 @@ export function parseSemanticModelEdit(text, proposal, baseline) {
   if (commands.length > 8) return failure('SEMANTIC_EDIT_BATCH_BUDGET', '每批最多8项修改，请分批预览和校验。');
   if (commands.some(command => !command)) return failure('SEMANTIC_EDIT_NEEDS_CLARIFICATION', '分号之间不能有空指令，整批未修改。');
   if (commands.length === 1) return parseSingleSemanticModelEdit(commands[0], proposal, baseline);
-  if (commands.some(command => /^(?:请)?(?:撤回|删除)候选字段/u.test(command))) return failure('SEMANTIC_EDIT_BATCH_WITHDRAWAL_FORBIDDEN', '撤回候选字段需单独提交，以检查完整依赖；整批未修改。');
+  if (commands.some(command => /^(?:请)?(?:撤回|删除)候选(?:字段|对象)/u.test(command))) return failure('SEMANTIC_EDIT_BATCH_WITHDRAWAL_FORBIDDEN', '撤回候选字段或对象需单独提交，以检查完整依赖；整批未修改。');
   let staged = proposal; const summaries = []; const operations = new Set();
   for (let index = 0; index < commands.length; index++) {
     const result = parseSingleSemanticModelEdit(commands[index], staged, baseline);
@@ -65,6 +66,14 @@ export function parseSemanticModelEdit(text, proposal, baseline) {
 
 function parseSingleSemanticModelEdit(text, proposal, baseline) {
   const input = String(text).trim();
+  if (/^(?:请)?(?:撤回|删除)候选对象/u.test(input)) {
+    const match = /^(?:请)?(?:撤回|删除)候选对象([“"])([^”"\r\n]{1,32})([”"])[。！!]?$/u.exec(input);
+    if (!match || !quotePair(match[1], match[3])) return failure('SEMANTIC_EDIT_NEEDS_CLARIFICATION', '请指定单个对象编码，例如：撤回候选对象“Customer”。不删除草稿或业务记录。');
+    const checked = inspectCandidateObjectRemoval(proposal, baseline, match[2]);
+    if (!checked.allowed) return checked;
+    const body = candidateBody(proposal); body.objectTypes = body.objectTypes.filter(item => item.id !== match[2]);
+    return { body, objectWithdrawal: { objectId: match[2] }, summary: `${match[2]} · 撤回未映射、无依赖的新候选对象；未删除草稿或业务记录` };
+  }
   if (/^(?:请)?新增对象/u.test(input)) return parseExplicitObjectAddition(input, proposal);
   if (/^(?:请)?新增关系/u.test(input)) return parseExplicitRelationshipAddition(input, proposal);
   if (/^(?:请)?(?:撤回|删除)候选字段/u.test(input)) {
