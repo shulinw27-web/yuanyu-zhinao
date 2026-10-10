@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { inspectCandidateFieldRemoval } from './semantic-field-removal.js';
 import { inspectCandidateObjectRemoval } from './semantic-object-removal.js';
+import { collectSemanticObjectDependencies } from './semantic-object-dependencies.js';
+import { hasButtonPermission } from './access-control-service.js';
 import { mutateSemanticGovernanceState, mutateSemanticGovernanceStates, readSemanticGovernanceState } from './semantic-governance-store.js';
 import { buildOAMetaModelDraftRuntimeChange, getOAMetaModelDraft, getOAMetaModelDraftFromRuntime, getOAMetaModelRuntimeTransactionEntry } from './meta-model-service.js';
 import { inspectMultimodalInput, extractMultimodalEvidence } from './multimodal-input-service.js';
@@ -696,6 +698,23 @@ function applySourceAssignmentsToDraft({ draft, originalDraft, previous = [], en
     }
   }
   return changed;
+}
+
+export function inspectSemanticOperationsObjectDependencies({ proposalId, revision, objectId, role, identityScope, accessContext }) {
+  assertSemanticTenant(identityScope);
+  const canRead = permission => accessContext ? accessContext.buttonPermissionIds?.includes(permission) : hasButtonPermission(role?.id, permission);
+  if (!canRead('meta_model.draft.save') && !canRead('meta_model.draft.review')) return { error: '当前角色不能读取模型依赖。', code: 'SEMANTIC_WORKSPACE_FORBIDDEN' };
+  return mapMaybe(readSemanticGovernanceState(PROPOSAL_NAMESPACE, proposalKey(proposalId)), proposal => {
+    if (!proposal || !canAccessProposal(proposal, identityScope, accessContext)) return { error: '未找到可访问的模型提案。', code: 'SEMANTIC_PROPOSAL_NOT_FOUND' };
+    if (Number(revision) !== (proposal.revision || 1)) return { error: '候选修订已变化，请刷新后检查。', code: 'SEMANTIC_PROPOSAL_REVISION_CONFLICT' };
+    const objects = proposal.draft.objectTypes.filter(item => item.id === objectId);
+    if (objects.length !== 1) return { error: '当前候选中没有唯一的目标对象。', code: 'SEMANTIC_DEPENDENCY_TARGET_INVALID' };
+    return mapMaybe(getOAMetaModelDraft(), base => {
+      const candidate = { ...proposal.draft, sourceAssignments: proposal.sourceAssignments, primaryKeyCorrections: proposal.primaryKeyCorrections, identityLinkConfirmations: proposal.identityLinkConfirmations };
+      const report = collectSemanticObjectDependencies([{ scope: 'candidate', model: candidate }, { scope: 'draft', model: base }, { scope: 'original', model: proposal.originalDraft || proposal.draft }], objects[0]);
+      return { ...report, objectId, proposalId, revision: proposal.revision || 1, draftFingerprint: base.fingerprint, readOnly: true };
+    });
+  });
 }
 
 export function updateSemanticOperationsProposal({ proposalId, revision, objectTypes, relationshipTypes, primaryKeyCorrections, identityLinkConfirmations, identityConflictRulings, declarationRulings, sourceAssignments, candidateFieldWithdrawal, candidateObjectWithdrawal, role, identityScope }) {

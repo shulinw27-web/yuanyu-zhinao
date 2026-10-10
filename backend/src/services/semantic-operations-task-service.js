@@ -1,10 +1,12 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { isSemanticModelEditCommand, parseSemanticModelEdit } from './semantic-model-edit-command.js';
+import { isSemanticDependencyCommand, parseSemanticDependencyCommand } from './semantic-object-dependencies.js';
 import { configureSemanticGovernanceRepository, getSemanticGovernanceStoreInfo, mutateSemanticGovernanceState, probeSemanticGovernanceStore, readSemanticGovernanceState } from './semantic-governance-store.js';
 import { inspectModelPromptSafety } from './local-model-gateway.js';
 import {
   applySemanticOperationsProposal,
   createSemanticOperationsProposalFromRequest,
+  inspectSemanticOperationsObjectDependencies,
   listSemanticOperationsSnapshots,
   updateSemanticOperationsProposal
 } from './semantic-operations-agent-service.js';
@@ -454,6 +456,20 @@ export async function createSemanticOperationsTask({ body, role, identityScope, 
     if (workspaceMaterial.length > 6000) return { error: '选定对象邻域超过上下文预算，请缩小模型范围。', status: 422, code: 'SEMANTIC_WORKSPACE_BUDGET' };
   }
   const explicitItemEdit = isSemanticModelEditCommand(text);
+  if (isSemanticDependencyCommand(text)) {
+    if (!parent?.proposal) return { error: '请打开要检查的模型候选任务。', code: 'SEMANTIC_EDIT_PROPOSAL_REQUIRED', status: 409 };
+    if (body.attachments?.length) return { error: '依赖检查不接收附件，请单独提交材料。', code: 'SEMANTIC_EDIT_ATTACHMENT_UNSUPPORTED', status: 422 };
+    if (!hasCurrentPermission(role, accessContext, 'meta_model.draft.save') && !hasCurrentPermission(role, accessContext, 'meta_model.draft.review')) return { error: '当前角色不能读取模型依赖。', code: 'SEMANTIC_WORKSPACE_FORBIDDEN', status: 403 };
+    const target = parseSemanticDependencyCommand(text);
+    if (target.error) return { ...target, status: 422 };
+    const report = await inspectSemanticOperationsObjectDependencies({ proposalId: parent.proposal.id, revision: body.parentProposalRevision, objectId: target.objectId, role, identityScope, accessContext });
+    if (report.error) return { ...report, status: report.code === 'SEMANTIC_PROPOSAL_REVISION_CONFLICT' ? 409 : 422 };
+    const locations = report.dependencies.slice(0, 20).map(item => `${item.scope} · ${item.path.map(part => String(part)).join('.')}`).join('\n');
+    const response = `${report.objectId} 的模型配置影响检查：共${report.total}处引用或同名提及。${report.total ? '\n' + locations : '本次范围未发现配置引用。'}${report.total > 20 ? '\n对话仅展示前20处，请核对完整配置。' : ''}\n依据：候选修订${report.revision}，草稿指纹${report.draftFingerprint}。${report.boundary}未修改候选、未删除业务记录、未授权发布。`;
+    await appendTaskMessage(parent.id, 'user', text);
+    await appendTaskMessage(parent.id, 'assistant', response);
+    return { ...await getSemanticOperationsTask({ taskId: parent.id, identityScope, accessContext }), dependencyAnalysis: report };
+  }
   if (explicitItemEdit) {
     if (!parent?.proposal) return { error: '请先打开待确认的语义模型候选，再指定对象或字段进行修改，不会为此另建模型。', status: 409, code: 'SEMANTIC_EDIT_PROPOSAL_REQUIRED' };
     if (body.attachments?.length) return { error: '单项候选修订不接收附件，请分开提交材料与修改要求。', status: 422, code: 'SEMANTIC_EDIT_ATTACHMENT_UNSUPPORTED' };

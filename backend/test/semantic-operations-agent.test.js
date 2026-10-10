@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { resetRuntimeState, writeState } from '../src/repositories/runtime-state-repository.js';
 import { mutateSemanticGovernanceState, readSemanticGovernanceState } from '../src/services/semantic-governance-store.js';
 import { getRole } from '../src/services/authorization-service.js';
-import { applySemanticOperationsProposal, createSemanticOperationsProposal, createSemanticOperationsProposalFromRequest, listSemanticOperationsSnapshots, rollbackSemanticOperationsSnapshot, saveSemanticOperationsDraft, updateSemanticOperationsProposal } from '../src/services/semantic-operations-agent-service.js';
+import { applySemanticOperationsProposal, createSemanticOperationsProposal, createSemanticOperationsProposalFromRequest, inspectSemanticOperationsObjectDependencies, listSemanticOperationsSnapshots, rollbackSemanticOperationsSnapshot, saveSemanticOperationsDraft, updateSemanticOperationsProposal } from '../src/services/semantic-operations-agent-service.js';
 import { archiveSemanticOperationsTask, classifySemanticOperationsIntent, createSemanticOperationsTask, executeSemanticOperationsTask, getSemanticOperationsTask, getSemanticOperationsTaskTrace, issueSemanticOperationsTaskConfirmation, listSemanticOperationsTasks, reviseSemanticOperationsTaskProposal } from '../src/services/semantic-operations-task-service.js';
 import { getOAMetaModelDraft, saveOAMetaModelDraft, validateOAMetaModelDraft } from '../src/services/meta-model-service.js';
 import { detectRequestedSemanticSystems, discoverSemanticSources } from '../src/services/semantic-source-discovery-service.js';
@@ -15,6 +15,41 @@ import { semanticOperationsPrincipalKey } from '../src/services/semantic-operati
 import { CANDIDATE_CATALOG, CANDIDATE_CATALOG_SIZE, listCatalogGaps, listUncoveredMentions, matchCandidateCatalog, UNCOVERED_MENTION_LIMIT } from '../src/services/semantic-candidate-catalog-service.js';
 
 const identity = { tenantId: 'semantic-test', subjectId: 'architect-01', deviceId: 'device-01' };
+
+test('agent dependency checks use private server rules while preserving proposal revision and confirmation', async () => {
+  resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);
+  const role = getRole('executive'); const task = await createSemanticOperationsTask({ body: { text: '建立供应商语义模型。', systemCodes: ['ERP'] }, role, identityScope: identity });
+  await issueSemanticOperationsTaskConfirmation({ taskId: task.id, identityScope: identity });
+  await mutateSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${task.proposal.id}`, null, stored => { stored.draft.metrics = [{ expression: 'count(Supplier)', note: '不应返回的配置正文' }]; return { value: stored }; });
+  const before = await readSemanticGovernanceState('semantic_operations_agent_tasks', 'index');
+  const request = { text: '检查对象删除影响“Supplier”', parentTaskId: task.id, parentProposalRevision: task.proposal.revision };
+  const result = await createSemanticOperationsTask({ body: request, role, identityScope: identity });
+  assert.ok(!result.error, result.error); assert.equal(result.id, task.id); assert.equal(result.proposal.revision, task.proposal.revision);
+  assert.equal(result.dependencyAnalysis.readOnly, true); assert.equal(result.dependencyAnalysis.complete, true);
+  assert.ok(result.dependencyAnalysis.dependencies.some(item => item.scope === 'candidate' && item.path.join('.') === 'metrics.0.expression'));
+  assert.ok(!JSON.stringify(result.dependencyAnalysis).includes('不应返回的配置正文')); assert.ok(result.messages.at(-1).content.includes('不是外部系统依赖扫描'));
+  const after = await readSemanticGovernanceState('semantic_operations_agent_tasks', 'index');
+  assert.deepEqual(after[task.id].confirmation, before[task.id].confirmation);
+  assert.equal((await listSemanticOperationsSnapshots({ identityScope: identity })).length, 0);
+});
+
+test('dependency reads reject foreign identities, stale revisions, revoked grants, mixed writes and excessive hidden rules', async () => {
+  resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks', 'oa_meta_model_runtime']);
+  const role = getRole('executive'); const task = await createSemanticOperationsTask({ body: { text: '建立供应商语义模型。', systemCodes: ['ERP'] }, role, identityScope: identity });
+  const request = { text: '检查对象删除影响“Supplier”', parentTaskId: task.id, parentProposalRevision: task.proposal.revision };
+  const inspect = options => inspectSemanticOperationsObjectDependencies({ proposalId: task.proposal.id, revision: task.proposal.revision, objectId: 'Supplier', role, identityScope: identity, ...options });
+  assert.equal((await inspect({ accessContext: { buttonPermissionIds: [] } })).code, 'SEMANTIC_WORKSPACE_FORBIDDEN');
+  assert.equal((await inspect({ identityScope: { ...identity, tenantId: 'other' } })).code, 'SEMANTIC_PROPOSAL_NOT_FOUND');
+  assert.equal((await inspect({ identityScope: { ...identity, subjectId: 'other' } })).code, 'SEMANTIC_PROPOSAL_NOT_FOUND');
+  assert.equal((await createSemanticOperationsTask({ body: { ...request, parentProposalRevision: 0 }, role, identityScope: identity })).code, 'SEMANTIC_PROPOSAL_REVISION_CONFLICT');
+  assert.equal((await createSemanticOperationsTask({ body: { ...request, text: request.text + '；删除对象' }, role, identityScope: identity })).code, 'SEMANTIC_DEPENDENCY_TARGET_INVALID');
+  assert.equal((await createSemanticOperationsTask({ body: { ...request, attachments: [{}] }, role, identityScope: identity })).code, 'SEMANTIC_EDIT_ATTACHMENT_UNSUPPORTED');
+  const before = await readSemanticGovernanceState('semantic_operations_agent_tasks', 'index');
+  await mutateSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${task.proposal.id}`, null, stored => { stored.draft.metrics = Array.from({ length: 20001 }, () => 'Supplier'); return { value: stored }; });
+  const blocked = await createSemanticOperationsTask({ body: request, role, identityScope: identity });
+  assert.equal(blocked.code, 'SEMANTIC_DEPENDENCY_BUDGET'); assert.deepEqual(blocked.dependencies, []);
+  assert.deepEqual(await readSemanticGovernanceState('semantic_operations_agent_tasks', 'index'), before);
+});
 
 test('explicit object withdrawal restores the candidate without touching the draft and invalidates confirmation', async () => {
   resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);

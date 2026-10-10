@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { isSemanticModelEditCommand, parseSemanticModelEdit } from '../src/services/semantic-model-edit-command.js';
 import { inspectCandidateFieldRemoval } from '../src/services/semantic-field-removal.js';
 import { inspectCandidateObjectRemoval } from '../src/services/semantic-object-removal.js';
+import { collectSemanticObjectDependencies, isSemanticDependencyCommand, parseSemanticDependencyCommand } from '../src/services/semantic-object-dependencies.js';
 
 const fixture = () => ({ objectTypes: [{ id: 'Stock', label: '库存', key: 'id', fields: ['id', 'qty', 'status'], sourceSystems: ['WMS'], fieldDefinitions: [
   { name: 'id', type: 'string', required: true, primaryKey: true, sourceField: 'stock_id', mappingStatus: 'mapped' },
@@ -21,6 +22,33 @@ test('batch edits stage ordered changes, preserve quoted semicolons and never mu
 
 const relationCommand = (predicate = 'reserves', from = 'Stock', to = 'Stock') => `新增关系“${predicate}”，从“${from}”到“${to}”，名称“预留库存”，基数“一对多”，依据“测试制度定义；尚未验证实例”`;
 const objectCommand = '新增对象“Customer”，名称“客户”，主键“customer_id”，类型“文本”，业务域“销售”，字段“name”，字段类型“文本”';
+
+test('dependency reports return bounded structural locations, not configuration content or deletion permission', () => {
+  const model = fixture(); model.relationshipTypes.push({ from: 'Stock', to: 'Customer', predicate: 'owns' });
+  model.metrics = [{ expression: 'count(Customer)', secret: 'private-rule-text' }, { expression: 'count(CustomerExtra)' }];
+  const before = structuredClone(model);
+  const report = collectSemanticObjectDependencies([{ scope: 'candidate', model }], { id: 'Customer', label: '客户' });
+  assert.equal(report.complete, true); assert.equal(report.total, 2);
+  assert.deepEqual(report.dependencies.map(item => item.path), [['relationshipTypes', 1, 'to'], ['metrics', 0, 'expression']]);
+  assert.ok(!JSON.stringify(report).includes('private-rule-text')); assert.ok(!JSON.stringify(report).includes('count(Customer)')); assert.deepEqual(model, before);
+  assert.equal(report.allowed, undefined);
+  const escaped = collectSemanticObjectDependencies([{ scope: 'draft', model: { policies: ['客户[VIP]需审核'] } }], { id: 'Customer', label: '客户[VIP]' });
+  assert.equal(escaped.total, 1);
+});
+
+test('dependency scans disclose truncated previews and never return a partial success on budget failure', () => {
+  const model = { metrics: Array.from({ length: 120 }, () => ({ expression: 'Customer' })) };
+  const report = collectSemanticObjectDependencies([{ scope: 'draft', model }], { id: 'Customer' });
+  assert.equal(report.total, 120); assert.equal(report.dependencies.length, 100); assert.equal(report.truncated, true);
+  model.worldModel = {}; let node = model.worldModel; for (let i = 0; i < 26; i++) { node.next = {}; node = node.next; }
+  const blocked = collectSemanticObjectDependencies([{ scope: 'draft', model }], { id: 'Customer' });
+  assert.equal(blocked.complete, false); assert.deepEqual(blocked.dependencies, []); assert.equal(blocked.code, 'SEMANTIC_DEPENDENCY_BUDGET');
+  const fanout = { metrics: Array.from({ length: 20001 }, () => 'none') };
+  assert.equal(collectSemanticObjectDependencies([{ scope: 'draft', model: fanout }], { id: 'Customer' }).code, 'SEMANTIC_DEPENDENCY_BUDGET');
+  assert.equal(isSemanticDependencyCommand('检查对象删除影响'), true);
+  assert.deepEqual(parseSemanticDependencyCommand('检查对象变更影响“Customer”'), { objectId: 'Customer' });
+  for (const text of ['检查对象删除影响', '检查对象删除影响“Customer"', '检查对象删除影响“Customer”；发布模型', '检查对象删除影响“Customer”删除它']) assert.ok(parseSemanticDependencyCommand(text).error);
+});
 
 test('object withdrawal is single, non-cascading and leaves the baseline and input unchanged', () => {
   const baseline = fixture(); const added = parseSemanticModelEdit(objectCommand, baseline).body; const before = structuredClone(added);
