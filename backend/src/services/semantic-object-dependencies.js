@@ -1,6 +1,6 @@
 // Structural references only: no business reads, scripts, or deletion decisions.
 const sections = ['relationshipTypes', 'scenario', 'policies', 'stateMachines', 'events', 'metrics', 'dataContracts', 'qualityRules', 'glossaryTerms', 'accessPolicies', 'lineageEdges', 'worldModel', 'sourceAssignments', 'primaryKeyCorrections', 'identityLinkConfirmations'];
-export function collectSemanticObjectDependencies(models, object) {
+export function collectSemanticObjectDependencies(models, object, { includeTargetObject = false } = {}) {
   if (!object?.id || typeof object.id !== 'string' || !Array.isArray(models)) return { error: '依赖检查目标无效。', code: 'SEMANTIC_DEPENDENCY_TARGET_INVALID' };
   const tokens = [object.id, object.label].filter(value => typeof value === 'string' && value).map(value => value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'));
   const mentions = new RegExp(`(^|[^A-Za-z0-9_])(?:${tokens.join('|')})($|[^A-Za-z0-9_])`, 'u');
@@ -25,7 +25,7 @@ export function collectSemanticObjectDependencies(models, object) {
   try {
     for (const { scope, model } of models) {
       if (!model || !['candidate', 'draft', 'original'].includes(scope)) return { error: '依赖检查模型范围无效。', code: 'SEMANTIC_DEPENDENCY_TARGET_INVALID' };
-      for (const [index, item] of (model.objectTypes || []).entries()) if (item.id !== object.id) visit(item, ['objectTypes', index], 'objectTypes', scope);
+      for (const [index, item] of (model.objectTypes || []).entries()) if (includeTargetObject || item.id !== object.id) visit(item, ['objectTypes', index], 'objectTypes', scope);
       for (const section of sections) visit(model[section], [section], section, scope);
     }
   } catch { return { error: '模型依赖检查超出2万节点或24层预算，不能确认影响范围。', code: 'SEMANTIC_DEPENDENCY_BUDGET', complete: false, dependencies: [] }; }

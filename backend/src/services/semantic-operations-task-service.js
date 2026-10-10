@@ -477,7 +477,7 @@ export async function createSemanticOperationsTask({ body, role, identityScope, 
     if (Number(body.parentProposalRevision) !== parent.proposal.revision) return { error: '候选修订已经变化，请刷新当前任务后继续修改。', status: 409, code: 'SEMANTIC_PROPOSAL_REVISION_CONFLICT' };
     const edit = parseSemanticModelEdit(text, parent.proposal, await getOAMetaModelDraft());
     if (edit.error) return { ...edit, status: 422 };
-    const revised = await reviseSemanticOperationsTaskProposal({ taskId: parent.id, body: { ...edit.body, candidateFieldWithdrawal: edit.withdrawal, candidateObjectWithdrawal: edit.objectWithdrawal, revision: parent.proposal.revision }, role, identityScope });
+    const revised = await reviseSemanticOperationsTaskProposal({ taskId: parent.id, body: { ...edit.body, candidateFieldWithdrawal: edit.withdrawal, candidateObjectWithdrawal: edit.objectWithdrawal, candidateRelationshipWithdrawal: edit.relationshipWithdrawal, revision: parent.proposal.revision }, role, identityScope });
     if (revised.error) return { ...revised, status: 409 };
     await appendTaskMessage(parent.id, 'user', text);
     await appendTaskMessage(parent.id, 'assistant', `已修订当前候选：${edit.summary}。${revised.response || ''}未采纳到草稿、未发布；旧确认凭证失效。`);
@@ -769,6 +769,7 @@ export function reviseSemanticOperationsTaskProposal({ taskId: id, body, role, i
     sourceAssignments: body?.sourceAssignments,
     candidateFieldWithdrawal: body?.candidateFieldWithdrawal,
     candidateObjectWithdrawal: body?.candidateObjectWithdrawal,
+    candidateRelationshipWithdrawal: body?.candidateRelationshipWithdrawal,
     role,
     identityScope
   }), (proposal) => {

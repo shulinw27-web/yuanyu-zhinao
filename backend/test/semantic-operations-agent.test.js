@@ -16,6 +16,43 @@ import { CANDIDATE_CATALOG, CANDIDATE_CATALOG_SIZE, listCatalogGaps, listUncover
 
 const identity = { tenantId: 'semantic-test', subjectId: 'architect-01', deviceId: 'device-01' };
 
+test('mock model edit loop adds object and relationship, inspects impact, then explicitly withdraws in dependency order', async () => {
+  resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);
+  const role = getRole('executive'); const baseline = await getOAMetaModelDraft();
+  let task = await createSemanticOperationsTask({ body: { text: '建立供应商语义模型。', systemCodes: ['ERP'] }, role, identityScope: identity });
+  const edit = text => createSemanticOperationsTask({ body: { text, parentTaskId: task.id, parentProposalRevision: task.proposal.revision }, role, identityScope: identity });
+  task = await edit('新增对象“Customer”，名称“客户”，主键“customer_id”，类型“文本”，业务域“销售”，字段“name”，字段类型“文本”；新增关系“serves”，从“Supplier”到“Customer”，名称“服务客户”，基数“一对多”，依据“测试需求声明供应商服务客户”');
+  assert.ok(!task.error, task.error);
+  const inspected = await edit('检查对象删除影响“Customer”'); assert.ok(inspected.dependencyAnalysis.dependencies.some(item => item.section === 'relationshipTypes'));
+  assert.equal((await edit('撤回候选对象“Customer”')).code, 'SEMANTIC_OBJECT_REMOVAL_DEPENDENCIES');
+  const token = await issueSemanticOperationsTaskConfirmation({ taskId: task.id, identityScope: identity }); const revision = task.proposal.revision;
+  task = await edit('撤回候选关系“Supplier/serves/Customer”'); assert.ok(!task.error, task.error); assert.equal(task.proposal.revision, revision + 1);
+  assert.ok(task.proposal.objectTypes.some(item => item.id === 'Customer')); assert.ok(!task.proposal.relationshipTypes.some(item => item.predicate === 'serves'));
+  assert.equal((await executeSemanticOperationsTask({ taskId: task.id, role, identityScope: identity, confirmationToken: token.confirmationToken })).code, 'SEMANTIC_TASK_CONFIRMATION_INVALID');
+  const clean = await edit('检查对象删除影响“Customer”'); assert.equal(clean.dependencyAnalysis.total, 0);
+  task = await edit('撤回候选对象“Customer”'); assert.ok(!task.error, task.error); assert.equal(task.proposal.objectTypes.length, 1);
+  assert.equal((await getOAMetaModelDraft()).fingerprint, baseline.fingerprint); assert.equal((await listSemanticOperationsSnapshots({ identityScope: identity })).length, 0);
+});
+
+test('relationship withdrawal rechecks hidden rules, original relationships and exact single-target scope', async () => {
+  resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks', 'oa_meta_model_runtime']);
+  const role = getRole('executive'); let task = await createSemanticOperationsTask({ body: { text: '建立供应商和采购订单语义模型。', systemCodes: ['ERP'] }, role, identityScope: identity });
+  task = await createSemanticOperationsTask({ body: { text: '新增关系“fulfillsOrder”，从“Supplier”到“PurchaseOrder”，名称“履约订单”，基数“一对多”，依据“测试制度要求”', parentTaskId: task.id, parentProposalRevision: task.proposal.revision }, role, identityScope: identity });
+  assert.ok(!task.error, task.error);
+  const target = { from: 'Supplier', predicate: 'fulfillsOrder', to: 'PurchaseOrder' };
+  const body = { revision: task.proposal.revision, objectTypes: structuredClone(task.proposal.objectTypes), relationshipTypes: task.proposal.relationshipTypes.filter(item => item.predicate !== 'fulfillsOrder'), candidateRelationshipWithdrawal: target };
+  const update = extra => updateSemanticOperationsProposal({ proposalId: task.proposal.id, ...body, ...extra, role, identityScope: identity });
+  assert.equal((await update({ candidateRelationshipWithdrawal: { ...target, cascade: true } })).code, 'SEMANTIC_RELATION_REMOVAL_TARGET_INVALID');
+  assert.equal((await update({ relationshipTypes: task.proposal.relationshipTypes })).code, 'SEMANTIC_RELATION_REMOVAL_TARGET_INVALID');
+  const changed = structuredClone(body.objectTypes); changed[0].label = '同时修改对象';
+  assert.equal((await update({ objectTypes: changed })).code, 'SEMANTIC_RELATION_REMOVAL_TARGET_INVALID');
+  await mutateSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${task.proposal.id}`, null, stored => { stored.draft.scenario = { readPlans: [{ predicate: 'fulfillsOrder' }] }; return { value: stored }; });
+  assert.equal((await update({})).code, 'SEMANTIC_RELATION_REMOVAL_DEPENDENCIES');
+  await mutateSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${task.proposal.id}`, null, stored => { stored.draft.scenario = {}; stored.originalDraft.relationshipTypes.push(structuredClone(stored.draft.relationshipTypes.find(item => item.predicate === 'fulfillsOrder'))); return { value: stored }; });
+  assert.equal((await update({})).code, 'SEMANTIC_RELATION_REMOVAL_EXISTING_FORBIDDEN');
+  const stored = await readSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${task.proposal.id}`); assert.equal(stored.revision, task.proposal.revision);
+});
+
 test('agent dependency checks use private server rules while preserving proposal revision and confirmation', async () => {
   resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);
   const role = getRole('executive'); const task = await createSemanticOperationsTask({ body: { text: '建立供应商语义模型。', systemCodes: ['ERP'] }, role, identityScope: identity });

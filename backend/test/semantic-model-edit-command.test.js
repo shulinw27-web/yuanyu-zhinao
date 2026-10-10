@@ -4,6 +4,7 @@ import { isSemanticModelEditCommand, parseSemanticModelEdit } from '../src/servi
 import { inspectCandidateFieldRemoval } from '../src/services/semantic-field-removal.js';
 import { inspectCandidateObjectRemoval } from '../src/services/semantic-object-removal.js';
 import { collectSemanticObjectDependencies, isSemanticDependencyCommand, parseSemanticDependencyCommand } from '../src/services/semantic-object-dependencies.js';
+import { inspectCandidateRelationshipRemoval } from '../src/services/semantic-relationship-removal.js';
 
 const fixture = () => ({ objectTypes: [{ id: 'Stock', label: '库存', key: 'id', fields: ['id', 'qty', 'status'], sourceSystems: ['WMS'], fieldDefinitions: [
   { name: 'id', type: 'string', required: true, primaryKey: true, sourceField: 'stock_id', mappingStatus: 'mapped' },
@@ -22,6 +23,32 @@ test('batch edits stage ordered changes, preserve quoted semicolons and never mu
 
 const relationCommand = (predicate = 'reserves', from = 'Stock', to = 'Stock') => `新增关系“${predicate}”，从“${from}”到“${to}”，名称“预留库存”，基数“一对多”，依据“测试制度定义；尚未验证实例”`;
 const objectCommand = '新增对象“Customer”，名称“客户”，主键“customer_id”，类型“文本”，业务域“销售”，字段“name”，字段类型“文本”';
+
+test('new declared relationship withdrawal restores the candidate without cascading or mutating input', () => {
+  const baseline = fixture(); const added = parseSemanticModelEdit(relationCommand(), baseline).body; const before = structuredClone(added);
+  const result = parseSemanticModelEdit('撤回候选关系“Stock/reserves/Stock”', added, baseline);
+  assert.ok(!result.error, result.error); assert.deepEqual(result.body, baseline); assert.deepEqual(added, before);
+  assert.deepEqual(result.relationshipWithdrawal, { from: 'Stock', predicate: 'reserves', to: 'Stock' });
+  assert.equal(isSemanticModelEditCommand('撤回候选关系'), true);
+  for (const text of ['撤回候选关系', '撤回候选关系“reserves”', '撤回候选关系“Stock/reserves/Stock"', '撤回候选关系“Stock/reserves/Stock”，发布模型']) assert.ok(parseSemanticModelEdit(text, added, baseline).error);
+  assert.equal(parseSemanticModelEdit('撤回候选关系“Stock/reserves/Stock”；撤回候选对象“Stock”', added, baseline).code, 'SEMANTIC_EDIT_BATCH_WITHDRAWAL_FORBIDDEN');
+  assert.equal(inspectCandidateRelationshipRemoval(added, baseline, result.relationshipWithdrawal, before).code, 'SEMANTIC_RELATION_REMOVAL_EXISTING_FORBIDDEN');
+});
+
+test('relationship withdrawal blocks derived mappings, timestamps, references, aliasing and dependency budgets', () => {
+  const baseline = fixture(); const fresh = () => parseSemanticModelEdit(relationCommand(), baseline).body; const target = { from: 'Stock', predicate: 'reserves', to: 'Stock' };
+  for (const change of [relation => { relation.derivedFrom = 'identity'; }, relation => { relation.keyMapping = {}; }, relation => { relation.validFrom = '2026-01-01'; }, relation => { relation.provenanceType = 'observed'; }]) {
+    const model = fresh(); change(model.relationshipTypes[1]); assert.equal(inspectCandidateRelationshipRemoval(model, baseline, target).code, 'SEMANTIC_RELATION_REMOVAL_GOVERNED_FORBIDDEN');
+  }
+  for (const change of [model => { model.scenario = { readPlans: [{ predicate: 'reserves' }] }; }, model => { model.policies = ['预留库存需审核']; }, model => { model.relationshipTypes.push({ from: 'Stock', predicate: 'reserves', to: 'Other' }); }]) {
+    const model = fresh(); change(model); assert.equal(inspectCandidateRelationshipRemoval(model, baseline, target).code, 'SEMANTIC_RELATION_REMOVAL_DEPENDENCIES');
+  }
+  const aliases = fresh(); aliases.relationshipTypes[1].predicate = 'Stock';
+  assert.equal(inspectCandidateRelationshipRemoval(aliases, baseline, { ...target, predicate: 'Stock' }).code, 'SEMANTIC_RELATION_REMOVAL_DEPENDENCIES');
+  const deep = fresh(); deep.worldModel = {}; let node = deep.worldModel; for (let i = 0; i < 26; i++) { node.next = {}; node = node.next; }
+  assert.equal(inspectCandidateRelationshipRemoval(deep, baseline, target).code, 'SEMANTIC_RELATION_REMOVAL_BUDGET');
+  assert.equal(inspectCandidateRelationshipRemoval(fresh(), null, target).code, 'SEMANTIC_RELATION_REMOVAL_TARGET_INVALID');
+});
 
 test('dependency reports return bounded structural locations, not configuration content or deletion permission', () => {
   const model = fixture(); model.relationshipTypes.push({ from: 'Stock', to: 'Customer', predicate: 'owns' });
