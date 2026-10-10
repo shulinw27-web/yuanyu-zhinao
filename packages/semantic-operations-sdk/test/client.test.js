@@ -6,6 +6,17 @@ test('resolves packaged desktop API endpoint', () => {
   assert.equal(resolveSemanticOperationsApiBaseUrl({ runtime: { semanticOperationsDesktop: { apiBaseUrl: 'http://127.0.0.1:3001/api/' } } }), 'http://127.0.0.1:3001/api');
 });
 
+test('review assignment uses encoded task ids and carries only explicit target and CAS revision', async () => {
+  const calls = [];
+  globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+  globalThis.fetch = async (url, options) => { calls.push({ url, options }); return new Response('{}', { status: 200 }); };
+  const client = createSemanticOperationsClient({ baseUrl: 'http://example.test/api', platform: 'review-test' });
+  await client.modelReviewers(); await client.assignModelReview('task/a', { subjectId: 'usr-003', expectedRevision: 2 });
+  assert.equal(calls[0].url, 'http://example.test/api/semantic-operations/reviewers');
+  assert.match(calls[1].url, /tasks\/task%2Fa\/review-assignment$/u);
+  assert.deepEqual(JSON.parse(calls[1].options.body), { subjectId: 'usr-003', expectedRevision: 2 });
+});
+
 test('uses identity and device sessions without demo role headers', async () => {  const calls = [];
   const values = new Map();
   globalThis.localStorage = { getItem: (key) => values.get(key) || null, setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) };

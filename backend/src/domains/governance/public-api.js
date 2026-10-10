@@ -16,7 +16,8 @@ export { getSemanticContextOverview } from '../../services/semantic-context-serv
 export { getSemanticaModelDeployment, getSemanticaModelDiscovery, publishSemanticaModelDefinition, validateSemanticaModelDefinition } from '../../services/semantica-demo-bridge-service.js';
 export { getCoreMetaObjectLayer } from '../../services/core-meta-object-service.js';
 export { applySemanticOperationsProposal, createSemanticOperationsProposal, createSemanticOperationsProposalFromRequest, listSemanticOperationsSnapshots, rollbackSemanticOperationsSnapshot, saveSemanticOperationsDraft, updateSemanticOperationsProposal } from '../../services/semantic-operations-agent-service.js';
-export { archiveSemanticOperationsTask, createSemanticOperationsTask, executeSemanticOperationsTask, getSemanticOperationsTask, getSemanticOperationsTaskTrace, issueSemanticOperationsTaskConfirmation, listSemanticOperationsTasks, recordSemanticOperationsReportExport, reviseSemanticOperationsTaskProposal } from '../../services/semantic-operations-task-service.js';
+export { archiveSemanticOperationsTask, createSemanticOperationsTask, executeSemanticOperationsTask, getSemanticOperationsTaskTrace, issueSemanticOperationsTaskConfirmation, recordSemanticOperationsReportExport, reviseSemanticOperationsTaskProposal } from '../../services/semantic-operations-task-service.js';
+export { semanticTaskWorkspace } from './semantic-task-workspace.js';
 export { discoverSemanticSources } from '../../services/semantic-source-discovery-service.js';
 export { semanticFingerprint } from '../../services/semantic-model-fingerprint.js';
 export { createSemanticInspectionSchedule, listSemanticInspectionSchedules, controlSemanticInspectionSchedule } from '../../services/semantic-inspection-schedule-service.js';

@@ -47,15 +47,26 @@ export function filterOntologyGraph(graph, { query = '', system = '', focus = ''
 export function findOntologyPath(graph, from, to) {
   const activeIds = new Set(graph.nodes.filter(item => item.change !== 'removed').map(item => item.id));
   if (!activeIds.has(from) || !activeIds.has(to)) return null;
-  const queue = [{ node: from, nodes: [from], edges: [] }];
+  // Index outgoing edges once; keep predecessors rather than copying every partial path.
+  const outgoing = new Map();
+  for (const edge of graph.edges) {
+    if (edge.change === 'removed' || !activeIds.has(edge.from) || !activeIds.has(edge.to)) continue;
+    if (!outgoing.has(edge.from)) outgoing.set(edge.from, []);
+    outgoing.get(edge.from).push(edge);
+  }
+  const queue = [from]; const predecessors = new Map();
   const visited = new Set([from]);
   for (let i = 0; i < queue.length; i++) {
     const current = queue[i];
-    if (current.node === to) return { nodes: current.nodes, edges: current.edges };
-    for (const edge of graph.edges.filter(item => item.from === current.node && item.change !== 'removed')) {
+    if (current === to) {
+      const nodes = [to]; const edges = []; let cursor = to;
+      while (cursor !== from) { const previous = predecessors.get(cursor); edges.push(previous.edge); nodes.push(previous.node); cursor = previous.node; }
+      return { nodes: nodes.reverse(), edges: edges.reverse() };
+    }
+    for (const edge of outgoing.get(current) || []) {
       if (!activeIds.has(edge.to) || visited.has(edge.to)) continue;
       visited.add(edge.to);
-      queue.push({ node: edge.to, nodes: [...current.nodes, edge.to], edges: [...current.edges, edge.id] });
+      predecessors.set(edge.to, { node: current, edge: edge.id }); queue.push(edge.to);
     }
   }
   return null;

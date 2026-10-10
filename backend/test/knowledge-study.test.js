@@ -1,12 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resetRuntimeState } from '../src/repositories/runtime-state-repository.js';
+import { resetRuntimeState, readState, writeState } from '../src/repositories/runtime-state-repository.js';
+import { createTenantIAMWorkspace } from '../src/services/iam-workspace-model.js';
+import { runWithIAMStoreContext } from '../src/services/iam-store.js';
+import { getEffectiveAccess } from '../src/services/access-control-service.js';
+import { handleKnowledgeRoutes } from '../src/routes/knowledge-routes.js';
 import { saveLibraryDocument, retractLibraryDocument } from '../src/services/knowledge-library-service.js';
 import { createLocalKnowledgeProvider, buildKnowledgeBrief } from '../src/services/knowledge-evidence-service.js';
 import { listKnowledgeStudies, saveKnowledgeStudy, readKnowledgeStudy, restoreKnowledgeStudy, prepareKnowledgeStudy, inspectStudySources } from '../src/services/knowledge-study-service.js';
 const context = { identityScope: { tenantId: 'study-test', subjectId: 'alice' }, roleId: 'executive' };
 const options = { context, resolveProvider: () => createLocalKnowledgeProvider(context), canRead: () => true };
-test.beforeEach(() => resetRuntimeState(['knowledge_library_v1', 'knowledge_studies_v1', 'domain_event_outbox']));
+test.beforeEach(() => resetRuntimeState(['iam', 'knowledge_library_v1', 'knowledge_studies_v1', 'domain_event_outbox']));
 async function input() {
   await saveLibraryDocument({ ...context, id: 'supplier', body: { expectedRevision: 0, title: '合成采购规范', source: '合成制度', sourceVersion: 'v1', kind: 'policy', text: '供应商资质过期需采购主管复核。' } });
   const brief = await buildKnowledgeBrief({ provider: createLocalKnowledgeProvider(context), query: '供应商资质', canRead: () => true });
@@ -82,3 +86,41 @@ test('study: source outline has no model calls or writes and conflict detection 
   assert.deepEqual(review.conflicts[0].claims.map(item => item.sourceIndex), [0, 1]);
   assert.equal((await prepareKnowledgeStudy({ ...options, canRead: () => false, body: { title: body.title, citations: body.citations } })).status, 403);
 });
+
+test('HTTP study operations recheck revoked write grants on both surfaces without changing drafts or outbox', () => runWithIAMStoreContext(async () => {
+  const identity = { tenantId: 'demo-enterprise', subjectId: 'usr-001' };
+  const actor = { identityScope: identity, roleId: 'executive' };
+  const provider = createLocalKnowledgeProvider(actor);
+  await saveLibraryDocument({ ...actor, id: 'policy', body: { expectedRevision: 0, title: '合成采购资料', source: '合成制度', sourceVersion: 'v1', kind: 'policy', text: '供应商资质过期需采购主管复核。' } });
+  const brief = await buildKnowledgeBrief({ provider, query: '供应商资质', canRead: () => true });
+  const body = { title: '合成学习', notes: '采购规则待核验。', citations: brief.evidence.map(item => item.citation), expectedRevision: 0, confirmed: true };
+  const studyOptions = { context: actor, resolveProvider: () => provider, canRead: () => true, id: 'review' };
+  await saveKnowledgeStudy({ ...studyOptions, body });
+  await saveKnowledgeStudy({ ...studyOptions, body: { ...body, expectedRevision: 1, notes: '第二次人工修订。' } });
+  const before = await readKnowledgeStudy(studyOptions);
+  const eventsBefore = readState('domain_event_outbox', 'events', {});
+  for (const surface of ['semantic-operations', 'agent']) {
+    const permission = surface === 'agent' ? 'agent.prompt.run' : 'meta_model.draft.save';
+    for (const [method, suffix, payload] of [
+      ['PUT', '/studies/review', { ...body, expectedRevision: 2 }],
+      ['POST', '/studies/review/restore', { revision: 1, expectedRevision: 2, confirmed: true }],
+      ['POST', '/studies/prepare', { title: body.title, citations: body.citations }]
+    ]) {
+      writeState('iam', 'workspace', createTenantIAMWorkspace(identity.tenantId));
+      assert.ok(getEffectiveAccess('executive', identity).buttonPermissionIds.includes(permission));
+      let response;
+      await handleKnowledgeRoutes({ req: { method }, res: {}, url: new URL(`http://local/api/${surface}/knowledge-library${suffix}`), role: 'executive', agentIdentity: identity,
+        effectiveAccess: getEffectiveAccess('executive', identity), selectActionRole: () => ({ id: 'executive' }), denyButton: () => assert.fail('initial grant exists'),
+        readBody: async () => {
+          const iam = readState('iam', 'workspace', {});
+          iam.rolePolicies.executive.buttonPermissionIds = iam.rolePolicies.executive.buttonPermissionIds.filter(id => id !== permission);
+          writeState('iam', 'workspace', iam);
+          return payload;
+        }, send: (_res, status, result) => { response = { status, result }; } });
+      assert.equal(response.status, 403, `${surface} ${suffix}`);
+      assert.equal(response.result.notes, undefined);
+      assert.deepEqual(await readKnowledgeStudy(studyOptions), before);
+      assert.deepEqual(readState('domain_event_outbox', 'events', {}), eventsBefore);
+    }
+  }
+}, 'demo-enterprise'));

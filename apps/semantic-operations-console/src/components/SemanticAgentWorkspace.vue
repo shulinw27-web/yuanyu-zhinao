@@ -9,6 +9,10 @@ const desktopBridge = globalThis.semanticOperationsDesktop || null;
 const emit = defineEmits(['applied', 'review-created']);
 const tasks = ref([]);
 const reviewTasks = ref([]);
+const reviewers = ref([]);
+const reviewerActor = ref('');
+const reviewerChoice = ref('');
+let reviewerGeneration = 0;
 const selected = ref(null);
 const selectedTrace = ref(null);
 const exportedReport = ref(null);
@@ -315,9 +319,10 @@ const mentionedNotSelected = computed(() => {
 const canSubmit = computed(() => Boolean(input.value.trim() || files.value.length) && !busy.value && !scopeRequiredReason.value);
 const canEditProposal = computed(() => selected.value?.status === 'waiting_confirmation' && selected.value?.command === 'apply_proposal' && Boolean(proposalEditor.value));
 const canExecute = computed(() => canExecuteSemanticTask({ task: selected.value, editorDirty: editorDirty.value, busy: busy.value })
-  && (selected.value?.command !== 'apply_proposal' || props.canReview));
+  && (selected.value?.command !== 'apply_proposal' || props.canReview && (!selected.value.reviewAssignment?.subjectId || selected.value.reviewAssignment.subjectId === reviewerActor.value)));
 const pendingReviewTasks = computed(() => reviewTasks.value.filter(task => task.status === 'waiting_confirmation'
-  && task.command === 'apply_proposal' && task.proposal && task.reviewPermission === 'meta_model.draft.review'));
+  && task.command === 'apply_proposal' && task.proposal && task.reviewPermission === 'meta_model.draft.review'
+  && (!task.reviewAssignment?.subjectId || task.reviewAssignment.subjectId === reviewerActor.value)));
 const graphNodes = computed(() => (proposalEditor.value?.objectTypes || []).map((item, index) => {
   const fieldDefinitions = item.fieldDefinitions || [];
   const pendingMappings = fieldDefinitions.filter((field) => field.mappingStatus === 'pending' || (!field.sourceField && !['derived', 'ignored'].includes(field.mappingStatus))).length;
@@ -458,6 +463,27 @@ async function loadMoreTasks() {
 function onTaskListScroll(event) {
   const element = event.currentTarget;
   if (element.scrollTop + element.clientHeight >= element.scrollHeight - 72) loadMoreTasks();
+}
+
+async function loadReviewers() {
+  const ticket = ++reviewerGeneration;
+  reviewers.value = []; reviewerChoice.value = ''; reviewerActor.value = '';
+  if (!props.canReview || !props.client.modelReviewers) return;
+  try { const result = await props.client.modelReviewers(); if (ticket === reviewerGeneration && props.canReview) { reviewers.value = result.reviewers || []; reviewerActor.value = result.actorSubjectId || ''; } }
+  catch { if (ticket === reviewerGeneration) reviewers.value = []; }
+}
+async function assignReview(returnToPool = false) {
+  if (busy.value || !props.canReview || !selected.value?.proposal || !props.client.assignModelReview || !returnToPool && !reviewerChoice.value) return;
+  const taskId = selected.value.id;
+  const expectedRevision = selected.value.reviewAssignment?.revision || 0;
+  busy.value = true;
+  try {
+    await props.client.assignModelReview(taskId, { subjectId: returnToPool ? null : reviewerChoice.value, expectedRevision });
+    message.value = '审核指派已更新，旧确认凭证已失效。请重新打开任务核对。';
+    await loadTasks();
+  } catch (error) { message.value = error.message || '审核指派失败，请刷新任务。'; }
+  finally { busy.value = false; }
+  await refreshReviewTasks();
 }
 
 async function refreshReviewTasks() {
@@ -776,18 +802,21 @@ async function exportReport() {
 }
 
 onMounted(() => {
+  loadReviewers();
   loadSystemScopeOptions();
   loadTasks(props.initialTaskId || undefined).catch((error) => { message.value = error.message; });
   refreshReviewTasks();
   if (props.canReview) reviewQueueTimer = setInterval(refreshReviewTasks, 20000);
 });
 let reviewQueueTimer = null;
-onBeforeUnmount(() => { if (reviewQueueTimer) clearInterval(reviewQueueTimer); });
+onBeforeUnmount(() => { reviewerGeneration++; if (reviewQueueTimer) clearInterval(reviewQueueTimer); });
 watch(() => props.canReview, enabled => {
+  loadReviewers();
   if (reviewQueueTimer) clearInterval(reviewQueueTimer);
   reviewQueueTimer = enabled ? setInterval(refreshReviewTasks, 20000) : null;
   if (enabled) refreshReviewTasks(); else reviewTasks.value = [];
 });
+watch(() => props.client, loadReviewers);
 watch(() => props.initialTaskId, id => loadTasks(id || undefined).catch(error => { message.value = error.message; }));
 watch([taskStatus, showArchived], () => loadTasks().catch((error) => { message.value = error.message; }));
 watch([() => selected.value?.id, () => selected.value?.proposal?.revision], initializeProposalEditor);
@@ -802,6 +831,13 @@ watch(() => selected.value?.id, () => nextTick(() => {
   <section class="agent-task-workspace">
     <section v-if="canReview" class="semantic-review-workarea" aria-label="待审核语义模型">
       <header><div><span>MODEL REVIEW QUEUE</span><h2>待审核语义模型</h2><p>只展示顶层对象、对象关系和来源系统摘要；字段与映射细节不作为审核入口。</p></div><b>{{ pendingReviewTasks.length }} 项待处理</b></header>
+      <div v-if="selected?.proposal && selected.status === 'waiting_confirmation'" class="review-assignment-controls">
+        <p>当前模型审核：{{ selected.reviewAssignment?.name || '权限审核池，尚未指派' }} · 指派修订 {{ selected.reviewAssignment?.revision || 0 }}</p>
+        <label>指派或转派给<select v-model="reviewerChoice" :disabled="busy"><option value="">选择有当前审核权限的人员</option><option v-for="person in reviewers" :key="person.subjectId" :value="person.subjectId">{{ person.name }}</option></select></label>
+        <button :disabled="busy || !reviewerChoice" @click="assignReview()">确认指派 / 转派</button>
+        <button :disabled="busy || !selected.reviewAssignment?.subjectId" @click="assignReview(true)">退回审核池</button>
+        <small>指派不授予权限、不采纳或发布模型；转派需当前承办人或有审核权限的创建人操作，旧确认凭证失效。</small>
+      </div>
       <div v-if="pendingReviewTasks.length" class="semantic-review-cards">
         <article v-for="task in pendingReviewTasks" :key="task.id">
           <div><b>{{ task.title }}</b><small>{{ task.proposal.objectTypes.length }} 个对象 · {{ task.proposal.relationshipTypes.length }} 条关系 · 第 {{ task.proposal.revision }} 版</small><p>{{ task.proposal.objectTypes.map(item => item.label || item.id).join('、') }}</p></div>
@@ -1163,6 +1199,7 @@ watch(() => selected.value?.id, () => nextTick(() => {
 </template>
 
 <style scoped>
+.review-assignment-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px;border:1px solid #574a2e;border-radius:7px}.review-assignment-controls p,.review-assignment-controls small{flex:1 1 100%;margin:0;line-height:1.6}.review-assignment-controls label{display:flex;gap:8px;align-items:center;min-width:0}.review-assignment-controls select,.review-assignment-controls button{max-width:100%;padding:7px;border:1px solid #4d8c7a;border-radius:5px;background:#153c35;color:#d7f5e8}.review-assignment-controls button:disabled{opacity:.5}
 .adoption-mode{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#aacbd5;font-size:12px;margin-bottom:8px}.adoption-mode select{max-width:100%;padding:7px;background:#0a2634;color:#d3edf1;border:1px solid #315b6b;border-radius:6px}.adoption-mode small{color:#91adb7}.adoption-mode :focus-visible{outline:2px solid #65d3ba;outline-offset:2px}
 .world-model-review{margin:12px 0;padding:14px;border:1px solid #345565;border-radius:8px;color:#b9d2de;overflow-wrap:anywhere;font-size:12px;line-height:1.6}.world-model-review h4{margin:0;color:#69d9c2}.world-model-review summary{cursor:pointer;color:#69d9c2}.world-model-review article{padding:10px 0;border-top:1px solid #294553}.world-model-review p{margin:6px 0}.world-model-review b{font-size:11px}
 .semantic-model-review-card{display:grid;gap:13px;margin:12px 0;padding:16px;border:1px solid #31716c;border-radius:11px;background:linear-gradient(145deg,#0d292f,#091d29);box-shadow:0 10px 26px #020a0e55}

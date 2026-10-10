@@ -15,7 +15,8 @@ function safePlanShape(plan) {
     if (clause.mapping !== undefined) {
       const m = clause.mapping; const fields = ['objectType', 'fromField', 'toField', 'statusField', 'versionField', 'validFromField', 'validToField'];
       if (clause.target || !object(m) || !fields.every(key => id(m[key])) || !text(m.predicate, 48) || !m.predicate
-        || Object.keys(m).some(key => ![...fields, 'predicate', 'asOf'].includes(key))
+        || Object.keys(m).some(key => ![...fields, 'predicate', 'asOf', 'direction'].includes(key))
+        || m.direction !== undefined && !['forward', 'reverse'].includes(m.direction)
         || !text(m.asOf, 30) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(m.asOf) || !Number.isFinite(Date.parse(m.asOf))
         || new Date(m.asOf).toISOString() !== (m.asOf.includes('.') ? m.asOf : m.asOf.replace('Z', '.000Z'))) return false;
     }

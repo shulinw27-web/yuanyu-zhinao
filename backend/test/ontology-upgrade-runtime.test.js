@@ -38,12 +38,107 @@ function mappingFixture(t) {
   return { draft, plan, records, queries, run, scope };
 }
 
+function chainedMappingFixture(t) {
+  const f = mappingFixture(t);
+  const sale = { id: 'Sale', key: 'id', fields: ['id', 'product', 'amount'], sourceSystems: ['POS'] };
+  const lookup = { id: 'SalesCrosswalk', key: 'id', fields: ['id', 'sku', 'product', 'status', 'revision', 'start', 'end'], sourceSystems: ['MDM'], fieldDefinitions: [{ name: 'sku', reference: 'Stock', referenceField: 'sku' }, { name: 'product', reference: 'Sale', referenceField: 'product' }] };
+  f.draft.objectTypes.push(sale, lookup);
+  f.draft.relationshipTypes.push({ from: 'Stock', to: 'Sale', predicate: 'sold_as', keyMapping: { fromField: 'sku', toField: 'product', basis: 'master_data_lookup', lookupSource: 'SalesCrosswalk', owner: 'mock', version: 'sales-v1' } });
+  f.draft.accessPolicies.push(...[sale, lookup].map(type => ({ objectType: type.id, roles: ['executive'], effect: 'allow', condition: 'iam_scope' })));
+  const grants = JSON.parse(process.env.ONTOLOGY_RUNTIME_GRANTS_JSON);
+  for (const type of [sale, lookup]) grants['demo-enterprise'].executive.objects[type.id] = { system: type.sourceSystems[0], fields: type.fields, classifications: ['internal'] };
+  process.env.ONTOLOGY_RUNTIME_GRANTS_JSON = JSON.stringify(grants);
+  const meta = { tenantId: f.scope.tenantId, organizationId: 'org-quality-dept', classification: 'internal', version: 'snapshot-v1', occurredAt: '2026-10-08T00:00:00Z' };
+  f.records.push({ ...meta, id: 'SMAP-1', objectType: lookup.id, system: 'MDM', payload: { id: 'SMAP-1', sku: 'SKU-900', product: 'POS-77', status: 'confirmed', revision: 'sales-v1', start: '2026-10-01T00:00:00Z', end: null } }, { ...meta, id: 'SALE-1', objectType: sale.id, system: 'POS', payload: { id: 'SALE-1', product: 'POS-77', amount: 120 } });
+  f.plan.datasets.push({ id: 'sales', objectType: 'Sale', where: [{ field: 'product', dataset: 'stock', sourceField: 'sku', mapping: { predicate: 'sold_as', objectType: 'SalesCrosswalk', fromField: 'sku', toField: 'product', statusField: 'status', versionField: 'revision', validFromField: 'start', validToField: 'end', asOf: '2026-10-09T00:00:00Z' } }] });
+  f.plan.outputs.push({ id: 'sales_amount', label: '关联销售额', unit: '元', expression: { op: 'sum', dataset: 'sales', value: { op: 'field', dataset: 'sales', field: 'amount' } } });
+  return f;
+}
+
+test('explicit ERP→MDM→WMS→MDM→POS chain keeps independent crosswalk versions and evidence at both hops', async t => {
+  const f = chainedMappingFixture(t);
+  assert.equal(validateOntologyReadPlans(f.draft).status, 'passed');
+  const result = await f.run();
+  assert.deepEqual(result.results.map(item => item.value), [42, 120]);
+  assert.equal(result.coverage.mappings, 2); assert.equal(result.executionAuthorized, false);
+  assert.deepEqual(f.queries.map(query => query.objectType), ['Material', 'Crosswalk', 'Stock', 'SalesCrosswalk', 'Sale']);
+  assert.deepEqual(f.queries.at(-1).filter, { field: 'product', values: ['POS-77'] });
+  const graph = buildOntologyResultGraph(f.draft, result.records, 'mock-v1', 'mock-fp', [result.mappingEvidence]);
+  assert.equal(graph.relationshipCoverage.filter(item => item.status === 'requires_mapping_execution').length, 0);
+});
+
+test('explicit POS→WMS→ERP reverse chain uses declared mapping direction rather than guessing business codes', async t => {
+  const f = chainedMappingFixture(t);
+  const salesMapping = f.plan.datasets[2].where[0].mapping;
+  const stockMapping = f.plan.datasets[1].where[0].mapping;
+  f.plan.datasets = [{ id: 'sales', objectType: 'Sale', where: [{ field: 'id', target: true }] },
+    { id: 'stock', objectType: 'Stock', where: [{ field: 'sku', dataset: 'sales', sourceField: 'product', mapping: { ...salesMapping, direction: 'reverse' } }] },
+    { id: 'material', objectType: 'Material', where: [{ field: 'id', dataset: 'stock', sourceField: 'sku', mapping: { ...stockMapping, direction: 'reverse' } }] }];
+  const queried = [];
+  const result = await executeOntologyReadPlan({ draft: f.draft, plan: f.plan, target: 'SALE-1', roleId: 'executive', scope: f.scope, retrieve: async (type, query) => { queried.push(query); return f.records.filter(row => row.objectType === type.id && query.filter.values.includes(row.payload[query.filter.field])); } });
+  assert.deepEqual(result.results.map(item => item.value), [42, 120]); assert.equal(result.coverage.mappings, 2);
+  assert.deepEqual(queried.at(-1).filter, { field: 'id', values: ['ERP-001'] });
+});
+
+test('second-hop missing, unconfirmed, expired or conflicting crosswalk never yields partial financial outputs', async t => {
+  for (const scenario of ['missing', 'unconfirmed', 'expired', 'conflict']) {
+    await t.test(scenario, async subtest => {
+    const f = chainedMappingFixture(subtest); const row = f.records.find(item => item.objectType === 'SalesCrosswalk');
+    if (scenario === 'missing') f.records.splice(f.records.indexOf(row), 1);
+    if (scenario === 'unconfirmed') row.payload.status = 'pending';
+    if (scenario === 'expired') row.payload.end = '2026-10-08T00:00:00Z';
+    if (scenario === 'conflict') f.records.push({ ...row, id: 'SMAP-2', payload: { ...row.payload, id: 'SMAP-2', product: 'POS-OTHER' } });
+    await assert.rejects(f.run(), new RegExp({ missing: 'READ_MAPPING_MISSING', unconfirmed: 'READ_MAPPING_UNCONFIRMED', expired: 'READ_MAPPING_EXPIRED', conflict: 'READ_MAPPING_CONFLICT' }[scenario]));
+    assert.ok(!f.queries.some(query => query.objectType === 'Sale'));
+    });
+  }
+});
+
+test('chain preflights all target and lookup permissions before requesting any upstream data', async t => {
+  const f = chainedMappingFixture(t); const grants = JSON.parse(process.env.ONTOLOGY_RUNTIME_GRANTS_JSON);
+  delete grants['demo-enterprise'].executive.objects.SalesCrosswalk;
+  process.env.ONTOLOGY_RUNTIME_GRANTS_JSON = JSON.stringify(grants);
+  await assert.rejects(f.run(), /READ_OBJECT_FORBIDDEN/); assert.deepEqual(f.queries, []);
+});
+
+test('server mapping binding rejects script, URL and recursive extension keys before any retrieval', async t => {
+  const f = mappingFixture(t); const original = structuredClone(f.plan.datasets[1].where[0].mapping);
+  for (const extra of [{ script: 'return input' }, { url: 'https://invalid.example/mapping' }, { recursive: true }, { maxDepth: 100 }]) {
+    f.plan.datasets[1].where[0].mapping = { ...original, ...extra };
+    assert.equal(validateOntologyReadPlans(f.draft).code, 'READ_MAPPING_BINDING_INVALID');
+    await assert.rejects(f.run(), /READ_PLAN_INVALID/); assert.equal(f.queries.length, 0);
+  }
+});
+
 test('visual wizard proposal satisfies the server contract and executes the same authorized crosswalk', async t => {
   const f = mappingFixture(t); const clause = f.plan.datasets[1].where[0];
   const candidate = proposeOntologyMapping(f.draft, { relationKey: JSON.stringify(['Material', 'stored_as', 'Stock']), joinKey: JSON.stringify([f.plan.id, 'stock']), ...clause.mapping, owner: '维护岗', version: 'map-v1' });
   assert.equal(validateOntologyReadPlans(candidate.draft).status, 'passed');
   const result = await executeOntologyReadPlan({ draft: candidate.draft, plan: candidate.draft.scenario.readPlans[0], target: 'ERP-001', roleId: 'executive', scope: f.scope, retrieve: async (type, query) => f.records.filter(row => row.objectType === type.id && query.filter.values.includes(row.payload[query.filter.field])) });
   assert.equal(result.results[0].value, 42);
+});
+
+test('reverse crosswalk is explicit, uses original key references and preserves business edge direction', async t => {
+  const f = mappingFixture(t); const binding = { ...f.plan.datasets[1].where[0].mapping, direction: 'reverse' };
+  f.plan.datasets = [{ id: 'stock', objectType: 'Stock', where: [{ field: 'id', target: true }] }, { id: 'material', objectType: 'Material', where: [{ field: 'id', dataset: 'stock', sourceField: 'sku', mapping: binding }] }];
+  f.plan.outputs = [{ id: 'materials', label: '原料数', unit: '项', expression: { op: 'sum', dataset: 'material', value: { op: 'literal', value: 1 } } }];
+  assert.equal(validateOntologyReadPlans(f.draft).status, 'passed', JSON.stringify(validateOntologyReadPlans(f.draft)));
+  const candidate = proposeOntologyMapping(f.draft, { relationKey: JSON.stringify(['Material', 'stored_as', 'Stock']), joinKey: JSON.stringify([f.plan.id, 'material']), ...binding, owner: '维护岗', version: 'map-v1' });
+  assert.equal(candidate.draft.scenario.readPlans[0].datasets[1].where[0].mapping.direction, 'reverse');
+  assert.deepEqual(candidate.draft.relationshipTypes[0].keyMapping, { ...f.draft.relationshipTypes[0].keyMapping, owner: '维护岗' });
+  const queries = [];
+  const run = () => executeOntologyReadPlan({ draft: f.draft, plan: f.plan, target: 'STOCK-1', roleId: 'executive', scope: f.scope, retrieve: async (type, query) => { queries.push(query); return f.records.filter(row => row.objectType === type.id && query.filter.values.includes(row.payload[query.filter.field])); } });
+  const result = await run(); assert.equal(result.results[0].value, 1);
+  assert.equal(queries.find(query => query.objectType === 'Crosswalk').filter.field, 'wms');
+  const graph = buildOntologyResultGraph(f.draft, result.records, 'mock-v1', 'mock-fp', [result.mappingEvidence]);
+  const relation = graph.relationships.find(item => item.predicate === 'stored_as'); assert.ok(relation);
+  assert.equal(relation.from, JSON.stringify(['instance', 'ERP', 'Material', 'ERP-001']));
+  assert.equal(relation.to, JSON.stringify(['instance', 'WMS', 'Stock', 'STOCK-1']));
+  delete binding.direction; assert.equal(validateOntologyReadPlans(f.draft).code, 'READ_MAPPING_RELATION_INVALID');
+  binding.direction = 'guess'; assert.equal(validateOntologyReadPlans(f.draft).code, 'READ_MAPPING_DIRECTION_INVALID');
+  binding.direction = 'reverse';
+  f.records.push({ ...structuredClone(f.records[1]), id: 'MAP-2', payload: { ...f.records[1].payload, id: 'MAP-2', erp: 'ERP-002' } });
+  await assert.rejects(run, /READ_MAPPING_CONFLICT/u);
 });
 
 test('crosswalk survives reviewed draft, replay and publication, then drives the published Agent connector path', async t => {

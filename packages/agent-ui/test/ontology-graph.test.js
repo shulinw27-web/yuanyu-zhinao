@@ -4,6 +4,17 @@ import { buildOntologyGraph, filterOntologyGraph, findOntologyPath, validateOnto
 const objects = [{ id: 'supplier', label: '供应商', sourceSystems: ['ERP'] }, { id: 'material', label: '原料批次', sourceSystems: ['ERP', 'WMS'] }, { id: 'batch', label: '生产批次', sourceSystems: ['MES'] }];
 const relations = [{ from: 'supplier', to: 'material', predicate: 'provides' }, { from: 'material', to: 'batch', predicate: 'usedIn' }, { from: 'batch', to: 'supplier', predicate: 'reportsTo' }, { from: 'missing', to: 'batch', predicate: 'dangling' }];
 
+test('large cyclic paths scan each edge once and reconstruct only the selected path', () => {
+  const count = 5000; let fromReads = 0;
+  const nodes = Array.from({ length: count }, (_, index) => ({ id: `n${index}` }));
+  const edges = nodes.map((_, index) => ({ id: `e${index}`, get from() { fromReads++; return `n${index}`; }, to: `n${(index + 1) % count}` }));
+  const result = findOntologyPath({ nodes, edges }, 'n0', `n${count - 1}`);
+  assert.equal(result.nodes.length, count); assert.equal(result.edges.length, count - 1);
+  assert.equal(result.nodes[0], 'n0'); assert.equal(result.edges.at(-1), `e${count - 2}`);
+  assert.ok(fromReads <= count * 4, `edge reads ${fromReads}`);
+  assert.deepEqual(findOntologyPath({ nodes, edges }, 'n0', 'n0'), { nodes: ['n0'], edges: [] });
+});
+
 test('source partitions count each node once and retain direction and removed relations separately', () => {
   const graph = buildOntologyGraph([...objects, { id: 'other', sourceSystems: ['WMS', 'ERP', 'ERP'] }, { id: 'unknown' }], [...relations, { from: 'material', to: 'supplier', predicate: 'reverse' }, { from: 'material', to: 'other', predicate: 'internal' }], { relationshipChanges: [{ from: 'supplier', to: 'material', predicate: 'old', change: 'removed' }] });
   const before = JSON.stringify(graph); const summary = summarizeOntologySources(graph);

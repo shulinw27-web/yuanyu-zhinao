@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
+import { createServer as createNodeServer } from 'node:http';
+import { listenOnFetchableLoopback } from './http-fixture-port.js';
+const createServer = handler => createNodeServer((req, res) => {
+  res.setHeader('Connection', 'close');
+  if (req.method === 'HEAD') { res.end(); return; }
+  return handler(req, res);
+});
 import { businessIdDomains, extractQueryBusinessIds, hasUnsupportedQueryTimeFilter, matchingQueryBusinessIds, validateAgentReadInput, validateAgentQueryAnswer } from '../src/services/agent-query-service.js';
 import { getRole } from '../src/services/authorization-service.js';
 import { routeAgentTask } from '../src/services/agent-orchestration-service.js';
@@ -78,7 +84,7 @@ test('HTTP history connector selects effective version and rejects incomplete, m
     if (mode === 'overlap') current.validFrom = old.validFrom;
     res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(payload));
   });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await listenOnFetchableLoopback(server);
   try {
     await withEnv({ NODE_ENV: 'production', AGENT_RUNTIME_MODE: 'mock', ENTERPRISE_CONNECTORS_CONFIG_JSON: JSON.stringify({ oms: { endpoint: `http://127.0.0.1:${server.address().port}` } }) }, async () => {
       const input = '查询 ORD-100 截至 2026-08-17T02:00:00Z 的状态';
@@ -346,7 +352,7 @@ test('enterprise Connector response filtering is enforced even if the supplier i
       { id: 'ORD-100', statement: '指定订单已取消。', status: 'cancelled', tenantId: 'demo-enterprise', organizationId: 'org-market-dept', version: 'v2', classification: 'internal', occurredAt: '2026-08-17T01:00:00Z' }
     ] }));
   });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await listenOnFetchableLoopback(server);
   try {
     await withEnv({ NODE_ENV: 'production', ENTERPRISE_CONNECTORS_CONFIG_JSON: JSON.stringify({ oms: { endpoint: `http://127.0.0.1:${server.address().port}` } }) }, async () => {
       const result = await retrieveAgentSystemEvidenceAsync('查询订单 ORD-100', 'marketing_manager', scope('market@demo.local'));
@@ -380,7 +386,7 @@ test('HTTP connector dates and versions are filtered again and conflicting curre
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ records: conflicting ? [record, { ...record, statement: '订单已取消' }] : [record, { ...record, version: 'v1' }, { ...record, occurredAt: '2026-08-18T02:00:00Z' }, { ...record, tenantId: 'other-tenant' }] }));
   });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await listenOnFetchableLoopback(server);
   try {
     await withEnv({ NODE_ENV: 'production', AGENT_RUNTIME_MODE: 'mock', ENTERPRISE_CONNECTORS_CONFIG_JSON: JSON.stringify({ oms: { endpoint: `http://127.0.0.1:${server.address().port}` } }) }, async () => {
       const result = await retrieveAgentSystemEvidenceAsync('查询 ORD-100 在 2026-08-17 的事件记录 版本 v2', 'marketing_manager', scope('market@demo.local'));
@@ -399,7 +405,7 @@ test('HTTP connector dates and versions are filtered again and conflicting curre
 
 test('an empty real Connector response cannot reactivate default risk and semantic fixtures', async () => {
   const server = createServer((req, res) => { req.resume(); res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"records":[]}'); });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await listenOnFetchableLoopback(server);
   try {
     await withEnv({ CONNECTOR_MOCK_MODE: 'enabled', ENTERPRISE_CONNECTORS_CONFIG_JSON: JSON.stringify({ qms: { endpoint: `http://127.0.0.1:${server.address().port}` } }) }, async () => {
       const result = await run('分析 RC-2026-0042');
@@ -426,7 +432,7 @@ test('actual HTTP model answer with another risk ID is replaced by verified targ
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(envelope) } }] }));
   });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await listenOnFetchableLoopback(server);
   try {
     await withEnv({ AGENT_RUNTIME_MODE: 'local', LOCAL_LLM_MODEL: 'query-test-model', LOCAL_LLM_BASE_URL: `http://127.0.0.1:${server.address().port}/v1`, MODEL_ALLOWLIST_JSON: JSON.stringify({ local: ['query-test-model'] }) }, async () => {
       resetModelGatewayObservability(); resetModelGovernanceForTest();
@@ -449,11 +455,11 @@ test('semantic operations exercises the real HTTP gateway in tests and cannot ad
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(envelope) } }] }));
   });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await listenOnFetchableLoopback(server);
   try {
     await withEnv({ AGENT_RUNTIME_MODE: 'local', LOCAL_LLM_MODEL: 'ops-test-model', LOCAL_LLM_BASE_URL: `http://127.0.0.1:${server.address().port}/v1`, MODEL_ALLOWLIST_JSON: JSON.stringify({ local: ['ops-test-model'] }) }, async () => {
       const result = await planSemanticOperationsRequest({ request: '检查模型状态', authoritativeIntent: 'inspect_status', identityScope: scope(), sourceDiscovery: { sources: [] } });
-      assert.equal(calls, 1);
+      assert.equal(calls, 1, JSON.stringify({ port: server.address().port, mode: result.mode, provider: result.provider }));
       assert.equal(result.intentConflict, true);
       assert.equal(result.goal, '检查模型状态');
       assert.equal(result.authoritativeIntent, 'inspect_status');

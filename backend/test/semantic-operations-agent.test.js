@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resetRuntimeState, writeState } from '../src/repositories/runtime-state-repository.js';
+import { mutateSemanticGovernanceState, readSemanticGovernanceState } from '../src/services/semantic-governance-store.js';
 import { getRole } from '../src/services/authorization-service.js';
 import { applySemanticOperationsProposal, createSemanticOperationsProposal, createSemanticOperationsProposalFromRequest, listSemanticOperationsSnapshots, rollbackSemanticOperationsSnapshot, saveSemanticOperationsDraft, updateSemanticOperationsProposal } from '../src/services/semantic-operations-agent-service.js';
 import { archiveSemanticOperationsTask, classifySemanticOperationsIntent, createSemanticOperationsTask, executeSemanticOperationsTask, getSemanticOperationsTask, getSemanticOperationsTaskTrace, issueSemanticOperationsTaskConfirmation, listSemanticOperationsTasks, reviseSemanticOperationsTaskProposal } from '../src/services/semantic-operations-task-service.js';
@@ -14,6 +15,59 @@ import { semanticOperationsPrincipalKey } from '../src/services/semantic-operati
 import { CANDIDATE_CATALOG, CANDIDATE_CATALOG_SIZE, listCatalogGaps, listUncoveredMentions, matchCandidateCatalog, UNCOVERED_MENTION_LIMIT } from '../src/services/semantic-candidate-catalog-service.js';
 
 const identity = { tenantId: 'semantic-test', subjectId: 'architect-01', deviceId: 'device-01' };
+
+test('explicit relationship creation stays in the authorized candidate and does not infer joins or publish', async () => {
+  resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);
+  const role = getRole('executive'); const baseline = await getOAMetaModelDraft();
+  let task = await createSemanticOperationsTask({ body: { text: '建立供应商和采购订单语义模型。', systemCodes: ['ERP'] }, role, identityScope: identity });
+  const taskId = task.id; const proposalId = task.proposal.id; const revision = task.proposal.revision;
+  const token = await issueSemanticOperationsTaskConfirmation({ taskId, identityScope: identity });
+  const command = '新增关系“fulfillsOrder”，从“Supplier”到“PurchaseOrder”，名称“履约订单”，基数“一对多”，依据“人工描述供应商承担订单履约责任”';
+  const edit = text => createSemanticOperationsTask({ body: { text, parentTaskId: taskId, parentProposalRevision: task.proposal.revision }, role, identityScope: identity });
+  task = await edit(`${command}；将“Supplier/fulfillsOrder/PurchaseOrder”的关系名称改为“订单履约责任”`);
+  assert.equal(task.id, taskId); assert.equal(task.proposal.id, proposalId); assert.equal(task.proposal.revision, revision + 1);
+  const relation = task.proposal.relationshipTypes.find(item => item.predicate === 'fulfillsOrder');
+  assert.equal(relation.label, '订单履约责任'); assert.equal(relation.provenanceType, 'declared'); assert.ok(!relation.keyMapping); assert.ok(!relation.derivedFrom);
+  assert.equal((await executeSemanticOperationsTask({ taskId, role, identityScope: identity, confirmationToken: token.confirmationToken })).code, 'SEMANTIC_TASK_CONFIRMATION_INVALID');
+  const before = await getSemanticOperationsTask({ taskId, identityScope: identity });
+  assert.equal((await edit(command)).code, 'SEMANTIC_EDIT_RELATION_CONFLICT');
+  assert.deepEqual(await getSemanticOperationsTask({ taskId, identityScope: identity }), before);
+  const stranger = { ...identity, subjectId: 'other' };
+  assert.ok((await createSemanticOperationsTask({ body: { text: command, parentTaskId: taskId, parentProposalRevision: task.proposal.revision }, role, identityScope: stranger })).error);
+  assert.equal((await createSemanticOperationsTask({ body: { text: command }, role, identityScope: identity })).code, 'SEMANTIC_EDIT_PROPOSAL_REQUIRED');
+  assert.deepEqual((await getOAMetaModelDraft()).relationshipTypes, baseline.relationshipTypes);
+  const reviewed = await issueSemanticOperationsTaskConfirmation({ taskId, identityScope: identity });
+  assert.ok(reviewed.confirmationToken);
+  const applied = await executeSemanticOperationsTask({ taskId, role, identityScope: identity, confirmationToken: reviewed.confirmationToken });
+  assert.ok(!applied.error, applied.error); assert.equal(applied.task.status, 'completed');
+  const saved = await getOAMetaModelDraft();
+  const savedRelation = saved.relationshipTypes.find(item => item.predicate === 'fulfillsOrder');
+  assert.equal(savedRelation.label, relation.label); assert.equal(savedRelation.evidence, relation.evidence);
+  assert.equal(savedRelation.provenanceType, 'declared'); assert.ok(!savedRelation.keyMapping);
+  // Persisted JSON omits undefined optional enum properties; compare wire-equivalent definitions.
+  assert.deepEqual(saved.objectTypes.find(item => item.id === 'Supplier').fieldDefinitions, JSON.parse(JSON.stringify(task.proposal.objectTypes.find(item => item.id === 'Supplier').fieldDefinitions)));
+});
+
+test('atomic conversational batches persist once, invalidate confirmation and leave failed batches unchanged', async () => {
+  resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);
+  const role = getRole('executive'); const baseline = await getOAMetaModelDraft();
+  let task = await createSemanticOperationsTask({ body: { text: '建立供应商和采购订单语义模型。', systemCodes: ['ERP'] }, role, identityScope: identity });
+  const id = task.id; const proposalId = task.proposal.id; const revision = task.proposal.revision;
+  const token = await issueSemanticOperationsTaskConfirmation({ taskId: id, identityScope: identity });
+  const edit = text => createSemanticOperationsTask({ body: { text, parentTaskId: id, parentProposalRevision: task.proposal.revision }, role, identityScope: identity });
+  task = await edit('将“Supplier”的业务域改为“采购”；将“Supplier”的业务名称改为“采购供应商”；将“Supplier”的业务说明改为“负责供货；不是生产主体”');
+  assert.equal(task.id, id); assert.equal(task.proposal.id, proposalId); assert.equal(task.proposal.revision, revision + 1);
+  assert.equal(task.proposal.objectTypes.find(item => item.id === 'Supplier').description, '负责供货；不是生产主体');
+  assert.equal((await executeSemanticOperationsTask({ taskId: id, role, identityScope: identity, confirmationToken: token.confirmationToken })).code, 'SEMANTIC_TASK_CONFIRMATION_INVALID');
+  const before = await getSemanticOperationsTask({ taskId: id, identityScope: identity });
+  const failed = await edit('将“Supplier”的业务域改为“物流”；将“不存在”的业务名称改为“错项”');
+  assert.equal(failed.code, 'SEMANTIC_EDIT_TARGET_AMBIGUOUS');
+  assert.deepEqual(await getSemanticOperationsTask({ taskId: id, identityScope: identity }), before);
+  task = await edit('给“Supplier”新增字段“risk_score”，类型“number”；将“Supplier.risk_score”的字段说明改为“待确认风险分”');
+  assert.equal(task.proposal.revision, revision + 2);
+  assert.equal((await issueSemanticOperationsTaskConfirmation({ taskId: id, identityScope: identity })).code, 'SEMANTIC_TASK_PROPOSAL_BLOCKED');
+  assert.deepEqual((await getOAMetaModelDraft()).objectTypes, baseline.objectTypes);
+});
 
 test('workspace questions bind an existing authorized object and model fingerprint across followup, reject drift and fabricated context', async () => {
   resetRuntimeState(['oa_meta_model_runtime', 'semantic_operations_agent_tasks']); const role = getRole('executive');
@@ -46,6 +100,68 @@ test('three explicit conversational edits retain one proposal, increment revisio
   assert.equal(unknown.code, 'SEMANTIC_EDIT_TARGET_AMBIGUOUS');
   const execution = await executeSemanticOperationsTask({ taskId: task.id, role, identityScope: identity, confirmationToken: confirmation.confirmationToken });
   assert.equal(execution.code, 'SEMANTIC_TASK_CONFIRMATION_INVALID');
+});
+
+test('conversational field edits and additions retain the candidate and fail closed on pending mappings', async () => {
+  resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);
+  const role = getRole('executive'); const before = await getOAMetaModelDraft();
+  let task = await createSemanticOperationsTask({ body: { text: '建立供应商和采购订单语义模型。', systemCodes: ['ERP'] }, role, identityScope: identity });
+  const taskId = task.id; const proposalId = task.proposal.id; const object = task.proposal.objectTypes.find(item => item.id === 'Supplier');
+  const field = object.fieldDefinitions.find(item => !item.primaryKey); assert.ok(field);
+  const confirmation = await issueSemanticOperationsTaskConfirmation({ taskId, identityScope: identity });
+  const edit = text => createSemanticOperationsTask({ body: { text, parentTaskId: task.id, parentProposalRevision: task.proposal.revision }, role, identityScope: identity });
+  task = await edit(`将“Supplier.${field.name}”的字段说明改为“当前合成场景的供应商描述”`);
+  assert.equal(task.id, taskId); assert.equal(task.proposal.id, proposalId);
+  assert.equal(task.proposal.objectTypes.find(item => item.id === 'Supplier').fieldDefinitions.find(item => item.name === field.name).description, '当前合成场景的供应商描述');
+  assert.equal((await executeSemanticOperationsTask({ taskId, role, identityScope: identity, confirmationToken: confirmation.confirmationToken })).code, 'SEMANTIC_TASK_CONFIRMATION_INVALID');
+  const revision = task.proposal.revision;
+  assert.equal((await edit('将“Supplier.supplier_id”的字段类型改为“number”')).code, 'SEMANTIC_EDIT_KEY_CHANGE_REQUIRES_REVIEW');
+  assert.equal((await getSemanticOperationsTask({ taskId, identityScope: identity })).proposal.revision, revision);
+  task = await edit('给“Supplier”新增字段“risk_score”，类型“number”，说明“待确认风险分”');
+  assert.equal(task.id, taskId); assert.equal(task.proposal.id, proposalId);
+  const added = task.proposal.objectTypes.find(item => item.id === 'Supplier').fieldDefinitions.find(item => item.name === 'risk_score');
+  assert.equal(added.mappingStatus, 'pending'); assert.equal(added.sourceField, ''); assert.equal(added.primaryKey, false);
+  assert.equal(task.proposal.impactAnalysis.publishBlocked, true); assert.equal(task.proposal.critic.status, 'failed');
+  assert.equal((await issueSemanticOperationsTaskConfirmation({ taskId, identityScope: identity })).code, 'SEMANTIC_TASK_PROPOSAL_BLOCKED');
+  assert.equal((await applySemanticOperationsProposal({ proposalId, role, identityScope: identity })).code, 'SEMANTIC_PROPOSAL_CRITIC_FAILED');
+  const pendingRevision = task.proposal.revision;
+  task = await edit('撤回候选字段“Supplier.risk_score”');
+  assert.equal(task.id, taskId); assert.equal(task.proposal.id, proposalId); assert.equal(task.proposal.revision, pendingRevision + 1);
+  assert.equal(task.proposal.objectTypes.find(item => item.id === 'Supplier').fields.includes('risk_score'), false);
+  assert.equal(task.proposal.critic.status, 'passed');
+  assert.ok((await issueSemanticOperationsTaskConfirmation({ taskId, identityScope: identity })).confirmationToken);
+  assert.equal((await edit('撤回候选字段“Supplier.supplier_id”')).code, 'SEMANTIC_FIELD_REMOVAL_KEY_FORBIDDEN');
+  assert.deepEqual((await getOAMetaModelDraft()).objectTypes, before.objectTypes);
+});
+
+test('withdrawal rechecks private server governance omitted from the public candidate before persisting', async () => {
+  resetRuntimeState(['semantic_operations_agent_proposals', 'oa_meta_model_runtime']);
+  const role = getRole('executive'); const initial = await createSemanticOperationsProposal({ input: '建立供应商语义模型。', identityScope: identity });
+  const objects = structuredClone(initial.objectTypes);
+  objects[0].fieldDefinitions.push({ name: 'risk_score', type: 'number', sourceField: '', mappingStatus: 'pending' }); objects[0].fields.push('risk_score');
+  const added = await updateSemanticOperationsProposal({ proposalId: initial.id, revision: initial.revision, objectTypes: objects, relationshipTypes: initial.relationshipTypes, role, identityScope: identity });
+  assert.equal(added.metrics, undefined);
+  await mutateSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${initial.id}`, null, stored => {
+    stored.draft.metrics = [{ id: 'risk_metric', expression: 'sum(risk_score)' }]; return { value: stored };
+  });
+  const reduced = structuredClone(added.objectTypes); reduced[0].fields = reduced[0].fields.filter(name => name !== 'risk_score'); reduced[0].fieldDefinitions = reduced[0].fieldDefinitions.filter(field => field.name !== 'risk_score');
+  const rejected = await updateSemanticOperationsProposal({ proposalId: initial.id, revision: added.revision, objectTypes: reduced, relationshipTypes: added.relationshipTypes,
+    candidateFieldWithdrawal: { objectId: reduced[0].id, fieldName: 'risk_score' }, role, identityScope: identity });
+  assert.equal(rejected.code, 'SEMANTIC_FIELD_REMOVAL_DEPENDENCIES');
+  assert.ok(rejected.dependencies.some(target => target.section === 'metrics'));
+  const current = await readSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${initial.id}`);
+  assert.equal(current.revision, added.revision); assert.ok(current.draft.objectTypes[0].fields.includes('risk_score'));
+});
+
+test('explicit candidate field commands require a target task and reject wrong identities and attachments', async () => {
+  resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks']); const role = getRole('executive');
+  const command = '给“Supplier”新增字段“risk_score”，类型“number”';
+  assert.equal((await createSemanticOperationsTask({ body: { text: command }, role, identityScope: identity })).code, 'SEMANTIC_EDIT_PROPOSAL_REQUIRED');
+  const task = await createSemanticOperationsTask({ body: { text: '建立供应商语义模型。', systemCodes: ['ERP'] }, role, identityScope: identity });
+  const body = { text: command, parentTaskId: task.id, parentProposalRevision: task.proposal.revision };
+  assert.equal((await createSemanticOperationsTask({ body, role, identityScope: { ...identity, subjectId: 'other' } })).code, 'SEMANTIC_PARENT_TASK_NOT_FOUND');
+  assert.equal((await createSemanticOperationsTask({ body: { ...body, attachments: [{}] }, role, identityScope: identity })).code, 'SEMANTIC_EDIT_ATTACHMENT_UNSUPPORTED');
+  assert.equal((await createSemanticOperationsTask({ body: { ...body, parentProposalRevision: 0 }, role, identityScope: identity })).code, 'SEMANTIC_PROPOSAL_REVISION_CONFLICT');
 });
 
 test('adoption mode is explicit: merge preserves objects, replace shows removals and remains recoverable', async () => {

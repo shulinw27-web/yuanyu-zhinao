@@ -5,6 +5,8 @@ import { readSemanticGovernanceState, mutateSemanticGovernanceState, mutateSeman
 import { runWithSemanticTenant, getOAMetaModelDraft, getOAMetaModelRuntimeTransactionEntry, getOAMetaModelDraftFromRuntime, semanticFingerprint } from '../governance/public-api.js';
 import { answerKnowledgeQuestion } from '../../services/knowledge-answer-service.js';
 import { privateModelViews } from './model-views.js';
+import { teamModelViews } from './team-model-views.js';
+import { materialReviews } from './material-reviews.js';
 
 const namespace = 'knowledge_model_links_v1';
 const kinds = ['definition', 'rule', 'field', 'workflow'];
@@ -123,4 +125,4 @@ async function suggest({ context, body, resolveProvider, canRead, policy, genera
   if (semanticFingerprint(await getModel(context)) !== fingerprint) return fail('KNOWLEDGE_MODEL_CHANGED');
   return { suggestions, modelFingerprint: fingerprint, method: 'bounded_exact_mentions_no_model_call', persisted: false };
 }
-export const knowledgeModelLinks = { list, save, retract, suggest, views: privateModelViews };
+export const knowledgeModelLinks = { list, save, retract, suggest, views: privateModelViews, teamViews: teamModelViews, materialReviews };

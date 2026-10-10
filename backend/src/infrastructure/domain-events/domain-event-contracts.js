@@ -1,6 +1,10 @@
 const definitions = [
   ['anomaly.report.changed', 'AnomalyReport', ['reportId', 'revision', 'status', 'action']],
   ['knowledge.study.changed', 'KnowledgeStudy', ['documentId', 'revision']],
+  ['knowledge.material_review.submitted', 'KnowledgeMaterialReview', ['revision', 'status']],
+  ['knowledge.material_review.decided', 'KnowledgeMaterialReview', ['revision', 'status']],
+  ['knowledge.material_review.archived', 'KnowledgeMaterialReview', ['revision', 'status']],
+  ['knowledge.material_review.assigned', 'KnowledgeMaterialReview', ['revision', 'status']],
   ['knowledge.document.changed', 'KnowledgeDocument', ['documentId', 'revision', 'status', 'contentHash']],
   ['risk.case.acknowledged', 'RiskCase', ['riskId', 'severity', 'status']],
   ['risk.case.disposition_approved', 'RiskCase', ['riskId', 'severity', 'status', 'disposition']],

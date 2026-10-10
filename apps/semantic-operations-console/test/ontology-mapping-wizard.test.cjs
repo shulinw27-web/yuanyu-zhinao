@@ -36,6 +36,21 @@ test('wizard candidate retains importable plan shape without changing source mod
   assert.equal(candidate.draft.relationshipTypes[0].keyMapping.lookupSource, 'Crosswalk');
   assert.match(candidate.summary, /Material.id.*Crosswalk.*Stock.sku/);
 });
+
+test('reverse wizard selects the same declared crosswalk and creates a direction-explicit importable candidate', async t => {
+  const ui = mount(t); const { selection } = fixture();
+  ui.props.draft.scenario.readPlans[0].datasets = [{ id: 'stock', objectType: 'Stock', where: [{ field: 'id', target: true }] }, { id: 'material', objectType: 'Material', where: [{ field: 'id', dataset: 'stock', sourceField: 'sku' }] }];
+  await Vue.nextTick(); ui.state.form.value.relationKey = selection.relationKey; await Vue.nextTick();
+  ui.state.form.value.joinKey = JSON.stringify(['stock', 'material']); await Vue.nextTick();
+  assert.deepEqual(ui.state.candidateCrosswalks.value.map(item => item.id), ['Crosswalk']);
+  ui.state.form.value.objectType = 'Crosswalk'; await Vue.nextTick();
+  Object.assign(ui.state.form.value, { ...selection, joinKey: JSON.stringify(['stock', 'material']) }); await Vue.nextTick();
+  assert.equal(ui.state.preview.value.error, ''); ui.state.apply();
+  const candidate = ui.events[0][1].draft;
+  assert.deepEqual(parseReadPlanImport(candidate), candidate.scenario.readPlans);
+  assert.equal(candidate.scenario.readPlans[0].datasets[1].where[0].mapping.direction, 'reverse');
+  candidate.scenario.readPlans[0].datasets[1].where[0].mapping.direction = 'guess'; assert.throws(() => parseReadPlanImport(candidate));
+});
 test('wizard refuses reversed joins, ambiguous source tables, repeated fields and undeclared references', () => {
   for (const mutate of [f => { f.draft.relationshipTypes[0].from = 'Stock'; }, f => { f.draft.objectTypes[2].sourceSystems.push('ERP'); }, f => { f.selection.statusField = 'erp'; }, f => { f.draft.objectTypes[2].fieldDefinitions = []; }, f => { f.selection.asOf = '2026-02-30T00:00:00Z'; }, f => { f.draft.scenario.decisionBindings.push({ id: 'old' }); }]) {
     const f = fixture(); mutate(f); assert.throws(() => Wizard.proposeOntologyMapping(f.draft, f.selection));

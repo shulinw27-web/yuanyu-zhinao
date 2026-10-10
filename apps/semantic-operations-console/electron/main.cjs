@@ -7,6 +7,11 @@ const developmentUrl = process.env.ELECTRON_RENDERER_URL;
 const isDevelopment = Boolean(developmentUrl);
 const rendererEntry = path.resolve(__dirname, '..', 'dist', 'index.html');
 let mainWindow = null;
+const smokeMode = process.env.SEMANTIC_OPS_ELECTRON_SMOKE === '1';
+if (smokeMode && process.env.YUANYU_ELECTRON_SMOKE_USER_DATA) {
+  if (!path.isAbsolute(process.env.YUANYU_ELECTRON_SMOKE_USER_DATA)) throw new Error('SMOKE_USER_DATA_MUST_BE_ABSOLUTE');
+  app.setPath('userData', process.env.YUANYU_ELECTRON_SMOKE_USER_DATA);
+}
 
 const resolveApiBaseUrl = () => {
   const fallback = 'http://127.0.0.1:3001/api';
@@ -97,7 +102,7 @@ function createWindow() {
     openExternal(url);
   });
   mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault());
-  mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.once('ready-to-show', () => { if (!smokeMode) mainWindow?.show(); });
   mainWindow.on('closed', () => { mainWindow = null; });
 
   if (isDevelopment) mainWindow.loadURL(developmentUrl);
@@ -123,6 +128,7 @@ function createWindow() {
         })()`
       );
       process.stdout.write(`SEMANTIC_OPS_ELECTRON_SMOKE_OK ${JSON.stringify(result)}\n`);
+      if (process.env.YUANYU_ELECTRON_SMOKE_USER_DATA) require('node:fs').writeFileSync(path.join(app.getPath('userData'), 'smoke-result.json'), JSON.stringify(result));
       if (!result.mounted || result.runtime !== 'electron' || (!result.authRequired && (result.loading || result.error || result.objectTypes < 1))) {
         process.exitCode = 1;
       }

@@ -5,8 +5,9 @@ import KnowledgeConversationPanel from './KnowledgeConversationPanel.vue';
 import KnowledgeMaterialReviewPanel from './KnowledgeMaterialReviewPanel.vue';
 import KnowledgeBusinessBriefPanel from './KnowledgeBusinessBriefPanel.vue';
 import KnowledgeModelLinksPanel from './KnowledgeModelLinksPanel.vue';
+import KnowledgeTeamReviewPanel from './KnowledgeTeamReviewPanel.vue';
 
-const props = defineProps({ client: { type: Object, required: true }, canWrite: { type: Boolean, default: false }, canModel: Boolean });
+const props = defineProps({ client: { type: Object, required: true }, canWrite: { type: Boolean, default: false }, canModel: Boolean, canReview: Boolean });
 const emit = defineEmits(['model-candidate']);
 const documents = ref([]); const providers = ref([]); const busy = ref(false); const error = ref(''); const notice = ref('');
 const draft = ref(null); const baseline = ref(''); const chunks = ref([]); const query = ref(''); const answer = ref(null); const source = ref(null);
@@ -143,6 +144,7 @@ onUnmounted(() => { generation++; });
     <p v-if="error" role="alert" class="knowledge-error">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
     <slot />
     <KnowledgeModelLinksPanel v-if="client.modelLinks" :client="client" :evidence="answer?.evidence || []" :can-write="canEdit" @open-citation="view = 'search'; openCitation($event)" />
+    <KnowledgeTeamReviewPanel :client="client" :evidence="answer?.evidence || []" :can-write="canEdit" :can-review="canReview" />
     <nav class="knowledge-nav" aria-label="知识资料操作"><button :aria-pressed="view === 'map'" @click="view = 'map'">知识地图</button><button :aria-pressed="view === 'search'" @click="view = 'search'">查找依据</button><button :aria-pressed="view === 'manage'" @click="view = 'manage'">资料管理</button><button v-if="canEdit" class="knowledge-primary" :disabled="busy" @click="startNewDocument">＋ 添加资料</button></nav>
     <section v-if="view === 'map'" class="knowledge-map-view" aria-label="资料关联地图">
       <div class="knowledge-map-intro"><b>资料从哪里来？</b><span>按来源归在一起，点击资料可查看原文。</span><small>当前连线只表示“同一来源”，不是 AI 已确认的业务关系。业务对象关系需要经过语义建模和人工审核后才能成立。</small></div>

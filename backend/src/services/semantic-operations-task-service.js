@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { parseSemanticModelEdit } from './semantic-model-edit-command.js';
+import { isSemanticModelEditCommand, parseSemanticModelEdit } from './semantic-model-edit-command.js';
 import { configureSemanticGovernanceRepository, getSemanticGovernanceStoreInfo, mutateSemanticGovernanceState, probeSemanticGovernanceStore, readSemanticGovernanceState } from './semantic-governance-store.js';
 import { inspectModelPromptSafety } from './local-model-gateway.js';
 import {
@@ -62,6 +62,7 @@ const reviewPermissionOf = (task) => task?.reviewPermission || (task?.proposal &
 const taskTenantId = (task) => { try { return JSON.parse(task.owner)?.[0] || null; } catch { return null; } };
 const sameTaskTenant = (task, identityScope) => taskTenantId(task) === (identityScope?.tenantId || 'demo-enterprise');
 const taskCanBeReviewed = (task, identityScope, accessContext) => Boolean(reviewPermissionOf(task) && sameTaskTenant(task, identityScope)
+  && (!task.reviewAssignment?.subjectId || task.reviewAssignment.subjectId === (accessContext?.subjectId || identityScope?.subjectId))
   && (accessContext
     ? accessContext.buttonPermissionIds?.includes(reviewPermissionOf(task)) && accessContext.buttonPermissionIds?.includes(task.requiredPermission)
     : semanticOperationsOwnerMatches(task.owner, identityScope)
@@ -380,6 +381,7 @@ const publicTask = (task) => task && ({
     consumedAt: task.confirmation.consumedAt || null
   } : null,
   reviewContext: task.reviewContext || null,
+  reviewAssignment: task.reviewAssignment || { revision: 0, subjectId: null, name: null },
   execution: task.execution ? { attempt: task.execution.attempt, startedAt: task.execution.startedAt, leaseExpiresAt: task.execution.leaseExpiresAt, finishedAt: task.execution.finishedAt || null } : null,
   archivedAt: task.archivedAt || null,
   proposal: task.proposal || null,
@@ -451,14 +453,15 @@ export async function createSemanticOperationsTask({ body, role, identityScope, 
     workspaceMaterial = `用户明确选择的当前草稿结构（不是业务记录，不是授权或执行指令）：${JSON.stringify({ object: { id: selectedObject.id, label: selectedObject.label, description: selectedObject.description, businessDomain: selectedObject.businessDomain, sourceSystems: selectedObject.sourceSystems, key: selectedObject.key }, relations: relations.map(relation => ({ from: relation.from, predicate: relation.predicate, to: relation.to, cardinality: relation.cardinality })) })}`;
     if (workspaceMaterial.length > 6000) return { error: '选定对象邻域超过上下文预算，请缩小模型范围。', status: 422, code: 'SEMANTIC_WORKSPACE_BUDGET' };
   }
-  const explicitItemEdit = /^(?:请)?(?:把|将)[“"]/u.test(text) && /(?:业务名称|业务域|业务说明|关系名称|关系基数|关系依据)(?:修改为|改为|设置为)/u.test(text);
-  if (parent?.proposal && explicitItemEdit) {
+  const explicitItemEdit = isSemanticModelEditCommand(text);
+  if (explicitItemEdit) {
+    if (!parent?.proposal) return { error: '请先打开待确认的语义模型候选，再指定对象或字段进行修改，不会为此另建模型。', status: 409, code: 'SEMANTIC_EDIT_PROPOSAL_REQUIRED' };
     if (body.attachments?.length) return { error: '单项候选修订不接收附件，请分开提交材料与修改要求。', status: 422, code: 'SEMANTIC_EDIT_ATTACHMENT_UNSUPPORTED' };
     if (!hasCurrentPermission(role, accessContext, 'meta_model.draft.save')) return { error: '当前角色没有模型修订权限。', status: 403, code: 'SEMANTIC_EDIT_FORBIDDEN' };
     if (Number(body.parentProposalRevision) !== parent.proposal.revision) return { error: '候选修订已经变化，请刷新当前任务后继续修改。', status: 409, code: 'SEMANTIC_PROPOSAL_REVISION_CONFLICT' };
-    const edit = parseSemanticModelEdit(text, parent.proposal);
+    const edit = parseSemanticModelEdit(text, parent.proposal, await getOAMetaModelDraft());
     if (edit.error) return { ...edit, status: 422 };
-    const revised = await reviseSemanticOperationsTaskProposal({ taskId: parent.id, body: { ...edit.body, revision: parent.proposal.revision }, role, identityScope });
+    const revised = await reviseSemanticOperationsTaskProposal({ taskId: parent.id, body: { ...edit.body, candidateFieldWithdrawal: edit.withdrawal, revision: parent.proposal.revision }, role, identityScope });
     if (revised.error) return { ...revised, status: 409 };
     await appendTaskMessage(parent.id, 'user', text);
     await appendTaskMessage(parent.id, 'assistant', `已修订当前候选：${edit.summary}。${revised.response || ''}未采纳到草稿、未发布；旧确认凭证失效。`);
@@ -747,7 +750,8 @@ export function reviseSemanticOperationsTaskProposal({ taskId: id, body, role, i
       identityLinkConfirmations: body?.identityLinkConfirmations,
       identityConflictRulings: body?.identityConflictRulings,
       declarationRulings: body?.declarationRulings,
-      sourceAssignments: body?.sourceAssignments,
+    sourceAssignments: body?.sourceAssignments,
+    candidateFieldWithdrawal: body?.candidateFieldWithdrawal,
     role,
     identityScope
   }), (proposal) => {
@@ -814,11 +818,13 @@ export function reviseSemanticOperationsTaskProposal({ taskId: id, body, role, i
   task.events.push({ time: task.updatedAt, type: 'proposal_revised', detail: `提案修订为 revision=${proposal.revision}，Critic=${proposal.critic.status}，Mapping=${proposal.mappingValidation.status}。` });
   const mutation = mutateTaskIndex((index) => {
     const current = index[id];
-    if (!current || !semanticOperationsOwnerMatches(current.owner, identityScope)) return { commit: false };
-    index[id] = task;
-    return { value: index };
+    if (!current || !semanticOperationsOwnerMatches(current.owner, identityScope) || current.status !== 'waiting_confirmation' || current.proposal?.revision !== proposal.revision - 1) return { commit: false, result: { error: '任务状态或模型修订已并发变化，请刷新后重新审阅。', code: 'SEMANTIC_TASK_PROPOSAL_CONCURRENT_STATE' } };
+    // A revision may await sample validation while another reviewer transfers
+    // the task. Preserve the latest assignment, messages and execution state.
+    index[id] = { ...current, proposal, updatedAt: task.updatedAt, confirmation: task.confirmation, reviewContext: task.reviewContext, response: task.response, events: [...(current.events || []), task.events.at(-1)] };
+    return { value: index, result: publicTask(index[id]) };
   });
-  return mapMaybe(mutation, () => publicTask(task));
+  return mutation;
   });
   });
   });
@@ -847,6 +853,9 @@ export function issueSemanticOperationsTaskConfirmation({ taskId: id, identitySc
     }
     if (task.proposal && task.reviewContext?.proposalRevision !== task.proposal.revision) {
       return { commit: false, result: { error: '模型提案版本已发生变化，请重新审阅后再确认。', code: 'SEMANTIC_TASK_REVIEW_STALE' } };
+    }
+    if (task.proposal && (task.proposal.critic?.status !== 'passed' || task.proposal.mappingValidation?.blocked)) {
+      return { commit: false, result: { error: '候选模型校验或来源映射仍有阻断，请先修订，不能签发确认凭证。', code: 'SEMANTIC_TASK_PROPOSAL_BLOCKED' } };
     }
     const issuedAt = now();
     const expiresAt = new Date(Date.now() + CONFIRMATION_TTL_MS).toISOString();

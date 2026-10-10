@@ -280,11 +280,11 @@ onMounted(restoreSession);
               <header><div><span>{{ model?.name || '当前语义模型' }}</span><small>{{ model?.code || '模型草稿' }} · {{ draft?.objectTypes?.length || 0 }} 个对象 · {{ draft?.relationshipTypes?.length || 0 }} 条关系</small></div><b>{{ deploymentDriftLabel }}</b></header>
               <OAMetaModelStudio :meta-model="model" :draft="draft" :authoring-profile="profile" :simulation="simulation" :semantic-context="semanticContext" :role="role" :message="message" :replay-cases="client.replayOntologyCases" :knowledge-client="client.knowledge" :button-permission-ids="buttonPermissionIds" :focused-object-id="graphSelectedId" :saved-layout="graphLayout" @save-layout="graphLayout = $event" @select-object="graphSelectedId = $event" @save-draft="saveDraft" @validate-draft="validateDraft" @simulate-build="simulateBuild" @publish="publishModel" @ask="askOntologyWorkspace"/>
               <OntologyWorkspaceTools v-if="draft" :draft="draft" :can-edit="canModel" :selected-id="graphSelectedId" @locate="graphSelectedId = $event" @material="handoffOntologyMaterial" @ask="askOntologyWorkspace" />
-              <OntologySavedViewsPanel v-if="draft" :client="client.knowledge" :draft="draft" :layout="graphLayout" :selected-id="graphSelectedId" :can-edit="canModel" @restore="restoreModelView" />
+              <OntologySavedViewsPanel v-if="draft" :client="client.knowledge" :draft="draft" :layout="graphLayout" :selected-id="graphSelectedId" :can-edit="canModel" :can-review="buttonPermissionIds.includes('meta_model.draft.review')" @restore="restoreModelView" />
             </section>
           </template>
 
-          <KnowledgeLibraryPanel v-else-if="activeView === 'knowledge'" :client="client.knowledge" :can-write="buttonPermissionIds.includes('meta_model.draft.save')" :can-model="canModel" @model-candidate="prepareKnowledgeModelCandidate" />
+          <KnowledgeLibraryPanel v-else-if="activeView === 'knowledge'" :client="client.knowledge" :can-write="buttonPermissionIds.includes('meta_model.draft.save')" :can-review="buttonPermissionIds.includes('meta_model.draft.review')" :can-model="canModel" @model-candidate="prepareKnowledgeModelCandidate" />
           <template v-else>
             <div class="ops-section-head"><div><span>GOVERNED HISTORY</span><h2>版本记录与草稿回滚</h2><p>共 {{ snapshots.length }} 个快照，不设固定数量上限。仅当前草稿指纹匹配的快照可回滚；回滚只恢复未发布草稿，不撤销已发布模型或业务数据。</p></div></div>
             <section class="version-list">

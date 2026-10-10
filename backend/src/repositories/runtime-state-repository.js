@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { retrySqliteStartup } from './sqlite-startup-retry.js';
 
 const clone = (value) => value === undefined ? undefined : structuredClone(value);
 const requestedDriver = String(process.env.RUNTIME_STORE_DRIVER || 'sqlite').trim().toLowerCase();
@@ -19,7 +20,8 @@ if (driver === 'sqlite') {
     const connection = new DatabaseSync(databasePath);
     // Apply the lock wait before WAL/schema setup so concurrent process startup does not fail immediately.
     connection.exec('PRAGMA busy_timeout = 5000;');
-    connection.exec(`
+    try {
+    retrySqliteStartup(() => connection.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA synchronous = NORMAL;
       CREATE TABLE IF NOT EXISTS runtime_state (
@@ -32,14 +34,14 @@ if (driver === 'sqlite') {
       );
       CREATE INDEX IF NOT EXISTS idx_runtime_state_namespace
         ON runtime_state(namespace, updated_at DESC);
-    `);
+    `));
     const schemaVersion = Number(connection.prepare('PRAGMA user_version').get().user_version || 0);
     if (schemaVersion > CURRENT_SCHEMA_VERSION) {
-      connection.close();
       throw new Error(`Runtime database schema ${schemaVersion} is newer than supported version ${CURRENT_SCHEMA_VERSION}.`);
     }
-    if (schemaVersion < 1) connection.exec('PRAGMA user_version = 1');
+    if (schemaVersion < 1) retrySqliteStartup(() => connection.exec('PRAGMA user_version = 1'));
     return connection;
+    } catch (error) { connection.close(); throw error; }
   };
   database = createSqliteConnection();
 }

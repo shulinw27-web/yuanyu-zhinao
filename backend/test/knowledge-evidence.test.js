@@ -4,6 +4,8 @@ import { createServer } from 'node:http';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { channel } from 'node:diagnostics_channel';
+import { listenOnFetchableLoopback } from './http-fixture-port.js';
 import { loadWeKnoraRuntimeProvider } from '../src/services/weknora-runtime-config.js';
 import { resetRuntimeState } from '../src/repositories/runtime-state-repository.js';
 import { saveLibraryDocument, retractLibraryDocument } from '../src/services/knowledge-library-service.js';
@@ -132,12 +134,13 @@ test('WK evidence: both route surfaces require their own page and write grants; 
 });
 
 async function withUpstream(run) {
-  const state = { calls: [], mode: 'ok', permitted: true, updated: '2026-09-12T00:00:00Z', text: '采购前核验供应商资质。', chunkStatus: 2, chunkType: 'text' };
+  const state = { calls: [], transportErrors: [], mode: 'ok', permitted: true, updated: '2026-09-12T00:00:00Z', text: '采购前核验供应商资质。', chunkStatus: 2, chunkType: 'text' };
   const grant = () => ({ principalKey: knowledgePrincipalKey(context), tenantId: 10000, knowledgeBaseId: 'kb-test', knowledgeIds: state.documentIds || ['doc-test'] });
   const server = createServer(async (req, res) => {
     // Applies to failures/redirects too: a fixture must not leave a pooled socket
     // pointing at a port that Windows can reassign to the next fixture.
     res.setHeader('Connection', 'close');
+    if (req.method === 'HEAD') { res.end(); return; }
     let raw = ''; for await (const chunk of req) raw += chunk;
     state.calls.push({ path: req.url, method: req.method, body: raw && JSON.parse(raw), key: req.headers['x-api-key'] });
     if (state.mode === 'timeout') return;
@@ -154,16 +157,31 @@ async function withUpstream(run) {
       updated_at: state.updated, content: state.text, status: state.chunkStatus, is_enabled: true, deleted_at: null, chunk_type: state.chunkType };
     res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ success: true, data }));
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = await listenOnFetchableLoopback(server);
+  const errors = channel('undici:request:error');
+  const onError = ({ request, error }) => {
+    if (String(request?.origin) === origin) state.transportErrors.push({ name: error?.name, code: error?.code || error?.cause?.code });
+  };
+  errors.subscribe(onError);
   const make = extra => createWeKnoraKnowledgeProvider({ context, baseUrl: `http://127.0.0.1:${server.address().port}`, apiKey: 'synthetic-test-key',
     resolveScope: () => state.permitted ? grant() : null, timeoutMs: 1000, ...extra });
-  try { await run({ state, make, grant, baseUrl: `http://127.0.0.1:${server.address().port}` }); }
-  finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+  try { await run({ state, make, grant, baseUrl: `http://127.0.0.1:${server.address().port}`, port: server.address().port }); }
+  catch (error) {
+    let probe = 'not_attempted';
+    if (state.calls.length === 0) {
+      try { const response = await fetch(origin, { signal: AbortSignal.timeout(1000) }); await response.body?.cancel(); probe = 'reachable'; }
+      catch (failure) { probe = failure.cause?.message === 'bad port' ? 'FETCH_BAD_PORT' : failure.cause?.code || failure.name; }
+    }
+    console.error(`WK_MOCK_DIAGNOSTIC=${JSON.stringify({ port: server.address().port, probe, transportErrors: state.transportErrors, requests: state.calls.map(call => ({ method: call.method, path: call.path })) })}`);
+    throw error;
+  }
+  finally { errors.unsubscribe(onError); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
 }
 
-test('WK provider: mock HTTP contract sends bounded document allowlist, no vector and reads authoritative chunks', async () => withUpstream(async ({ state, make }) => {
+test('WK provider: mock HTTP contract sends bounded document allowlist, no vector and reads authoritative chunks', async () => withUpstream(async ({ state, make, port }) => {
   const provider = make(); const result = await brief(provider);
-  assert.equal(result.status, 'evidence_ready');
+  if (result.status !== 'evidence_ready') console.error(`WK_MOCK_DIAGNOSTIC=${JSON.stringify({ code: result.code, status: result.status, port, transportErrors: state.transportErrors, requests: state.calls.map(call => ({ method: call.method, path: call.path })) })}`);
+  assert.equal(result.status, 'evidence_ready', JSON.stringify({ code: result.code, status: result.status, requests: state.calls.map(call => ({ method: call.method, path: call.path })) }));
   assert.equal(result.evidence[0].excerpt, state.text);
   const search = state.calls[0];
   assert.equal(search.path, '/api/v1/knowledge-bases/kb-test/hybrid-search');

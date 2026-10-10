@@ -12,7 +12,7 @@ const candidateCrosswalks = computed(() => {
   const join = joins.value.find(item => item.key === form.value.joinKey);
   if (!join || !relation.value) return [];
   return (props.draft?.objectTypes || []).filter(item => item.sourceSystems?.length === 1
-    && [[relation.value.from, join.sourceField], [relation.value.to, join.targetField]].every(([endpoint, field]) => item.fieldDefinitions?.some(def => def.reference === endpoint && (def.referenceField || props.draft.objectTypes.find(type => type.id === endpoint)?.key) === field)));
+    && [[relation.value.from, join.direction === 'reverse' ? join.targetField : join.sourceField], [relation.value.to, join.direction === 'reverse' ? join.sourceField : join.targetField]].every(([endpoint, field]) => item.fieldDefinitions?.some(def => def.reference === endpoint && (def.referenceField || props.draft.objectTypes.find(type => type.id === endpoint)?.key) === field)));
 });
 const objectLabel = id => props.draft?.objectTypes?.find(item => item.id === id)?.label || id;
 const fields = [{ key: 'fromField', label: '对照表中的源编码' }, { key: 'toField', label: '对照表中的目标编码' }, { key: 'statusField', label: '确认状态字段（值为confirmed）' }, { key: 'versionField', label: '映射版本字段' }, { key: 'validFromField', label: '生效时间字段' }, { key: 'validToField', label: '失效时间字段（null表示长期有效）' }];
@@ -32,11 +32,11 @@ function apply() {
 <template>
   <details class="mapping-wizard">
     <summary>跨系统编码不同？配置主数据对照</summary>
-    <p>选择“业务关系 → 查询步骤 → 对照表”。只编辑候选，不连接系统、不授予权限、不自动发布。</p>
+    <p>选择“业务关系 → 查询步骤 → 对照表”。步骤可明确选择正向或反向查询；对照字段的源/目标始终按业务关系原方向填写，反查不会改变关系方向。只编辑候选，不连接系统、不授予权限、不自动发布。</p>
     <fieldset :disabled="!canEdit">
       <div class="mapping-grid">
         <label>1. 业务关系<select v-model="form.relationKey"><option value="">请选择</option><option v-for="item in draft?.relationshipTypes || []" :key="JSON.stringify([item.from, item.predicate, item.to])" :value="JSON.stringify([item.from, item.predicate, item.to])">{{ objectLabel(item.from) }} → {{ item.label || item.predicate }} → {{ objectLabel(item.to) }}</option></select></label>
-        <label>2. 现有读取步骤<select v-model="form.joinKey"><option value="">请选择同方向的步骤</option><option v-for="item in joins" :key="item.key" :value="item.key">{{ item.label }}</option></select></label>
+        <label>2. 现有读取步骤<select v-model="form.joinKey"><option value="">请选择明确方向的步骤</option><option v-for="item in joins" :key="item.key" :value="item.key">{{ item.label }}</option></select></label>
         <label>3. 对照对象<select v-model="form.objectType"><option value="">请选择已声明两端引用的对照表</option><option v-for="item in candidateCrosswalks" :key="item.id" :value="item.id">{{ item.label || item.id }} · {{ item.sourceSystems[0] }}</option></select></label>
       </div>
       <p v-if="relation && !joins.length" class="mapping-warning">尚无同方向的读取步骤，请先在“关联查询与计算”配置或导入只读方案；不会自动创建查询。</p>

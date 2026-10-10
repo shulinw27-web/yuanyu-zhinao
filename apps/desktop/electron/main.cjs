@@ -10,6 +10,11 @@ const rendererEntry = path.resolve(__dirname, '..', 'dist', 'index.html');
 let mainWindow = null;
 let desktopExecutor = null;
 let endpointRuntime = null;
+const smokeMode = process.env.ZHINAO_ELECTRON_SMOKE === '1';
+if (smokeMode && process.env.YUANYU_ELECTRON_SMOKE_USER_DATA) {
+  if (!path.isAbsolute(process.env.YUANYU_ELECTRON_SMOKE_USER_DATA)) throw new Error('SMOKE_USER_DATA_MUST_BE_ABSOLUTE');
+  app.setPath('userData', process.env.YUANYU_ELECTRON_SMOKE_USER_DATA);
+}
 
 const resolveApiBaseUrl = () => {
   const fallback = 'http://127.0.0.1:3001/api';
@@ -128,7 +133,7 @@ function createWindow() {
     openExternal(url);
   });
   mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault());
-  mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.once('ready-to-show', () => { if (!smokeMode) mainWindow?.show(); });
   mainWindow.on('closed', () => { mainWindow = null; });
 
   if (isDevelopment) {
@@ -139,8 +144,10 @@ function createWindow() {
 
   if (process.env.ZHINAO_ELECTRON_SMOKE === '1') {
     mainWindow.webContents.once('did-finish-load', async () => {
-      const result = await mainWindow.webContents.executeJavaScript('({ title: document.title, mounted: Boolean(document.querySelector(".agent-workbench")) })');
+      const result = await mainWindow.webContents.executeJavaScript('({ title: document.title, mounted: Boolean(document.querySelector(".agent-workbench")), authRequired: Boolean(document.querySelector(".auth-screen")), runtime: window.zhinaoDesktop?.runtime || window.yuanyuDesktop?.runtime || null })');
       process.stdout.write(`ELECTRON_SMOKE_OK ${JSON.stringify(result)}\n`);
+      if (process.env.YUANYU_ELECTRON_SMOKE_USER_DATA) require('node:fs').writeFileSync(path.join(app.getPath('userData'), 'smoke-result.json'), JSON.stringify(result));
+      if (!result.mounted) process.exitCode = 1;
       setTimeout(() => app.quit(), 250);
     });
   }

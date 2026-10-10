@@ -8,6 +8,8 @@
 - [元域智脑客户端兼容与发布矩阵](CLIENT_COMPATIBILITY_MATRIX.md)
 - [本体建模改进与验收记录](ONTOLOGY_MODELING_ACCEPTANCE.md)
 - [Ontology Playground 融合实施与回归记录](ONTOLOGY_PLAYGROUND_IMPLEMENTATION_REPORT.md)
+- [Ontology融合当前状态与剩余项（优先阅读）](ONTOLOGY_FUSION_CURRENT_STATUS.md)
+- [Ontology增强验收：交换、团队视图、反向映射与性能](ONTOLOGY_ENHANCEMENT_ACCEPTANCE_2026-10-10.md)
 - [本体工作区深化补强：计划与阶段记录](ONTOLOGY_WORKSPACE_UPGRADE.md)
 - [钉钉 H5 接入测试报告](DINGTALK_ACCEPTANCE_2026-09-08.md)
 - [身份源适配回归报告](IDENTITY_PROVIDER_ACCEPTANCE_2026-09-08.md)

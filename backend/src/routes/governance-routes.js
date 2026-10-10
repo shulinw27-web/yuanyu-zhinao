@@ -20,11 +20,10 @@ import {
   controlSemanticInspectionSchedule,
   discoverSemanticSources,
   executeSemanticOperationsTask,
-  getSemanticOperationsTask,
+  semanticTaskWorkspace,
   getSemanticOperationsTaskTrace,
   issueSemanticOperationsTaskConfirmation,
   listSemanticOperationsSnapshots,
-  listSemanticOperationsTasks,
   listSemanticInspectionSchedules,
   listSemanticOperationsNotifications,
   readSemanticOperationsNotification,
@@ -270,8 +269,19 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
     }));
     return true;
   }
+  if (req.method === 'GET' && url.pathname === '/api/semantic-operations/reviewers') {
+    const result = await semanticTaskWorkspace.reviewers({ identityScope: agentIdentity });
+    send(res, result.error ? result.status : 200, result.error ? { message: result.error, code: result.code } : result); return true;
+  }
+  const reviewAssignmentMatch = url.pathname.match(/^\/api\/semantic-operations\/tasks\/([^/]+)\/review-assignment$/);
+  if (req.method === 'POST' && reviewAssignmentMatch) {
+    if (!selectActionRole('meta_model.draft.review')) { denyButton('meta_model.draft.review'); return true; }
+    if (!selectActionRole('meta_model.draft.save')) { denyButton('meta_model.draft.save'); return true; }
+    const result = await semanticTaskWorkspace.assign({ taskId: decodeURIComponent(reviewAssignmentMatch[1]), identityScope: agentIdentity, body: await readBody(req) });
+    send(res, result.error ? result.status : 200, result.error ? { message: result.error, code: result.code } : result); return true;
+  }
   if (req.method === 'GET' && url.pathname === '/api/semantic-operations/tasks') {
-    send(res, 200, { tasks: await listSemanticOperationsTasks({
+    send(res, 200, { tasks: await semanticTaskWorkspace.list({
       identityScope: agentIdentity,
       accessContext: effectiveAccess,
       status: url.searchParams.get('status') || '',
@@ -292,7 +302,7 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
   const semanticTaskTraceMatch = url.pathname.match(/^\/api\/semantic-operations\/tasks\/([^/]+)\/trace$/);
   const semanticTaskDetailMatch = url.pathname.match(/^\/api\/semantic-operations\/tasks\/([^/]+)$/);
   if (req.method === 'GET' && semanticTaskDetailMatch) {
-    const task = await getSemanticOperationsTask({ taskId: decodeURIComponent(semanticTaskDetailMatch[1]), identityScope: agentIdentity, accessContext: effectiveAccess });
+    const task = await semanticTaskWorkspace.get({ taskId: decodeURIComponent(semanticTaskDetailMatch[1]), identityScope: agentIdentity, accessContext: effectiveAccess });
     send(res, task ? 200 : 404, task ? { task } : { message: '未找到当前身份可见的元域智语任务。', code: 'SEMANTIC_TASK_NOT_FOUND' });
     return true;
   }
@@ -310,7 +320,7 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
   const semanticTaskConfirmationMatch = url.pathname.match(/^\/api\/semantic-operations\/tasks\/([^/]+)\/confirmation$/);
   if (req.method === 'POST' && semanticTaskConfirmationMatch) {
     const taskId = decodeURIComponent(semanticTaskConfirmationMatch[1]);
-    const task = await getSemanticOperationsTask({ taskId, identityScope: agentIdentity, accessContext: effectiveAccess });
+    const task = await semanticTaskWorkspace.get({ taskId, identityScope: agentIdentity, accessContext: effectiveAccess });
     if (!task) { send(res, 404, { message: '未找到属于当前身份的元域智语任务。', code: 'SEMANTIC_TASK_NOT_FOUND' }); return true; }
     const reviewRole = task.proposal ? selectActionRole(task.reviewPermission) : null;
     const actionRole = selectActionRole(task.requiredPermission);
@@ -329,7 +339,7 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
   const semanticTaskExecuteMatch = url.pathname.match(/^\/api\/semantic-operations\/tasks\/([^/]+)\/execute$/);
   if (req.method === 'POST' && semanticTaskExecuteMatch) {
     const taskId = decodeURIComponent(semanticTaskExecuteMatch[1]);
-    const task = await getSemanticOperationsTask({ taskId, identityScope: agentIdentity, accessContext: effectiveAccess });
+    const task = await semanticTaskWorkspace.get({ taskId, identityScope: agentIdentity, accessContext: effectiveAccess });
     if (!task) { send(res, 404, { message: '未找到属于当前身份的元域智语任务。', code: 'SEMANTIC_TASK_NOT_FOUND' }); return true; }
     const reviewRole = task.proposal ? selectActionRole(task.reviewPermission) : null;
     const actionRole = selectActionRole(task.requiredPermission);

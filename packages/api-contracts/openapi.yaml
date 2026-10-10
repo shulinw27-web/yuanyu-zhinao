@@ -21,6 +21,229 @@ tags:
   - { name: SemanticOperations, description: 独立元域智语任务、证据、巡检、通知与受控报告 }
   - { name: Platform, description: 平台运行状态与配置 }
 paths:
+  /semantic-operations/knowledge-library/material-reviews/reviewers:
+    get:
+      operationId: listMaterialReviewers
+      summary: 本租户当前有效的资料审核人员
+      description: 需当前页面、审核与保存权限；仅返回姓名和主体编号，不回退演示租户。
+      responses:
+        '200': { description: reviewers列表；候选资格不授予来源读取权限 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /semantic-operations/knowledge-library/material-reviews/{id}/assignment:
+    post:
+      operationId: assignMaterialReviewer
+      summary: 提交人或当前承办人显式指派、转派或退回审核池
+      description: 当前有效审核人员、独立来源复验、职责分离与CAS；记录、泛化站内通知和事件原子保存，不向外部平台发消息。
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirmed, expectedRevision, subjectId]
+              properties:
+                confirmed: { const: true }
+                expectedRevision: { type: integer, minimum: 1 }
+                subjectId: { type: [string, 'null'], maxLength: 128 }
+      responses:
+        '200': { description: 新修订及指派结果；不授予读取权限 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 修订、待审核状态或来源冲突 }
+  /semantic-operations/knowledge-library/material-reviews/history:
+    get:
+      operationId: listArchivedMaterialReviews
+      summary: 分页读取保留归档资料核对记录
+      description: 每窗口10条，逐读取者复验来源，来源无权或变化则省略，不返回原文缓存；归档不恢复来源或待审核状态。
+      parameters:
+        - { in: query, name: offset, schema: { type: integer, minimum: 0, maximum: 1000, default: 0 } }
+      responses:
+        '200': { description: 当前可读reviews、offset、hasMore }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /semantic-operations/knowledge-library/material-reviews/{id}/archive:
+    post:
+      operationId: archiveMaterialReview
+      summary: 原提交人保留归档终态记录并释放日常预算
+      description: 同时需要审核、保存及页面权限。事务转移记录与出箱事件，不删除；待审核不能归档，最多1000条保留归档，满额拒绝。来源已失效仍允许本人进行保留归档。
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirmed, expectedRevision]
+              properties:
+                confirmed: { const: true }
+                expectedRevision: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: archived、retained及新revision }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 当前主体无可归档记录 }
+        '409': { description: 修订变化或非终态 }
+        '413': { description: 1000条保留归档已满 }
+  /semantic-operations/knowledge-library/material-reviews:
+    get:
+      operationId: listSharedMaterialReviews
+      summary: 按当前人员独立来源授权列出资料协作核对
+      description: 需语义端页面和草稿审核权限。每窗口最多10项，无权或来源失效的记录连标题也不返回；不返回全库数量。
+      parameters:
+        - { in: query, name: offset, schema: { type: integer, minimum: 0, maximum: 100, default: 0 } }
+      responses:
+        '200': { description: reviews、offset、hasMore、windowSize }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: submitSharedMaterialReview
+      summary: 显式提交最多3项授权企业资料供独立审核
+      description: 同时需要当前页面、审核及保存权限；仅WeKnora来源指针，个人知识库不允许共享。最多100条保留记录，不复制原文，不授予读取权限或发布规则。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirmed, citations]
+              properties:
+                confirmed: { const: true }
+                citations:
+                  type: array
+                  minItems: 1
+                  maxItems: 3
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [provider, knowledgeBaseId, documentId, chunkId, revision, location]
+                    properties:
+                      provider: { const: weknora_local }
+                      knowledgeBaseId: { type: string, maxLength: 100 }
+                      documentId: { type: string, maxLength: 100 }
+                      chunkId: { type: string, maxLength: 100 }
+                      revision: { type: string, pattern: '^[a-f0-9]{64}$' }
+                      location: { const: provider_chunk_not_pdf_coordinates }
+      responses:
+        '200': { description: 未发布且不授权的review摘要 }
+        '400': { description: 输入无效或来源不是允许的企业指针 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 来源变化或已有待核对记录 }
+        '413': { description: 证据或记录预算超限 }
+  /semantic-operations/knowledge-library/material-reviews/{id}:
+    get:
+      operationId: readSharedMaterialReview
+      summary: 独立复验来源并读取审核资料原文
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: review及当前允许读取的sources，不缓存原文 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 当前租户无此记录 }
+        '409': { description: 来源版本或审核修订变化 }
+  /semantic-operations/knowledge-library/material-reviews/{id}/decision:
+    post:
+      operationId: decideSharedMaterialReview
+      summary: 非提交人核对通过或退回，提交人撤回待核对记录
+      description: 需当前页面、审核及保存权限；按修订号提交。通过不是规则发布、上游权限授予或业务执行。来源不可读后本人仍可撤回待核对记录。
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirmed, expectedRevision, decision]
+              properties:
+                confirmed: { const: true }
+                expectedRevision: { type: integer, minimum: 1 }
+                decision: { enum: [approved, rejected, withdrawn] }
+                note: { type: string, maxLength: 1000, description: 人工核对意见，可选；按当前来源授权读取，不复制到事件或变成模型指令 }
+      responses:
+        '200': { description: 新修订和状态，published与grantsAuthority恒为false }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 非待审核状态、修订冲突或来源失效 }
+  /semantic-operations/reviewers:
+    get:
+      operationId: listSemanticModelReviewers
+      summary: 获取本租户当前有效的模型审核人员（仅姓名与主体编号）
+      description: 必须具备语义端页面、草稿保存及模型审核权限；从当前租户IAM解析，不回退演示人员。
+      responses:
+        '200':
+          description: reviewers列表及当前actorSubjectId，不含账号、联系方式或授权明细。
+        '403':
+          description: 无当前审核权限或租户上下文不一致。
+  /semantic-operations/knowledge-library/team-model-views/history:
+    get:
+      operationId: listTeamOntologyViewHistory
+      summary: 分页读取已撤回与归档团队视图元信息
+      description: 仅同租户当前审核权限人员可读，不返回布局、个人视图编号或主体键。
+      parameters:
+        - { in: query, name: offset, schema: { type: integer, minimum: 0, maximum: 1100, default: 0 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        '200': { description: views、total、offset、limit }
+        '400': { description: 分页输入无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /semantic-operations/knowledge-library/team-model-views/{id}/archive:
+    post:
+      operationId: archiveTeamOntologyView
+      summary: 原分享人归档已撤回的团队布局
+      description: 需当前审核与草稿保存权限，按修订号在事务中转移到归档区，保留历史而非删除，释放日常100条记录预算。归档区最多1000条，不能恢复已撤回布局。
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedRevision]
+              properties:
+                expectedRevision: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: archived、revision与retained标记 }
+        '400': { description: 参数无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 无本人未归档视图 }
+        '409': { description: 修订冲突或尚未撤回 }
+        '413': { description: 归档预算超限 }
+  /semantic-operations/tasks/{id}/review-assignment:
+    post:
+      operationId: assignSemanticModelReview
+      summary: 指派、转派或退回语义模型审核池
+      description: 仅待确认模型任务可操作。首次由有权限审核人指派；后续由承办人或有审核权限的创建人操作。事务更新指派和定向提醒，作废旧确认凭证，不采纳或发布，不授予权限。
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [subjectId, expectedRevision]
+              properties:
+                subjectId: { type: [string, 'null'], maxLength: 128, description: 当前有效IAM主体编号；null明确退回审核池 }
+                expectedRevision: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: 新assignment修订与confirmationInvalidated标记。
+        '400':
+          description: 非法输入。
+        '403':
+          description: 操作人或目标无当前权限。
+        '404':
+          description: 无本租户模型任务。
+        '409':
+          description: 修订、任务状态冲突或重复指派。
   /integrations/workflows/webhooks/{providerId}:
     post:
       tags: [SemanticOperations]
@@ -395,6 +618,76 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: 私有范围内无该视图 }
         '409': { description: 模型已变化，不能恢复旧布局 }
+  /semantic-operations/knowledge-library/model-views/{id}/share:
+    post:
+      tags: [SemanticOperations]
+      operationId: shareOntologyViewWithReviewers
+      description: 需草稿保存及审核权限；将本人本角色的已保存布局复制为同租户审核人员可读快照，不共享私有资料或授予权限。最多20个有效、100条含撤回记录。
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedRevision, modelFingerprint]
+              properties:
+                expectedRevision: { type: integer, minimum: 1 }
+                modelFingerprint: { type: string, pattern: '^[a-f0-9]{24}$' }
+      responses:
+        '200': { description: 新团队快照元信息，不返回个人视图标识或主体键 }
+        '400': { description: 参数无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 私有范围无源视图 }
+        '409': { description: 模型变更、源修订冲突或重复分享 }
+        '413': { description: 团队视图预算超限 }
+  /semantic-operations/knowledge-library/team-model-views:
+    get:
+      tags: [SemanticOperations]
+      operationId: listTeamOntologyViews
+      description: 当前同租户审核人员可读的未撤回布局快照元信息，不返回坐标或资料。
+      responses:
+        '200': { description: 快照列表及当前模型指纹 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 响应期间模型变化 }
+  /semantic-operations/knowledge-library/team-model-views/{id}:
+    get:
+      tags: [SemanticOperations]
+      operationId: readTeamOntologyView
+      description: 需当前模型审核权限，读取前后复验权限、模型版本和撤回状态；只读，不携带知识原文。
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: 授权团队布局快照 }
+        '400': { description: 标识无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 当前租户无该快照或已撤回 }
+        '409': { description: 模型版本已变化 }
+  /semantic-operations/knowledge-library/team-model-views/{id}/retract:
+    post:
+      tags: [SemanticOperations]
+      operationId: retractTeamOntologyView
+      description: 需保存及审核权限，仅原分享主体和角色可按修订撤回快照，保留有界记录，不删除源个人视图。
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedRevision]
+              properties:
+                expectedRevision: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: 撤回结果及新修订 }
+        '400': { description: 参数无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 无本人本角色分享的快照 }
+        '409': { description: 修订冲突或重复撤回 }
   /semantic-operations/knowledge-library/model-links/{id}/retract:
     post:
       tags: [SemanticOperations]
@@ -1986,7 +2279,7 @@ components:
       properties:
         text: { type: string, maxLength: 4000 }
         parentTaskId: { type: string }
-        parentProposalRevision: { type: integer, minimum: 1, description: 自然语言修订当前候选时必需的版本比较值 }
+        parentProposalRevision: { type: integer, minimum: 1, description: 修订候选属性/字段、新增声明关系或撤回未映射新候选字段时必需；须指定parentTaskId。分号分隔最多8项明确修改整批保存一次，失败不写入，撤回须单独提交。新增关系不生成数据匹配，新增字段来源映射待确认，校验阻断时拒绝签发确认令牌 }
         workspaceContext:
           type: object
           additionalProperties: false

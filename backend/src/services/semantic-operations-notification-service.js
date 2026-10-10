@@ -11,9 +11,9 @@ const mutateIndex = (callback) => mutateSemanticGovernanceState(NAMESPACE, KEY, 
 
 // Pure construction/insertion lets other aggregates save their result and its
 // notification in the same repository transaction.
-export function buildSemanticOperationsNotification({ identityScope, severity = 'info', title, message, sourceType, sourceId, action = null, audiencePermissionId = null, createdAt = now() }) {
+export function buildSemanticOperationsNotification({ identityScope, severity = 'info', title, message, sourceType, sourceId, action = null, audiencePermissionId = null, audienceSubjectId = null, createdAt = now() }) {
   const owner = semanticOperationsPrincipalKey(identityScope);
-  return { id: `semantic-notice-${randomUUID()}`, owner, audience: audiencePermissionId ? { tenantId: identityScope?.tenantId || 'demo-enterprise', permissionId: audiencePermissionId } : null, severity, title: String(title || '元域智语提醒').slice(0, 120), message: String(message || '').slice(0, 800), sourceType: sourceType || 'system', sourceId: sourceId || null, action, createdAt, readAt: null };
+  return { id: `semantic-notice-${randomUUID()}`, owner, audience: audiencePermissionId ? { tenantId: identityScope?.tenantId || 'demo-enterprise', permissionId: audiencePermissionId, ...(audienceSubjectId ? { subjectId: audienceSubjectId } : {}) } : null, severity, title: String(title || '元域智语提醒').slice(0, 120), message: String(message || '').slice(0, 800), sourceType: sourceType || 'system', sourceId: sourceId || null, action, createdAt, readAt: null };
 }
 
 export function insertSemanticOperationsNotification(index, notification) {
@@ -36,7 +36,9 @@ export async function createSemanticOperationsNotification(input) {
 }
 
 const sameNotificationTenant = (item, identityScope) => item.audience?.tenantId === (identityScope?.tenantId || 'demo-enterprise');
-const canViewNotification = (item, identityScope, accessContext) => semanticOperationsOwnerMatches(item.owner, identityScope)
+const canViewNotification = (item, identityScope, accessContext) => item.audience?.subjectId
+  ? sameNotificationTenant(item, identityScope) && item.audience.subjectId === (accessContext?.subjectId || identityScope?.subjectId) && accessContext?.buttonPermissionIds?.includes(item.audience.permissionId)
+  : semanticOperationsOwnerMatches(item.owner, identityScope)
   || Boolean(sameNotificationTenant(item, identityScope) && item.audience?.permissionId
     && accessContext?.buttonPermissionIds?.includes(item.audience.permissionId));
 

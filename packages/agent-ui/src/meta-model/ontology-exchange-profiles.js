@@ -1,5 +1,6 @@
 import { DOMParser } from '@xmldom/xmldom';
 import { exportOntologySubset, importOntologySubset } from './ontology-exchange.js';
+import { exportOntologyTurtle, parseOntologyTurtle } from './ontology-turtle.js';
 
 const RDF = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
 const RDFS = 'http://www.w3.org/2000/01/rdf-schema#';
@@ -7,7 +8,7 @@ const OWL = 'http://www.w3.org/2002/07/owl#';
 const BASE = 'urn:yuanyu:ontology:';
 const identifier = value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(value);
 const escapeXML = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[character]);
-const fieldKeys = ['name', 'type', 'required', 'primaryKey', 'unit', 'enumValues', 'reference', 'referenceField', 'sourceField', 'mappingStatus', 'label', 'description'];
+const fieldKeys = ['name', 'type', 'required', 'primaryKey', 'unit', 'enum', 'enumValues', 'reference', 'referenceField', 'sourceField', 'mappingStatus', 'label', 'description'];
 function metadata(draft) {
   return draft.objectTypes.map(item => ({ id: item.id, businessDomain: item.businessDomain || '', sourceSystems: item.sourceSystems || [], source: typeof item.source === 'string' ? item.source : '', classification: item.classification || '', aliases: item.aliases || [], fieldDefinitions: (item.fieldDefinitions || []).map(field => Object.fromEntries(fieldKeys.filter(key => field[key] !== undefined).map(key => [key, field[key]]))) }));
 }
@@ -22,7 +23,8 @@ function applyMetadata(result, entries, mapping) {
     for (const field of entry.fieldDefinitions) {
       if (!field || !object.fields.includes(field.name) || Object.keys(field).some(key => !fieldKeys.includes(key)) || (field.reference && !result.objectTypes.some(item => item.id === field.reference)) || (field.referenceField && !result.objectTypes.find(item => item.id === field.reference)?.fields.includes(field.referenceField))) throw new Error('字段注解或引用不闭合。');
       for (const [key, value] of Object.entries(field)) {
-        if (['required', 'primaryKey'].includes(key) ? typeof value !== 'boolean' : key === 'enumValues' ? !Array.isArray(value) || value.length > 100 || value.some(item => typeof item !== 'string' || item.length > 200) : typeof value !== 'string' || value.length > 2000) throw new Error('字段注解类型或长度无效。');
+        if (value === null && ['unit', 'reference', 'referenceField', 'label', 'description'].includes(key)) continue;
+        if (['required', 'primaryKey'].includes(key) ? typeof value !== 'boolean' : ['enum', 'enumValues'].includes(key) ? !Array.isArray(value) || value.length > 100 || value.some(item => typeof item !== 'string' || item.length > 200) : typeof value !== 'string' || value.length > 2000) throw new Error('字段注解类型或长度无效。');
       }
     }
     for (const key of ['sourceSystems', 'aliases']) if (!Array.isArray(entry[key]) || entry[key].length > 100 || entry[key].some(value => typeof value !== 'string' || value.length > 100)) throw new Error('对象注解类型无效。');
@@ -42,9 +44,10 @@ export function exportOntologyProfile(draft, profile = 'neutral-jsonld') {
   if (profile === 'platform-package') return { profile, extension: 'json', text: JSON.stringify({ schemaVersion: 'yuanyu.ontology.package.v1', structure: subset.document, metadata: entries }, null, 2), losses: [...losses, '仅保留声明性系统/字段映射；关系键转换、时态规则和治理契约仍需另行核对。'] };
   const clean = entries.map(entry => ({ ...entry, sourceSystems: [], source: '', fieldDefinitions: entry.fieldDefinitions.map(field => Object.fromEntries(Object.entries(field).filter(([key]) => !['sourceField', 'mappingStatus'].includes(key)))) }));
   if (profile === 'neutral-jsonld') return { profile, extension: 'jsonld', text: JSON.stringify({ ...subset.document, 'yuanyu:metadata': clean }, null, 2), losses: [...losses, '中立交换不携带系统映射；外部工具可能忽略元域注解。'] };
+  if (profile === 'neutral-turtle') return { profile, extension: 'ttl', text: exportOntologyTurtle(draft, clean), losses: [...losses, 'Turtle仅支持命名类、对象关系及元域注解；不携带系统映射，不支持空白节点或OWL限制。'] };
   if (profile !== 'playground-rdfxml') throw new Error('不支持的交换配置。');
   const classes = draft.objectTypes.map(item => `<owl:Class rdf:about="${BASE}${item.id}"><rdfs:label>${escapeXML(item.label || item.id)}</rdfs:label><rdfs:comment>${escapeXML(item.description)}</rdfs:comment><yuanyu:key>${escapeXML(item.key)}</yuanyu:key><yuanyu:fields>${escapeXML(JSON.stringify(item.fields))}</yuanyu:fields><yuanyu:metadata>${escapeXML(JSON.stringify(clean.find(entry => entry.id === item.id)))}</yuanyu:metadata></owl:Class>`);
-  const relations = draft.relationshipTypes.map((item, index) => `<owl:ObjectProperty rdf:about="${BASE}relation_${index}"><rdfs:domain rdf:resource="${BASE}${item.from}"/><rdfs:range rdf:resource="${BASE}${item.to}"/><rdfs:label>${escapeXML(item.label || item.predicate)}</rdfs:label><yuanyu:predicate>${escapeXML(item.predicate)}</yuanyu:predicate><yuanyu:cardinality>${escapeXML(item.cardinality)}</yuanyu:cardinality></owl:ObjectProperty>`);
+  const relations = draft.relationshipTypes.map((item, index) => `<owl:ObjectProperty rdf:about="${BASE}relationship/${index}"><rdfs:domain rdf:resource="${BASE}${item.from}"/><rdfs:range rdf:resource="${BASE}${item.to}"/><rdfs:label>${escapeXML(item.label || item.predicate)}</rdfs:label><yuanyu:predicate>${escapeXML(item.predicate)}</yuanyu:predicate><yuanyu:cardinality>${escapeXML(item.cardinality)}</yuanyu:cardinality></owl:ObjectProperty>`);
   return { profile, extension: 'rdf', text: `<?xml version="1.0" encoding="UTF-8"?><rdf:RDF xmlns:rdf="${RDF}" xmlns:rdfs="${RDFS}" xmlns:owl="${OWL}" xmlns:yuanyu="${BASE}">${classes.join('')}${relations.join('')}</rdf:RDF>`, losses: [...losses, 'RDF/XML 使用标准类/关系及元域注解；Playground 特有编辑注解需人工转换，不保证任意工具无损导入。'] };
 }
 function readXML(text) {
@@ -79,7 +82,7 @@ function readXML(text) {
     if (node.namespaceURI === OWL && node.localName === 'ObjectProperty') {
       const from = identities.get(value(node, RDFS, 'domain')?.getAttributeNS(RDF, 'resource')); const to = identities.get(value(node, RDFS, 'range')?.getAttributeNS(RDF, 'resource'));
       const predicate = textValue(node, BASE, 'predicate') || node.getAttributeNS(RDF, 'about').split(/[#:/]/).at(-1);
-      graph.push({ '@id': `${BASE}relation_${graph.length}`, '@type': 'owl:ObjectProperty', 'rdfs:domain': { '@id': `${BASE}${from}` }, 'rdfs:range': { '@id': `${BASE}${to}` }, 'rdfs:label': textValue(node, RDFS, 'label') || predicate, 'yuanyu:predicate': predicate, 'yuanyu:cardinality': textValue(node, BASE, 'cardinality') });
+      graph.push({ '@id': `${BASE}relationship/${graph.length}`, '@type': 'owl:ObjectProperty', 'rdfs:domain': { '@id': `${BASE}${from}` }, 'rdfs:range': { '@id': `${BASE}${to}` }, 'rdfs:label': textValue(node, RDFS, 'label') || predicate, 'yuanyu:predicate': predicate, 'yuanyu:cardinality': textValue(node, BASE, 'cardinality') });
     } else if (!(node.namespaceURI === OWL && ['Class', 'DatatypeProperty'].includes(node.localName))) losses.push(`未支持的 RDF 节点：${node.nodeName}`);
     for (const child of Array.from(node.childNodes).filter(child => child.nodeType === 1)) if (![RDFS, BASE].includes(child.namespaceURI) || !['label', 'comment', 'domain', 'range', 'key', 'fields', 'metadata', 'predicate', 'cardinality'].includes(child.localName)) losses.push(`未支持注解：${child.nodeName}`);
   }
@@ -89,7 +92,12 @@ function readXML(text) {
 }
 export function importOntologyProfile(text) {
   if (typeof text !== 'string' || text.length > 240000) throw new Error('文件超过 240KB 或格式无效。');
-  if (text.trimStart().startsWith('<')) return readXML(text);
+  if (/^(?:<\?xml|<!DOCTYPE|<!--|<[^>\s]+\s[^>]*xmlns)/u.test(text.trimStart())) return readXML(text);
+  if (!/^[{[]/u.test(text.trimStart())) {
+    const parsed = parseOntologyTurtle(text);
+    const result = applyMetadata(importOntologySubset(JSON.stringify(parsed.document)), parsed.metadata, false);
+    return { ...result, profile: 'neutral-turtle', losses: [...result.losses, ...parsed.losses, '字段及业务域注解保留，系统映射、授权和执行能力不导入。'] };
+  }
   const doc = JSON.parse(text);
   if (doc['yuanyu:metadata']) {
     const { 'yuanyu:metadata': entries, ...structure } = doc;

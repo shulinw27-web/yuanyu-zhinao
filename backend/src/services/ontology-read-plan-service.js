@@ -213,7 +213,7 @@ export async function executeOntologyReadPlan({ draft, plan, target, roleId, sco
     if (clause.mapping) {
       const source = datasets[clause.dataset];
       const contract = ontologyMappingBinding(draft, object(draft, plan.datasets.find(item => item.id === clause.dataset).objectType), object(draft, ds.objectType), clause);
-      const rows = await fetchRows({ id: `${ds.id}:mapping`, objectType: contract.type.id }, { schemaVersion: 'ontology-query.v1', objectType: contract.type.id, fields: contract.type.fields, filter: { field: clause.mapping.fromField, values: query.filter.values }, limit: 100 });
+      const rows = await fetchRows({ id: `${ds.id}:mapping`, objectType: contract.type.id }, { schemaVersion: 'ontology-query.v1', objectType: contract.type.id, fields: contract.type.fields, filter: { field: contract.readFromField, values: query.filter.values }, limit: 100 });
       for (const row of rows) {
         const key = `${row.system}:${row.objectType}:${row.id}`; const old = extraRecords.get(key);
         if (old && fingerprint(old) !== fingerprint(row)) fail('READ_RECORD_CONFLICT');
@@ -228,7 +228,8 @@ export async function executeOntologyReadPlan({ draft, plan, target, roleId, sco
         const targets = datasets[ds.id].filter(record => record.payload[clause.field] === pair.target);
         if (!targets.length) fail('READ_MAPPING_TARGET_MISSING');
         for (const from of mapped.source.filter(record => record.payload[clause.sourceField] === pair.source)) for (const to of targets) {
-          mappingRuns.push({ from: JSON.stringify(['instance', from.system, from.objectType, from.id]), to: JSON.stringify(['instance', to.system, to.objectType, to.id]), predicate: mapped.contract.relation.predicate, fromType: from.objectType, toType: to.objectType, mappingVersion: mapped.contract.relation.keyMapping.version, asOf: clause.mapping.asOf });
+          const declaredFrom = mapped.contract.reverse ? to : from; const declaredTo = mapped.contract.reverse ? from : to;
+          mappingRuns.push({ from: JSON.stringify(['instance', declaredFrom.system, declaredFrom.objectType, declaredFrom.id]), to: JSON.stringify(['instance', declaredTo.system, declaredTo.objectType, declaredTo.id]), predicate: mapped.contract.relation.predicate, fromType: declaredFrom.objectType, toType: declaredTo.objectType, mappingVersion: mapped.contract.relation.keyMapping.version, asOf: clause.mapping.asOf });
           if (mappingRuns.length > 2000) fail('READ_MAPPING_PAIR_LIMIT');
         }
       }

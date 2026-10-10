@@ -12,7 +12,8 @@ const idFrom = value => {
 export function exportOntologySubset(draft) {
   const graph = draft.objectTypes.map(item => ({ '@id': iri(item.id), '@type': 'owl:Class', 'rdfs:label': item.label || item.id,
     'rdfs:comment': item.description || '', 'yuanyu:key': item.key, 'yuanyu:fields': item.fields || [] }));
-  graph.push(...draft.relationshipTypes.map((item, index) => ({ '@id': `${BASE}relation_${index}`, '@type': 'owl:ObjectProperty', 'rdfs:domain': ref(item.from), 'rdfs:range': ref(item.to), 'rdfs:label': item.label || item.predicate, 'yuanyu:predicate': item.predicate, 'yuanyu:cardinality': item.cardinality || '' })));
+  // A slash cannot occur in a legal object id, so relation IRIs never alias classes.
+  graph.push(...draft.relationshipTypes.map((item, index) => ({ '@id': `${BASE}relationship/${index}`, '@type': 'owl:ObjectProperty', 'rdfs:domain': ref(item.from), 'rdfs:range': ref(item.to), 'rdfs:label': item.label || item.predicate, 'yuanyu:predicate': item.predicate, 'yuanyu:cardinality': item.cardinality || '' })));
   return { document: { '@context': context, '@graph': graph }, losses: ['不导出系统映射、企业授权、读取方案、业务实例、时态规则及资料引用。', '基数作为元域注解保留，不声明实现 OWL 限制或推理。'] };
 }
 export function importOntologySubset(text) {

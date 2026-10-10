@@ -10,7 +10,7 @@
 export const DOMAIN_EXPORT_CEILING = {
   agent: 61,
   alerting: 8,
-  governance: 92,
+  governance: 91,
   // 2026-10-09 资料目录与模型依据关联独立成域；移走治理域6个目录接口。
   knowledge: 7,
   iam: 4,

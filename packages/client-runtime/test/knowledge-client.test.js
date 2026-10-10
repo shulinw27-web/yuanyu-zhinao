@@ -2,6 +2,57 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createKnowledgeClient } from '../src/index.js';
 
+test('material reviews use the semantic authenticated SDK, encoded ids and explicit confirmation/CAS', async () => {
+  const calls = []; const request = async (path, options = {}) => { calls.push({ path, ...options }); return {}; };
+  const client = createKnowledgeClient(request, 'semantic-operations');
+  await client.materialReviews(10); await client.materialReview('id/foreign');
+  await client.submitMaterialReview([{ provider: 'weknora_local' }]); await client.decideMaterialReview('id/foreign', 2, 'approved');
+  assert.ok(calls[0].path.endsWith('/material-reviews?offset=10'));
+  assert.ok(calls[1].path.endsWith('/material-reviews/id%2Fforeign'));
+  assert.deepEqual(JSON.parse(calls[2].body), { citations: [{ provider: 'weknora_local' }], confirmed: true });
+  assert.deepEqual(JSON.parse(calls[3].body), { expectedRevision: 2, decision: 'approved', confirmed: true });
+  assert.ok(calls.every(call => !call.headers));
+  const business = createKnowledgeClient(request, 'agent');
+  for (const name of ['materialReviews', 'materialReview', 'submitMaterialReview', 'decideMaterialReview']) assert.equal(business[name], undefined);
+});
+
+test('material archive SDK retains semantic-only identity requests and explicit confirmation', async () => {
+  const calls = []; const client = createKnowledgeClient(async (path, options = {}) => { calls.push({ path, ...options }); }, 'semantic-operations');
+  await client.materialReviewHistory(10); await client.archiveMaterialReview('review/id', 3);
+  assert.ok(calls[0].path.endsWith('/material-reviews/history?offset=10'));
+  assert.ok(calls[1].path.endsWith('/material-reviews/review%2Fid/archive'));
+  assert.deepEqual(JSON.parse(calls[1].body), { expectedRevision: 3, confirmed: true });
+  const business = createKnowledgeClient(() => {}, 'agent');
+  assert.equal(business.materialReviewHistory, undefined); assert.equal(business.archiveMaterialReview, undefined);
+});
+
+test('material assignment and explicit notes preserve semantic-only authentication and CAS', async () => {
+  const calls = []; const client = createKnowledgeClient(async (path, options = {}) => { calls.push({ path, ...options }); }, 'semantic-operations');
+  await client.materialReviewers(); await client.assignMaterialReview('review/id', 4, 'reviewer-one');
+  await client.assignMaterialReview('review/id', 5, null); await client.decideMaterialReview('review/id', 6, 'rejected', '请补充范围');
+  assert.ok(calls[0].path.endsWith('/material-reviews/reviewers'));
+  assert.ok(calls[1].path.endsWith('/material-reviews/review%2Fid/assignment'));
+  assert.deepEqual(JSON.parse(calls[1].body), { expectedRevision: 4, subjectId: 'reviewer-one', confirmed: true });
+  assert.deepEqual(JSON.parse(calls[2].body), { expectedRevision: 5, subjectId: null, confirmed: true });
+  assert.equal(JSON.parse(calls[3].body).note, '请补充范围');
+  assert.ok(calls.every(call => !call.headers));
+  const business = createKnowledgeClient(() => {}, 'agent');
+  assert.equal(business.assignMaterialReview, undefined); assert.equal(business.materialReviewers, undefined);
+});
+
+test('team views are semantic-only authenticated operations with encoded ids and revision-bound mutations', async () => {
+  const calls = []; const request = async (path, options = {}) => { calls.push({ path, ...options }); return {}; };
+  const client = createKnowledgeClient(request, 'semantic-operations');
+  await client.teamModelViews(); await client.teamModelView('../foreign');
+  await client.shareModelView('view', { expectedRevision: 2, modelFingerprint: 'fp' });
+  await client.retractTeamModelView('view', 1);
+  assert.equal(calls.length, 4); assert.ok(calls[1].path.endsWith('/team-model-views/..%2Fforeign'));
+  assert.equal(calls[2].method, 'POST'); assert.deepEqual(JSON.parse(calls[2].body), { expectedRevision: 2, modelFingerprint: 'fp' });
+  assert.deepEqual(JSON.parse(calls[3].body), { expectedRevision: 1 }); assert.ok(calls.every(call => !call.headers));
+  const business = createKnowledgeClient(request, 'agent');
+  for (const key of ['teamModelViews', 'teamModelView', 'shareModelView', 'retractTeamModelView']) assert.equal(business[key], undefined);
+});
+
 for (const surface of ['agent', 'semantic-operations']) {
   test(`knowledge SDK ${surface}: every operation uses the owning authenticated request`, async () => {
     const calls = [];
@@ -62,4 +113,13 @@ for (const surface of ['agent', 'semantic-operations']) {
 }
 test('knowledge SDK rejects unknown surfaces', () => {
   assert.throws(() => createKnowledgeClient(() => {}, '../admin'), TypeError);
+});
+
+test('team history and archive remain semantic-only and encode paging and revision parameters', async () => {
+  const calls = []; const client = createKnowledgeClient(async (path, options) => { calls.push({ path, options }); return {}; }, 'semantic-operations');
+  await client.teamModelHistory(20, 20); assert.ok(calls[0].path.endsWith('/team-model-views/history?offset=20&limit=20'));
+  await client.archiveTeamModelView('old/foreign', 2); assert.ok(calls[1].path.endsWith('/team-model-views/old%2Fforeign/archive'));
+  assert.deepEqual(JSON.parse(calls[1].options.body), { expectedRevision: 2 });
+  assert.equal(createKnowledgeClient(() => {}, 'agent').archiveTeamModelView, undefined);
+  assert.equal(createKnowledgeClient(() => {}, 'agent').teamModelHistory, undefined);
 });
