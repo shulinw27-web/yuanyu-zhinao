@@ -1,6 +1,7 @@
 // Explicit candidate edits only. Never infer keys, sources, mappings or authority.
 import { inspectCandidateFieldRemoval } from './semantic-field-removal.js';
 import { parseExplicitRelationshipAddition } from './semantic-relationship-edit-command.js';
+import { parseExplicitObjectAddition } from './semantic-object-edit-command.js';
 const propertyNames = '业务名称|业务域|业务说明|关系名称|关系基数|关系依据|字段说明|字段单位|字段类型|字段必填|字段枚举';
 const propertyPattern = new RegExp(`^(?:请)?(?:把|将)([“"])([^”"\\r\\n]{1,100})([”"])(?:的)?(${propertyNames})(?:修改为|改为|设置为)([“"])([^”"\\r\\n]{1,300})([”"])(?:[。！!])?$`, 'u');
 const typeAliases = { 文本: 'string', 字符串: 'string', 数值: 'number', 整数: 'integer', 布尔: 'boolean', 日期: 'date', 日期时间: 'datetime' };
@@ -14,7 +15,7 @@ export function isSemanticModelEditCommand(text) {
   return /^(?:请)?(?:把|将)[“"]/u.test(value) && new RegExp(`(?:${propertyNames})(?:修改为|改为|设置为)`, 'u').test(value)
     || /^(?:请)?(?:给|为)[“"]/u.test(value) && /(?:新增|添加)字段/u.test(value)
     || /^(?:请)?(?:撤回|删除)候选字段/u.test(value)
-    || /^(?:请)?新增关系/u.test(value);
+    || /^(?:请)?新增(?:关系|对象)/u.test(value);
 }
 
 function addExplicitField(text, proposal) {
@@ -64,6 +65,7 @@ export function parseSemanticModelEdit(text, proposal, baseline) {
 
 function parseSingleSemanticModelEdit(text, proposal, baseline) {
   const input = String(text).trim();
+  if (/^(?:请)?新增对象/u.test(input)) return parseExplicitObjectAddition(input, proposal);
   if (/^(?:请)?新增关系/u.test(input)) return parseExplicitRelationshipAddition(input, proposal);
   if (/^(?:请)?(?:撤回|删除)候选字段/u.test(input)) {
     const removal = /^(?:请)?(?:撤回|删除)候选字段([“"])([^”"\r\n]{1,100})([”"])[。！!]?$/u.exec(input);

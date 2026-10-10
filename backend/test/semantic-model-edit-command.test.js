@@ -19,6 +19,36 @@ test('batch edits stage ordered changes, preserve quoted semicolons and never mu
 });
 
 const relationCommand = (predicate = 'reserves', from = 'Stock', to = 'Stock') => `新增关系“${predicate}”，从“${from}”到“${to}”，名称“预留库存”，基数“一对多”，依据“测试制度定义；尚未验证实例”`;
+const objectCommand = '新增对象“Customer”，名称“客户”，主键“customer_id”，类型“文本”，业务域“销售”，字段“name”，字段类型“文本”';
+
+test('explicit object addition preserves input and leaves source and key mapping pending without grants', () => {
+  const proposal = fixture(); const before = structuredClone(proposal);
+  const result = parseSemanticModelEdit(objectCommand, proposal);
+  assert.ok(!result.error, result.error); assert.deepEqual(proposal, before);
+  const object = result.body.objectTypes.at(-1);
+  assert.equal(object.id, 'Customer'); assert.deepEqual(object.sourceSystems, ['UNASSIGNED']);
+  assert.equal(object.coreObject, object.id);
+  assert.equal(object.key, 'customer_id'); assert.equal(object.fieldDefinitions[0].mappingStatus, 'pending');
+  assert.equal(object.fieldDefinitions[0].sourceField, ''); assert.equal(object.fieldDefinitions[0].required, true);
+  assert.deepEqual(result.body.relationshipTypes, proposal.relationshipTypes); assert.equal(isSemanticModelEditCommand('新增对象'), true);
+});
+
+test('new objects support bounded batch field and relation additions, but invalid commands roll back the whole candidate', () => {
+  const proposal = fixture(); const before = structuredClone(proposal);
+  const result = parseSemanticModelEdit(`${objectCommand}；给“Customer”新增字段“phone”，类型“文本”；${relationCommand('belongsTo', 'Stock', 'Customer')}`, proposal);
+  assert.ok(!result.error, result.error); assert.equal(result.body.objectTypes.at(-1).fields.length, 3); assert.equal(result.body.relationshipTypes.at(-1).to, 'Customer');
+  const failed = parseSemanticModelEdit(`${objectCommand}；${objectCommand}`, proposal); assert.ok(failed.error); assert.equal(failed.body, undefined); assert.deepEqual(proposal, before);
+});
+
+test('object declarations reject conflicting names, unsafe identifiers, unsupported key types, extra authority and budgets', () => {
+  for (const text of [objectCommand.replace('Customer', 'Stock'), objectCommand.replace('客户', '库存'), objectCommand.replace('Customer', 'constructor'),
+    objectCommand.replace('customer_id', 'x.y'), objectCommand.replace('文本', '数值'), objectCommand.replace('Customer”', 'Customer"'), `${objectCommand}，发布模型`, `${objectCommand}，来源“ERP”`,
+    objectCommand.replace('Customer', 'A'.repeat(33)), objectCommand.replace('字段“name”', '字段“customer_id”'), objectCommand.replace('字段类型“文本”', '字段类型“执行脚本”'), objectCommand.split('，字段“')[0]]) {
+    assert.ok(parseSemanticModelEdit(text, fixture()).error, text);
+  }
+  const full = fixture(); full.objectTypes = Array.from({ length: 40 }, (_, i) => ({ ...full.objectTypes[0], id: `Object${i}`, label: `对象${i}` }));
+  assert.equal(parseSemanticModelEdit(objectCommand, full).code, 'SEMANTIC_EDIT_OBJECT_BUDGET');
+});
 
 test('explicit relationship additions declare structure only, support batch followup and preserve input', () => {
   const proposal = fixture(); const before = structuredClone(proposal);

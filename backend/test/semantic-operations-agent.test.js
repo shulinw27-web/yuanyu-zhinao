@@ -16,6 +16,31 @@ import { CANDIDATE_CATALOG, CANDIDATE_CATALOG_SIZE, listCatalogGaps, listUncover
 
 const identity = { tenantId: 'semantic-test', subjectId: 'architect-01', deviceId: 'device-01' };
 
+test('explicit object addition follows task identity/CAS, invalidates old confirmation and blocks unmapped adoption', async () => {
+  resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);
+  const role = getRole('executive'); const baseline = await getOAMetaModelDraft();
+  let task = await createSemanticOperationsTask({ body: { text: '建立供应商语义模型。', systemCodes: ['ERP'] }, role, identityScope: identity });
+  const token = await issueSemanticOperationsTaskConfirmation({ taskId: task.id, identityScope: identity });
+  const body = { text: '新增对象“Customer”，名称“客户”，主键“customer_id”，类型“文本”，业务域“销售”，字段“name”，字段类型“文本”', parentTaskId: task.id, parentProposalRevision: task.proposal.revision };
+  assert.equal((await createSemanticOperationsTask({ body: { text: body.text }, role, identityScope: identity })).code, 'SEMANTIC_EDIT_PROPOSAL_REQUIRED');
+  assert.equal((await createSemanticOperationsTask({ body, role, identityScope: { ...identity, subjectId: 'other' } })).code, 'SEMANTIC_PARENT_TASK_NOT_FOUND');
+  assert.equal((await createSemanticOperationsTask({ body, role, identityScope: { ...identity, tenantId: 'other-tenant' } })).code, 'SEMANTIC_PARENT_TASK_NOT_FOUND');
+  assert.equal((await createSemanticOperationsTask({ body: { ...body, parentProposalRevision: 0 }, role, identityScope: identity })).code, 'SEMANTIC_PROPOSAL_REVISION_CONFLICT');
+  task = await createSemanticOperationsTask({ body, role, identityScope: identity });
+  assert.ok(!task.error, task.error); assert.equal(task.proposal.revision, body.parentProposalRevision + 1);
+  const object = task.proposal.objectTypes.find(item => item.id === 'Customer');
+  assert.deepEqual(object.sourceSystems, ['UNASSIGNED']); assert.equal(object.fieldDefinitions[0].sourceField, '');
+  assert.equal(object.fieldDefinitions[0].mappingStatus, 'pending'); assert.equal(object.key, 'customer_id');
+  assert.equal((await executeSemanticOperationsTask({ taskId: task.id, role, identityScope: identity, confirmationToken: token.confirmationToken })).code, 'SEMANTIC_TASK_CONFIRMATION_INVALID');
+  const applied = await applySemanticOperationsProposal({ proposalId: task.proposal.id, role, identityScope: identity });
+  assert.ok(applied.error, 'unmapped new objects must not be adopted');
+  const current = await getOAMetaModelDraft();
+  assert.deepEqual(current.objectTypes, baseline.objectTypes);
+  assert.deepEqual(current.relationshipTypes, baseline.relationshipTypes);
+  assert.equal(current.fingerprint, baseline.fingerprint);
+  assert.equal((await listSemanticOperationsSnapshots({ identityScope: identity })).length, 0);
+});
+
 test('explicit relationship creation stays in the authorized candidate and does not infer joins or publish', async () => {
   resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);
   const role = getRole('executive'); const baseline = await getOAMetaModelDraft();
