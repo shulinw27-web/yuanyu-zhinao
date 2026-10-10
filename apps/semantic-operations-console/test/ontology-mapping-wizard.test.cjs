@@ -2,14 +2,16 @@ const test = require('node:test'); const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs'); const { resolve } = require('node:path');
 const { parse, compileScript, compileTemplate } = require('@vue/compiler-sfc'); const Vue = require('vue');
 const Wizard = require('../../../packages/agent-ui/src/meta-model/ontology-mapping-wizard.js');
+const MappingPaths = require('../../../packages/agent-ui/src/meta-model/ontology-mapping-paths.js');
 const { parseReadPlanImport } = require('@healthcare-ai/agent-ui/ontology-read-plan');
 const filename = resolve(__dirname, '../../../packages/agent-ui/src/meta-model/OntologyMappingWizard.vue');
 const { descriptor } = parse(readFileSync(filename, 'utf8'), { filename });
 const compiled = compileScript(descriptor, { id: 'mapping-wizard-regression' });
 assert.deepEqual(compileTemplate({ source: descriptor.template.content, filename, id: 'mapping-wizard-regression', compilerOptions: { bindingMetadata: compiled.bindings } }).errors, []);
 const executable = compiled.content.replace(/import\s*\{([^}]+)\}\s*from\s*['"]vue['"];?/gu, (_, names) => `const { ${names.replace(/\s+as\s+/gu, ': ')} } = Vue;`)
+  .replace(/import\s*\{([^}]+)\}\s*from\s*['"]\.\/ontology-mapping-paths\.js['"];?/u, (_, names) => `const { ${names} } = MappingPaths;`)
   .replace(/import\s*\{([^}]+)\}\s*from\s*['"]\.\/ontology-mapping-wizard\.js['"];?/u, (_, names) => `const { ${names} } = Wizard;`).replace('export default', 'return');
-const Component = new Function('Vue', 'Wizard', executable)(Vue, Wizard);
+const Component = new Function('Vue', 'Wizard', 'MappingPaths', executable)(Vue, Wizard, MappingPaths);
 const renderer = Vue.createRenderer({ createElement: () => ({}), createText: () => ({}), createComment: () => ({}), setText() {}, setElementText() {}, parentNode() {}, nextSibling() {}, patchProp() {}, insert() {}, remove() {} });
 function fixture() {
   const relation = { from: 'Material', to: 'Stock', predicate: 'stored' };
@@ -76,4 +78,14 @@ test('plan import rejects malformed mappings instead of displaying them as execu
   for (const mutate of [mapping => { mapping.objectType = 'https://example.com'; }, mapping => { mapping.asOf = '2026-02-30T00:00:00Z'; }, mapping => { mapping.script = 'arbitrary'; }, mapping => { delete mapping.statusField; }]) {
     const changed = structuredClone(candidate); mutate(changed.scenario.readPlans[0].datasets[1].where[0].mapping); assert.throws(() => parseReadPlanImport(changed));
   }
+});
+
+test('mapping discovery remains read-only even for read-only roles and model edits clear its evidence', async t => {
+  const ui = mount(t); const candidate = Wizard.proposeOntologyMapping(fixture().draft, fixture().selection).draft;
+  ui.props.draft = candidate; ui.props.canEdit = false; await Vue.nextTick();
+  Object.assign(ui.state.pathForm.value, { fromType: 'Material', toType: 'Stock', maxDepth: 3 }); await Vue.nextTick();
+  Object.assign(ui.state.pathForm.value, { fromField: 'id', toField: 'sku' }); await Vue.nextTick();
+  const before = JSON.stringify(candidate); ui.state.discover();
+  assert.equal(ui.state.pathResult.value.status, 'candidate'); assert.equal(ui.events.length, 0); assert.equal(JSON.stringify(candidate), before);
+  ui.props.draft.objectTypes[0].label = '模型已修订'; await Vue.nextTick(); assert.equal(ui.state.pathResult.value, null);
 });

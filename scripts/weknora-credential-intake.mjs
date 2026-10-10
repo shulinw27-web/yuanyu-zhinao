@@ -6,7 +6,9 @@ import { writeFile, lstat } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
-export async function startCredentialIntake({ save, binding, lifetimeMs = 300000 }) {
+export async function startCredentialIntake({ save, binding, lifetimeMs = 300000, listen = server => new Promise((resolve, reject) => {
+  server.once('error', reject); server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve(); });
+}) }) {
   const nonce = randomBytes(32).toString('hex');
   let used = false; let origin;
   const server = createServer(async (req, res) => {
@@ -16,6 +18,9 @@ export async function startCredentialIntake({ save, binding, lifetimeMs = 300000
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Security-Policy', "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
     const reply = (status, text) => { res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(text); };
+    // Test listener readiness can probe before the origin is initialized. No form,
+    // nonce or credential processing is available at this stage.
+    if (!origin) return reply(503, 'Not ready');
     if (req.headers.host !== new URL(origin).host || req.url !== `/${nonce}` || used) return reply(403, 'Unavailable');
     if (req.method === 'GET') return reply(200, '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>WeKnora 私有配置保存</title><h1>保存专用只读密钥</h1><p>仅写入仓库外的 weknora.local.json，不显示密钥，不覆盖已有文件。</p><form method="post" autocomplete="off"><label>专用 WeKnora Key <input name="key" type="password" autocomplete="off" required maxlength="4096"></label><button type="submit">确认保存到本机私有配置</button></form></html>');
     if (req.method !== 'POST' || req.headers.origin !== origin
@@ -39,7 +44,7 @@ export async function startCredentialIntake({ save, binding, lifetimeMs = 300000
     } catch { used = true; reply(500, 'Save failed; no credential details returned'); clearTimeout(timer); server.close(); }
   });
   server.requestTimeout = 15000; server.headersTimeout = 10000;
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listen(server);
   origin = `http://127.0.0.1:${server.address().port}`;
   const timer = setTimeout(() => { server.closeAllConnections(); server.close(); }, lifetimeMs);
   return { url: `${origin}/${nonce}`, close: () => { clearTimeout(timer); server.closeAllConnections(); server.close(); } };

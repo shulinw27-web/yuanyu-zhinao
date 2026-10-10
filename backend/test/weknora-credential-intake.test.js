@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startCredentialIntake } from '../../scripts/weknora-credential-intake.mjs';
+import { listenOnFetchableLoopback } from './http-fixture-port.js';
 
 test('WK setup: single-use local form enforces origin, shape and never echoes credentials', async () => {
   const saved = []; const binding = { principalKey: 'a'.repeat(64) };
-  const intake = await startCredentialIntake({ save: async value => saved.push(value), binding });
+  const intake = await startCredentialIntake({ save: async value => saved.push(value), binding, listen: listenOnFetchableLoopback });
   try {
     const page = await fetch(intake.url);
     assert.equal(page.headers.get('cache-control'), 'no-store');
@@ -24,7 +25,7 @@ test('WK setup: single-use local form enforces origin, shape and never echoes cr
 });
 
 test('WK setup: filesystem failure cannot expose the key or be retried against a partial file', async () => {
-  const intake = await startCredentialIntake({ binding: {}, save: async () => { throw new Error('synthetic-test-key'); } });
+  const intake = await startCredentialIntake({ binding: {}, save: async () => { throw new Error('synthetic-test-key'); }, listen: listenOnFetchableLoopback });
   try {
     const response = await fetch(intake.url, { method: 'POST', headers: { Origin: new URL(intake.url).origin,
       'Content-Type': 'application/x-www-form-urlencoded' }, body: 'key=synthetic-test-key' });
