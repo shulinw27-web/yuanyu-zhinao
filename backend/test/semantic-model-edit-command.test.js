@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { isSemanticModelEditCommand, parseSemanticModelEdit } from '../src/services/semantic-model-edit-command.js';
 import { inspectCandidateFieldRemoval } from '../src/services/semantic-field-removal.js';
 import { inspectCandidateObjectRemoval } from '../src/services/semantic-object-removal.js';
-import { collectSemanticObjectDependencies, isSemanticDependencyCommand, parseSemanticDependencyCommand } from '../src/services/semantic-object-dependencies.js';
+import { collectSemanticObjectDependencies, collectSemanticFieldDependencies, isSemanticDependencyCommand, parseSemanticDependencyCommand } from '../src/services/semantic-object-dependencies.js';
 import { inspectCandidateRelationshipRemoval } from '../src/services/semantic-relationship-removal.js';
 
 const fixture = () => ({ objectTypes: [{ id: 'Stock', label: '库存', key: 'id', fields: ['id', 'qty', 'status'], sourceSystems: ['WMS'], fieldDefinitions: [
@@ -23,6 +23,23 @@ test('batch edits stage ordered changes, preserve quoted semicolons and never mu
 
 const relationCommand = (predicate = 'reserves', from = 'Stock', to = 'Stock') => `新增关系“${predicate}”，从“${from}”到“${to}”，名称“预留库存”，基数“一对多”，依据“测试制度定义；尚未验证实例”`;
 const objectCommand = '新增对象“Customer”，名称“客户”，主键“customer_id”，类型“文本”，业务域“销售”，字段“name”，字段类型“文本”';
+
+test('field impact omits its own declaration, preserves referenced indices and detects governance rules', () => {
+  const model = parseSemanticModelEdit('给“Stock”新增字段“risk_score”，类型“number”', fixture()).body;
+  assert.equal(collectSemanticFieldDependencies([{ scope: 'candidate', model }], 'Stock', 'risk_score').total, 0);
+  model.policies = ['risk_score需审核']; model.objectTypes[0].fieldDefinitions[2].description = '根据Stock.risk_score核对状态';
+  const before = structuredClone(model); const report = collectSemanticFieldDependencies([{ scope: 'candidate', model }], 'Stock', 'risk_score');
+  assert.equal(report.total, 2); assert.deepEqual(report.dependencies.map(item => item.path), [['objectTypes', 0, 'fieldDefinitions', 2, 'description'], ['policies', 0]]);
+  assert.deepEqual(model, before); assert.ok(!JSON.stringify(report).includes('需审核'));
+  assert.deepEqual(parseSemanticDependencyCommand('检查字段删除影响“Stock.risk_score”'), { objectId: 'Stock', fieldName: 'risk_score' });
+  assert.equal(isSemanticDependencyCommand('检查字段变更影响'), true);
+  for (const text of ['检查字段删除影响“risk_score”', '检查字段删除影响“Stock.risk_score”；删除字段', '检查字段删除影响“Stock.risk_score"']) assert.ok(parseSemanticDependencyCommand(text).error);
+  const malformed = fixture(); malformed.objectTypes[0].fields = {};
+  assert.equal(collectSemanticFieldDependencies([{ scope: 'candidate', model: malformed }], 'Stock', 'qty').code, 'SEMANTIC_DEPENDENCY_BUDGET');
+  const huge = fixture(); huge.objectTypes[0].fields = Array(20001).fill('qty');
+  const limited = collectSemanticFieldDependencies([{ scope: 'candidate', model: huge }], 'Stock', 'qty');
+  assert.equal(limited.complete, false); assert.deepEqual(limited.dependencies, []);
+});
 
 test('new declared relationship withdrawal restores the candidate without cascading or mutating input', () => {
   const baseline = fixture(); const added = parseSemanticModelEdit(relationCommand(), baseline).body; const before = structuredClone(added);
@@ -238,6 +255,7 @@ test('withdrawal only removes a newly added pending field without touching the b
 test('withdrawal blocks incoming references, mapped sources, read plans, governance mentions and excess budget', () => {
   const baseline = fixture(); const fresh = () => parseSemanticModelEdit('给“Stock”新增字段“risk_score”，类型“number”', baseline).body;
   for (const change of [
+    model => { model.policies = ['risk_score需经过审核']; },
     model => { model.objectTypes[0].fieldDefinitions[1].reference = 'Stock'; model.objectTypes[0].fieldDefinitions[1].referenceField = 'risk_score'; },
     model => { model.objectTypes[0].fieldDefinitions.at(-1).sourceField = 'risk_source'; },
     model => { model.scenario = { readPlans: [{ outputs: [{ expr: { field: 'risk_score' } }] }] }; },

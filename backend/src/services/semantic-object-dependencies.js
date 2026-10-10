@@ -33,9 +33,30 @@ export function collectSemanticObjectDependencies(models, object, { includeTarge
     boundary: '仅检查当前候选、草稿和原提案的配置引用/同名提及；不是外部系统依赖扫描或允许删除的证明。' };
 }
 
-export const isSemanticDependencyCommand = text => /^(?:请)?检查对象(?:删除|变更)影响/u.test(String(text).trim());
+export function collectSemanticFieldDependencies(models, objectId, fieldName) {
+  if (!Array.isArray(models) || !/^[A-Za-z][A-Za-z0-9_]{0,47}$/u.test(objectId || '') || !/^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(fieldName || '')) return { error: '字段依赖目标无效。', code: 'SEMANTIC_DEPENDENCY_TARGET_INVALID' };
+  // Preserve array indices in reported paths; omit only the declaration itself.
+  let filtered;
+  try {
+    let prepared = 0;
+    filtered = models.map(({ scope, model }) => ({ scope, model: model && { ...model, objectTypes: (model.objectTypes || []).map(item => {
+      if (++prepared > 20000) throw new Error('budget');
+      if (item.id !== objectId) return item;
+      prepared += (item.fields || []).length + (item.fieldDefinitions || []).length;
+      if (prepared > 20000) throw new Error('budget');
+      return { ...item, key: item.key === fieldName ? null : item.key,
+        fields: (item.fields || []).map(name => name === fieldName ? null : name),
+        fieldDefinitions: (item.fieldDefinitions || []).map(field => field.name === fieldName ? null : field) };
+    }) } }));
+  } catch { return { error: '字段依赖配置结构无效或超出处理预算。', code: 'SEMANTIC_DEPENDENCY_BUDGET', complete: false, dependencies: [] }; }
+  return collectSemanticObjectDependencies(filtered, { id: fieldName, label: `${objectId}.${fieldName}` }, { includeTargetObject: true });
+}
+
+export const isSemanticDependencyCommand = text => /^(?:请)?检查(?:对象|字段)(?:删除|变更)影响/u.test(String(text).trim());
 export function parseSemanticDependencyCommand(text) {
+  const field = /^(?:请)?检查字段(?:删除|变更)影响([“"])([A-Za-z][A-Za-z0-9_]{0,47})\.([A-Za-z][A-Za-z0-9_]{0,63})([”"])[。！!]?$/u.exec(String(text).trim());
+  if (field && field[4] === (field[1] === '“' ? '”' : '"')) return { objectId: field[2], fieldName: field[3] };
   const match = /^(?:请)?检查对象(?:删除|变更)影响([“"])([A-Za-z][A-Za-z0-9_]{0,47})([”"])[。！!]?$/u.exec(String(text).trim());
-  if (!match || match[3] !== (match[1] === '“' ? '”' : '"')) return { error: '请明确单个对象编码，例如：检查对象删除影响“Customer”。不接受混合执行指令。', code: 'SEMANTIC_DEPENDENCY_TARGET_INVALID' };
+  if (!match || match[3] !== (match[1] === '“' ? '”' : '"')) return { error: '请明确对象或字段编码，例如：检查对象删除影响“Customer”或检查字段删除影响“Customer.name”。不接受混合执行指令。', code: 'SEMANTIC_DEPENDENCY_TARGET_INVALID' };
   return { objectId: match[2] };
 }

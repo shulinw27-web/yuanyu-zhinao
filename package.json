@@ -9,6 +9,8 @@
     "apps/*"
   ],
   "scripts": {
+    "dev:docs": "node scripts/local-docs.mjs",
+    "test:docs-reader": "node --test backend/test/local-docs-reader.test.js",
     "dev:portal": "npm run dev -w @healthcare-ai/product-portal",
     "start:portal-api": "node scripts/product-portal-runtime.mjs --sandbox-payments",
     "portal:admin": "node scripts/product-portal-runtime.mjs --admin-email",
@@ -129,6 +131,7 @@
     "eslint": "^10.8.1",
     "eslint-plugin-vue": "^10.10.0",
     "globals": "^17.11.0",
+    "markdown-it": "^15.0.2",
     "typescript": "^5.9.3",
     "vue-tsc": "^3.3.11"
   }

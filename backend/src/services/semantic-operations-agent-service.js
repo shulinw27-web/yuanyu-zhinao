@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { inspectCandidateFieldRemoval } from './semantic-field-removal.js';
 import { inspectCandidateObjectRemoval } from './semantic-object-removal.js';
-import { collectSemanticObjectDependencies } from './semantic-object-dependencies.js';
+import { collectSemanticObjectDependencies, collectSemanticFieldDependencies } from './semantic-object-dependencies.js';
 import { hasButtonPermission } from './access-control-service.js';
 import { inspectCandidateRelationshipRemoval } from './semantic-relationship-removal.js';
 import { mutateSemanticGovernanceState, mutateSemanticGovernanceStates, readSemanticGovernanceState } from './semantic-governance-store.js';
@@ -701,7 +701,7 @@ function applySourceAssignmentsToDraft({ draft, originalDraft, previous = [], en
   return changed;
 }
 
-export function inspectSemanticOperationsObjectDependencies({ proposalId, revision, objectId, role, identityScope, accessContext }) {
+export function inspectSemanticOperationsObjectDependencies({ proposalId, revision, objectId, fieldName, role, identityScope, accessContext }) {
   assertSemanticTenant(identityScope);
   const canRead = permission => accessContext ? accessContext.buttonPermissionIds?.includes(permission) : hasButtonPermission(role?.id, permission);
   if (!canRead('meta_model.draft.save') && !canRead('meta_model.draft.review')) return { error: '当前角色不能读取模型依赖。', code: 'SEMANTIC_WORKSPACE_FORBIDDEN' };
@@ -710,10 +710,12 @@ export function inspectSemanticOperationsObjectDependencies({ proposalId, revisi
     if (Number(revision) !== (proposal.revision || 1)) return { error: '候选修订已变化，请刷新后检查。', code: 'SEMANTIC_PROPOSAL_REVISION_CONFLICT' };
     const objects = proposal.draft.objectTypes.filter(item => item.id === objectId);
     if (objects.length !== 1) return { error: '当前候选中没有唯一的目标对象。', code: 'SEMANTIC_DEPENDENCY_TARGET_INVALID' };
+    if (fieldName !== undefined && objects[0].fieldDefinitions?.filter(field => field.name === fieldName).length !== 1) return { error: '当前候选中没有唯一的目标字段。', code: 'SEMANTIC_DEPENDENCY_TARGET_INVALID' };
     return mapMaybe(getOAMetaModelDraft(), base => {
       const candidate = { ...proposal.draft, sourceAssignments: proposal.sourceAssignments, primaryKeyCorrections: proposal.primaryKeyCorrections, identityLinkConfirmations: proposal.identityLinkConfirmations };
-      const report = collectSemanticObjectDependencies([{ scope: 'candidate', model: candidate }, { scope: 'draft', model: base }, { scope: 'original', model: proposal.originalDraft || proposal.draft }], objects[0]);
-      return { ...report, objectId, proposalId, revision: proposal.revision || 1, draftFingerprint: base.fingerprint, readOnly: true };
+      const models = [{ scope: 'candidate', model: candidate }, { scope: 'draft', model: base }, { scope: 'original', model: proposal.originalDraft || proposal.draft }];
+      const report = fieldName === undefined ? collectSemanticObjectDependencies(models, objects[0]) : collectSemanticFieldDependencies(models, objectId, fieldName);
+      return { ...report, objectId, ...(fieldName === undefined ? {} : { fieldName }), proposalId, revision: proposal.revision || 1, draftFingerprint: base.fingerprint, readOnly: true };
     });
   });
 }
@@ -877,7 +879,7 @@ export function updateSemanticOperationsProposal({ proposalId, revision, objectT
   if (candidateFieldWithdrawal) {
     const target = candidateFieldWithdrawal;
     if (typeof target !== 'object' || Object.keys(target).some(key => !['objectId', 'fieldName'].includes(key)) || typeof target.objectId !== 'string' || typeof target.fieldName !== 'string') return { error: '候选字段撤回目标无效。', code: 'SEMANTIC_FIELD_REMOVAL_TARGET_INVALID' };
-    const inspected = inspectCandidateFieldRemoval(proposal.draft, base, target.objectId, target.fieldName);
+    const inspected = inspectCandidateFieldRemoval({ ...proposal.draft, sourceAssignments: proposal.sourceAssignments, primaryKeyCorrections: proposal.primaryKeyCorrections, identityLinkConfirmations: proposal.identityLinkConfirmations }, base, target.objectId, target.fieldName);
     if (!inspected.allowed) return inspected;
     if (merged.draft.objectTypes.find(item => item.id === target.objectId)?.fields.includes(target.fieldName)) return { error: '候选字段尚未从本次修订中移除。', code: 'SEMANTIC_FIELD_REMOVAL_TARGET_INVALID' };
   }

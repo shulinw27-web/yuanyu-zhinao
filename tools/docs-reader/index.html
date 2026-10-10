@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>元域 · 项目文档中心</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<header><a class="brand" href="#"><span class="logo">元</span><span>元域 <small>项目文档中心</small></span></a><span class="local">● 本地只读 · 文档实时读取</span><button id="refresh" type="button">刷新文档</button></header>
+<div class="layout">
+<aside class="sidebar"><div class="side-title">文档分类</div><nav id="categories" aria-label="文档分类"></nav><div class="side-footer">直接阅读 docs 原文件<br>不复制文档，不上传内容</div></aside>
+<main id="main"><section class="intro"><span class="eyebrow">YUANYU KNOWLEDGE DESK</span><h1 id="view-title">把项目看清楚，从这里开始。</h1><p id="view-description">按目的找文档，而不是在文件夹里找文件。</p></section>
+<div class="toolbar"><div class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="搜索标题、文件名或正文…" aria-label="搜索项目文档"><kbd>Ctrl K</kbd></div><label class="archive-toggle"><input id="archives" type="checkbox">包含历史归档</label><select id="sort" aria-label="文档排序"><option value="title">按标题排列</option><option value="updated">最近修改优先</option></select></div>
+<p id="notice" role="status" aria-live="polite"></p>
+<section id="library"><div id="featured" class="featured"></div><div class="list-heading"><h2 id="list-title">全部文档</h2><span id="count"></span></div><div id="documents" class="document-grid"></div></section>
+<section id="reader" hidden><div class="reader-toolbar"><button id="back" type="button">← 返回文档列表</button><span id="doc-meta"></span><a id="download">下载原文件 ↓</a></div><div class="reader-layout"><article id="article" class="prose"></article><aside class="toc"><h3>本页目录</h3><nav id="toc" aria-label="文档章节"></nav></aside></div></section>
+</main></div><script type="module" src="/app.js"></script></body></html>

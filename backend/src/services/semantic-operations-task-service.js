@@ -462,10 +462,10 @@ export async function createSemanticOperationsTask({ body, role, identityScope, 
     if (!hasCurrentPermission(role, accessContext, 'meta_model.draft.save') && !hasCurrentPermission(role, accessContext, 'meta_model.draft.review')) return { error: '当前角色不能读取模型依赖。', code: 'SEMANTIC_WORKSPACE_FORBIDDEN', status: 403 };
     const target = parseSemanticDependencyCommand(text);
     if (target.error) return { ...target, status: 422 };
-    const report = await inspectSemanticOperationsObjectDependencies({ proposalId: parent.proposal.id, revision: body.parentProposalRevision, objectId: target.objectId, role, identityScope, accessContext });
+    const report = await inspectSemanticOperationsObjectDependencies({ proposalId: parent.proposal.id, revision: body.parentProposalRevision, objectId: target.objectId, fieldName: target.fieldName, role, identityScope, accessContext });
     if (report.error) return { ...report, status: report.code === 'SEMANTIC_PROPOSAL_REVISION_CONFLICT' ? 409 : 422 };
     const locations = report.dependencies.slice(0, 20).map(item => `${item.scope} · ${item.path.map(part => String(part)).join('.')}`).join('\n');
-    const response = `${report.objectId} 的模型配置影响检查：共${report.total}处引用或同名提及。${report.total ? '\n' + locations : '本次范围未发现配置引用。'}${report.total > 20 ? '\n对话仅展示前20处，请核对完整配置。' : ''}\n依据：候选修订${report.revision}，草稿指纹${report.draftFingerprint}。${report.boundary}未修改候选、未删除业务记录、未授权发布。`;
+    const response = `${report.objectId}${report.fieldName ? '.' + report.fieldName : ''} 的模型配置影响检查：共${report.total}处引用或同名提及。${report.total ? '\n' + locations : '本次范围未发现配置引用。'}${report.total > 20 ? '\n对话仅展示前20处，请核对完整配置。' : ''}\n依据：候选修订${report.revision}，草稿指纹${report.draftFingerprint}。${report.boundary}未修改候选、未删除业务记录、未授权发布。`;
     await appendTaskMessage(parent.id, 'user', text);
     await appendTaskMessage(parent.id, 'assistant', response);
     return { ...await getSemanticOperationsTask({ taskId: parent.id, identityScope, accessContext }), dependencyAnalysis: report };

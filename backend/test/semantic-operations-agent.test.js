@@ -16,6 +16,28 @@ import { CANDIDATE_CATALOG, CANDIDATE_CATALOG_SIZE, listCatalogGaps, listUncover
 
 const identity = { tenantId: 'semantic-test', subjectId: 'architect-01', deviceId: 'device-01' };
 
+test('field checks and withdrawal both enforce private policies and preserve confirmation on read-only checks', async () => {
+  resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);
+  const role = getRole('executive'); const baseline = await getOAMetaModelDraft();
+  let task = await createSemanticOperationsTask({ body: { text: '建立供应商语义模型。', systemCodes: ['ERP'] }, role, identityScope: identity });
+  const edit = text => createSemanticOperationsTask({ body: { text, parentTaskId: task.id, parentProposalRevision: task.proposal.revision }, role, identityScope: identity });
+  task = await edit('给“Supplier”新增字段“risk_score”，类型“number”'); assert.ok(!task.error, task.error);
+  await issueSemanticOperationsTaskConfirmation({ taskId: task.id, identityScope: identity });
+  const before = await readSemanticGovernanceState('semantic_operations_agent_tasks', 'index');
+  await mutateSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${task.proposal.id}`, null, stored => { stored.draft.policies = ['risk_score须审核，不回传正文']; return { value: stored }; });
+  const report = await edit('检查字段删除影响“Supplier.risk_score”'); assert.ok(!report.error, report.error);
+  assert.equal(report.dependencyAnalysis.fieldName, 'risk_score'); assert.ok(report.dependencyAnalysis.dependencies.some(item => item.path.join('.') === 'policies.0'));
+  assert.ok(!JSON.stringify(report.dependencyAnalysis).includes('不回传正文')); assert.ok(report.messages.at(-1).content.includes('Supplier.risk_score'));
+  const after = await readSemanticGovernanceState('semantic_operations_agent_tasks', 'index'); assert.deepEqual(after[task.id].confirmation, before[task.id].confirmation);
+  assert.equal((await edit('撤回候选字段“Supplier.risk_score”')).code, 'SEMANTIC_FIELD_REMOVAL_DEPENDENCIES');
+  assert.equal((await edit('检查字段删除影响“Supplier.missing”')).code, 'SEMANTIC_DEPENDENCY_TARGET_INVALID');
+  const stored = await readSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${task.proposal.id}`); assert.equal(stored.revision, task.proposal.revision);
+  await mutateSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${task.proposal.id}`, null, current => { current.draft.policies = []; return { value: current }; });
+  task = await edit('撤回候选字段“Supplier.risk_score”'); assert.ok(!task.error, task.error);
+  assert.ok(!task.proposal.objectTypes[0].fields.includes('risk_score')); assert.equal((await getOAMetaModelDraft()).fingerprint, baseline.fingerprint);
+  assert.equal((await listSemanticOperationsSnapshots({ identityScope: identity })).length, 0);
+});
+
 test('mock model edit loop adds object and relationship, inspects impact, then explicitly withdraws in dependency order', async () => {
   resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);
   const role = getRole('executive'); const baseline = await getOAMetaModelDraft();
