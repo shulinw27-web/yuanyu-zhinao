@@ -3,6 +3,9 @@ import { mutateSemanticGovernanceState, mutateSemanticGovernanceStates, readSema
 import { semanticOperationsOwnerMatches, semanticOperationsPrincipalKey } from './semantic-operations-identity.js';
 import { buildSemanticOperationsNotification, insertSemanticOperationsNotification, SEMANTIC_NOTIFICATION_NAMESPACE } from './semantic-operations-notification-service.js';
 import { runWithTenantExecution } from './tenant-execution-context.js';
+import { currentSemanticModel, currentSemanticTenant, DEFAULT_SEMANTIC_MODEL_ID } from './semantic-tenant-context.js';
+import { assertCurrentSemanticModelAdmission, semanticModelReferenceMatches } from './semantic-model-reference.js';
+import { semanticModelRegistry } from './semantic-model-registry.js';
 
 const NAMESPACE = 'semantic_inspection_schedules';
 const KEY = 'index';
@@ -12,29 +15,40 @@ const readIndex = () => readSemanticGovernanceState(NAMESPACE, KEY, {});
 const mutateIndex = (callback) => mutateSemanticGovernanceState(NAMESPACE, KEY, {}, callback);
 const nextTime = (intervalMinutes, nowAt = Date.now()) => new Date(nowAt + intervalMinutes * 60_000).toISOString();
 const publicSchedule = schedule => { const { lease: _lease, ...safe } = structuredClone(schedule); return safe; };
-const ownsLease = (schedule, workerId, token, nowAt) => Boolean(schedule?.status === 'active' && token && schedule.lease?.token === token
+const ownsLease = (schedule, workerId, token, nowAt) => Boolean(semanticModelReferenceMatches(schedule) && schedule?.status === 'active' && token && schedule.lease?.token === token
   && schedule.lease.workerId === workerId && Date.parse(schedule.lease.expiresAt) > nowAt);
 
 export async function createSemanticInspectionSchedule({ body, role, identityScope }) {
+  if (currentSemanticModel() !== DEFAULT_SEMANTIC_MODEL_ID) {
+    try {
+      await assertCurrentSemanticModelAdmission();
+      if (role?.id !== 'executive' || identityScope?.tenantId !== currentSemanticTenant()) throw new Error('SEMANTIC_INSPECTION_WORKSPACE_FORBIDDEN');
+    } catch { return { error: '模型工作区未准入，未创建自动巡检。', code: 'SEMANTIC_MODEL_WORKER_UNBOUND' }; }
+    if (!Array.isArray(body?.checks) || body.checks.some(check => !['schema_integrity', 'mapping_coverage'].includes(check))) {
+      return { error: '独立模型当前仅支持结构完整性和映射覆盖检查，不扫描来源或部署。', code: 'SEMANTIC_MODEL_INSPECTION_CHECK_UNSUPPORTED' };
+    }
+  }
+  if (body?.modelId !== undefined && body.modelId !== currentSemanticModel()) return { error: '巡检模型引用与当前工作区不一致。', code: 'SEMANTIC_INSPECTION_MODEL_MISMATCH' };
   const checks = [...new Set(Array.isArray(body?.checks) ? body.checks.filter((item) => ALLOWED_CHECKS.has(item)) : [])];
   if (!checks.length) return { error: '请至少选择一项允许的只读语义检查。', code: 'SEMANTIC_INSPECTION_CHECK_REQUIRED' };
   const intervalMinutes = Math.max(15, Math.min(Number(body?.intervalMinutes) || 1440, 10080));
   const createdAt = now();
   const schedule = { id: `semantic-inspection-${randomUUID()}`, owner: semanticOperationsPrincipalKey(identityScope), roleId: role.id, identityScope: { tenantId: identityScope.tenantId, subjectId: identityScope.subjectId, deviceId: identityScope.deviceId || null, platform: identityScope.platform || null }, name: String(body?.name || '语义层日常只读巡检').slice(0, 100), checks, intervalMinutes, status: 'active', createdAt, updatedAt: createdAt, nextRunAt: body?.runNow === false ? nextTime(intervalMinutes) : createdAt, lastRun: null, lease: null };
+  schedule.modelId = currentSemanticModel();
   await mutateIndex((index) => { index[schedule.id] = schedule; return { value: index }; });
   return { schedule: publicSchedule(schedule) };
 }
 
 export async function listSemanticInspectionSchedules({ identityScope }) {
   const index = await readIndex();
-  return Object.values(index).filter((item) => semanticOperationsOwnerMatches(item.owner, identityScope)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(publicSchedule);
+  return Object.values(index).filter((item) => semanticModelReferenceMatches(item) && semanticOperationsOwnerMatches(item.owner, identityScope)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(publicSchedule);
 }
 
 export async function controlSemanticInspectionSchedule({ id, action, identityScope }) {
   if (!['pause', 'resume', 'cancel', 'run-now'].includes(action)) return { error: '不支持的巡检控制动作。', code: 'SEMANTIC_INSPECTION_ACTION_INVALID' };
   return mutateIndex((index) => {
     const schedule = index[id];
-    if (!schedule || !semanticOperationsOwnerMatches(schedule.owner, identityScope)) return { commit: false, result: { error: '未找到当前身份的巡检计划。', code: 'SEMANTIC_INSPECTION_NOT_FOUND' } };
+    if (!semanticModelReferenceMatches(schedule) || !semanticOperationsOwnerMatches(schedule.owner, identityScope)) return { commit: false, result: { error: '未找到当前身份的巡检计划。', code: 'SEMANTIC_INSPECTION_NOT_FOUND' } };
     if (schedule.status === 'cancelled' || (action === 'resume' && schedule.status !== 'paused')) return { commit: false, result: { error: '当前巡检状态不支持此操作；已取消计划需要重新创建。', code: 'SEMANTIC_INSPECTION_STATE_CONFLICT' } };
     if (action === 'cancel') schedule.status = 'cancelled';
     if (action === 'pause') schedule.status = 'paused';
@@ -49,7 +63,7 @@ export async function claimDueSemanticInspection({ workerId, leaseMs = 120000, n
   if (typeof workerId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,119}$/.test(workerId)) throw new TypeError('Invalid inspection worker ID.');
   const current = now(nowAt);
   return mutateIndex((index) => {
-    const schedule = Object.values(index).filter((item) => item.status === 'active' && item.nextRunAt <= current && (!item.lease || item.lease.expiresAt <= current)).sort((a, b) => a.nextRunAt.localeCompare(b.nextRunAt))[0];
+    const schedule = Object.values(index).filter((item) => semanticModelReferenceMatches(item) && item.status === 'active' && item.nextRunAt <= current && (!item.lease || item.lease.expiresAt <= current)).sort((a, b) => a.nextRunAt.localeCompare(b.nextRunAt))[0];
     if (!schedule) return { commit: false, result: null };
     schedule.lease = { workerId, token: randomUUID(), claimedAt: current, expiresAt: now(nowAt + Math.max(10000, Math.min(Number(leaseMs) || 120000, 300000))) }; schedule.updatedAt = current; index[schedule.id] = schedule;
     return { value: index, result: structuredClone(schedule) };
@@ -89,10 +103,37 @@ export async function runSemanticInspectionCycle({ workerId = `semantic-worker-$
     try { await completeSemanticInspection({ ...lease, result: await runWithTenantExecution({ identity: schedule.identityScope, roleId: schedule.roleId, feature: 'semantic', permission: 'page.semantic-operations.view' }, async () => {
       const current = (await readIndex())[schedule.id];
       if (!ownsLease(current, workerId, lease.leaseToken, Date.now())) throw new Error('SEMANTIC_INSPECTION_LEASE_MISMATCH');
-      return executeInspection(schedule);
+      await assertCurrentSemanticModelAdmission();
+      const result = await executeInspection(schedule);
+      await assertCurrentSemanticModelAdmission();
+      return result;
     }) }); }
     catch { await completeSemanticInspection({ ...lease, error: 'SEMANTIC_INSPECTION_FAILED' }); }
     count += 1;
   }
   return { processed: count };
+}
+
+// Internal server-selected workspaces only. No global tenant enumeration, implicit
+// default fallback, or model selection derived from a stored task/request body.
+export async function runRegisteredSemanticInspectionCycle({ role, identityScope, modelIds, workerId, executeInspection, maxRuns = 10 } = {}) {
+  const fail = code => ({ error: '模型巡检未完成，请检查工作区绑定与授权。', code });
+  if (currentSemanticModel() !== DEFAULT_SEMANTIC_MODEL_ID || !Array.isArray(modelIds) || !modelIds.length || modelIds.length > 32
+    || new Set(modelIds).size !== modelIds.length || modelIds.some(id => typeof id !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(id))
+    || !Number.isSafeInteger(maxRuns) || maxRuns < 1 || maxRuns > 100 || typeof executeInspection !== 'function') return fail('SEMANTIC_INSPECTION_BINDING_INVALID');
+  const bindings = [...modelIds];
+  const catalogue = await semanticModelRegistry.list({ role, identityScope });
+  if (catalogue.error) return fail(catalogue.code);
+  if (bindings.some(id => !catalogue.models.some(model => model.id === id && ['registered', 'legacy_workspace'].includes(model.lifecycle)))) return fail('MODEL_REGISTRY_NOT_FOUND');
+  let processed = 0;
+  const pending = [...bindings];
+  while (pending.length && processed < maxRuns) {
+    const modelId = pending.shift();
+    const result = await semanticModelRegistry.withWorkspace({ role, identityScope, modelId, work: () =>
+      runSemanticInspectionCycle({ workerId, executeInspection, maxRuns: 1 }) });
+    if (result.error) return { ...fail(result.code), processed };
+    processed += result.processed;
+    if (result.processed) pending.push(modelId);
+  }
+  return { processed, modelIds: bindings };
 }

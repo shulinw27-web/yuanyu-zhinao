@@ -21,6 +21,408 @@ tags:
   - { name: SemanticOperations, description: 独立元域智语任务、证据、巡检、通知与受控报告 }
   - { name: Platform, description: 平台运行状态与配置 }
 paths:
+  /semantic-operations/models/{modelId}/preview-requests/{requestId}/inspect-prepared:
+    post:
+      operationId: inspectPreparedPreview
+      x-button-permission: meta_model.draft.save
+      description: 明确确认原检查点/输入/草稿，当前IAM和实际材料/提案/来源/证据复验，只返回有效性摘要，不续交、签发或执行。POST不重试，不接受路径/身份覆盖。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string } }
+        - { in: path, name: requestId, required: true, schema: { type: string, format: uuid }, description: 仅小写UUIDv4 }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PreviewRecoveryRequest' } } }
+      responses:
+        '200': { description: modelId、taskId、checkpointFingerprint、referenceState=valid、contentReturned=false、executionEnabled=false }
+        '400': { description: 方法/查询/确认或请求无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 实际引用/检查点/权限/登记变化，不返回正文 }
+  /semantic-operations/models/{modelId}/preview-requests/{requestId}/resume:
+    post:
+      operationId: resumePreparedPreview
+      x-button-permission: meta_model.draft.save
+      description: 明确确认原检查点与草稿，实际引用/当前IAM复验后联合提交原任务/回执，原ID不变、不重新抽取，证据pending不允许确认或执行。失败不自动重试，可能taskMayHaveCommitted；受管门禁未扩大。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string } }
+        - { in: path, name: requestId, required: true, schema: { type: string, format: uuid }, description: 仅小写UUIDv4 }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PreviewRecoveryRequest' } } }
+      responses:
+        '200': { description: 原任务摘要/指纹，resumedFromCheckpoint=true、evidenceState=pending、confirmationEnabled=false、executionEnabled=false }
+        '400': { description: 方法/查询/确认或请求无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 引用/检查点/CAS/权限或重复续交拒绝，可能已经提交 }
+  /semantic-operations/models/{modelId}/preview-requests/{requestId}/recover-commit:
+    post:
+      operationId: recoverPreviewCommit
+      x-button-permission: meta_model.draft.save
+      description: 明确核对原请求/输入/检查点/草稿，读取实际committed回执和任务并复验引用，仅恢复原任务摘要/指纹，不重新提交、补证据或签发。不接受请求号/模型/身份覆盖，POST不自动重试。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string } }
+        - { in: path, name: requestId, required: true, schema: { type: string, format: uuid }, description: 仅小写UUIDv4 }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PreviewRecoveryRequest' } } }
+      responses:
+        '200': { description: 原任务摘要/指纹，recoveredCommit=true、原evidenceState、confirmationEnabled=false、executionEnabled=false }
+        '400': { description: 方法/查询/确认或请求无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 当前任务/请求/CAS/引用/权限不符，不返回旧内容 }
+  /semantic-operations/models/{modelId}/source-materials/inspect:
+    post:
+      operationId: inspectModelSources
+      x-button-permission: meta_model.draft.save
+      description: 检查明确来源的当前资料摘要，仅当前实际来源权限，不返回正文、不绑定或访问业务记录；不是提供方调用，POST不自动重试。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$' } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ModelSourceInspectionRequest' } } }
+      responses:
+        '200': { description: modelId、revision、systemCodes、sourceFingerprint、documentCount、runtimeReadEnabled=false }
+        '400': { description: 非POST或查询覆盖 }
+        '409': { description: 载荷、实际IAM/来源/资料/登记无效或变化；默认模型不开放绑定路径 }
+  /semantic-operations/models/{modelId}/source-materials/bind:
+    post:
+      operationId: bindModelSources
+      x-button-permission: meta_model.draft.save
+      description: 明确确认当前已获准来源的资料绑定，版本与资料SHA双CAS；仅本系统绑定，不授予来源权限、不读业务记录或写上游。不返回正文；失败可能bindingMayHaveCommitted，POST不自动重试，受管运行时门禁不扩大。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$' } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ModelSourceBindingRequest' } } }
+      responses:
+        '200': { description: 当前模型绑定的摘要和新revision，不返回资料正文 }
+        '400': { description: 非POST或查询覆盖 }
+        '409': { description: 未确认、载荷/CAS/来源/权限/登记无效或变化，可能bindingMayHaveCommitted }
+  /semantic-operations/models/{modelId}/structured-preview-tasks:
+    post:
+      operationId: createStructuredPreview
+      x-button-permission: meta_model.draft.save
+      summary: 从明确绑定的结构化材料生成候选预览
+      description: 独立模型、当前IAM与显式来源绑定；稳定请求号及草稿CAS，仅解析可识别Schema，不调用大模型理解/规划/非结构化抽取。不采纳、确认、执行或发布，ready只表示候选证据就绪。POST不自动重试，reserved无检查点不自动接管；受管租户unverified_runtime门禁未扩大。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$' } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/StructuredPreviewRequest' } } }
+      responses:
+        '201': { description: 新候选任务摘要、taskFingerprint、evidenceState、traceId及creationMode；executionEnabled=false、runtimeReadEnabled=false }
+        '200': { description: 实际回执与引用复验后的同任务复用，reused=true }
+        '400': { description: 方法/查询/请求无效或非独立建模诉求 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: IAM/登记/草稿/来源/请求/证据变化或准备仍待处理；可能taskMayHaveCommitted或preparationMayHaveCommitted }
+        '422': { description: 缺少可解析的结构化字段，不转入模型生成 }
+  /semantic-operations/models/{modelId}/tasks/{taskId}/preview-evidence-recover:
+    post:
+      operationId: recoverPreviewEvidence
+      x-button-permission: meta_model.draft.save
+      summary: 明确恢复原结构化候选任务的证据回执
+      description: 仅当前所有者/原角色、待确认且未签发的结构化预览任务，新鲜IAM与实际引用复验，确认完整任务指纹。pending恢复记录标注为当前观察，不重建缺失原链，不创建任务、不签发、不执行。POST失败不自动重试；受管租户unverified_runtime门禁不扩大。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$' } }
+        - { in: path, name: taskId, required: true, schema: { type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$' } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LocalTaskConfirmationRequest' } } }
+      responses:
+        '200': { description: modelId、taskId、evidenceState和traceId，confirmationTokenReturned=false、executionEnabled=false }
+        '400': { description: 非POST、查询覆盖、未确认或载荷非法 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 主体/模型/任务/版本/引用/原证据不符，可能taskMayHaveCommitted或evidencePending；不返回凭证 }
+  /semantic-operations/models/{modelId}/preview-requests/{requestId}:
+    get:
+      operationId: getPreviewRequestStatus
+      summary: 只读查询当前主体的结构化预览请求状态
+      x-button-permission: meta_model.draft.save
+      description: 需要新鲜管理层IAM、语义运营页面及草稿权限和模型登记。仅当前主体/原角色的状态与摘要，prepared/committed复验实际记录；无快照reserved阻塞，不自动重试、接管、准备或执行，不接受查询覆盖参数。商业受管租户仍受unverified_runtime门禁，状态不代表恢复或引用准入。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$' } }
+        - { in: path, name: requestId, required: true, schema: { type: string, pattern: '^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$' } }
+      responses:
+        '200':
+          description: 请求元数据，不返回准备正文或凭证
+          content: { application/json: { schema: { $ref: '#/components/schemas/PreviewRequestStatus' } } }
+        '400': { description: 非法请求号、查询参数或写方法 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 当前模型或主体的请求不存在，不分配占位 }
+        '409': { description: 当前登记/IAM失效、实际回执或检查点变化，不返回旧摘要 }
+  /semantic-operations/models/{modelId}/tasks:
+    get:
+      operationId: listScopedSemanticModelTaskMetadata
+      summary: 分页读取指定模型的当前可见任务摘要
+      description: 需当前管理层及语义运营页面权限；沿用任务所有者、同租户、审核指派及任务自身权限校验。仅任务元数据，不返回用户标题、请求/回复、消息、材料、提案全文或证据。无创建、确认、执行入口，不接受其他查询或模型/租户头选择。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$' } }
+        - { in: query, name: offset, schema: { type: integer, minimum: 0, maximum: 1000000, default: 0 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
+        - { in: query, name: includeArchived, schema: { type: boolean, default: false } }
+      responses:
+        '200': { description: 当前权限范围tasks、offset、limit、modelId；contentScope=task_metadata_only、runtimeReadEnabled=false，不返回总量 }
+        '400': { description: 非法或重复分页参数、其他选择字段或写方法 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 当前租户未登记模型 }
+        '409': { description: 等待期间IAM或模型登记失效，不返回任务摘要 }
+  /semantic-operations/models/{modelId}/tasks/{taskId}:
+    get:
+      operationId: getScopedSemanticModelTaskMetadata
+      summary: 读取指定模型内当前可见任务摘要
+      description: 管理层及语义运营页面权限不能替代任务权限。未知、跨模型、他人且无审核访问或任务权限已撤销均404；默认工作区不接收非默认模型任务引用。只返回泛化标题、状态、时间、所需权限、确认标记及可选提案编号/修订/状态，不返回对话或提案全文，不创建授权。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$' } }
+        - { in: path, name: taskId, required: true, schema: { type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$' } }
+      responses:
+        '200': { description: task摘要、modelId；contentScope=task_metadata_only、runtimeReadEnabled=false }
+        '400': { description: 不接受查询参数或写方法 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 模型或任务不存在，或当前任务访问不被允许 }
+        '409': { description: 等待期间IAM或模型登记失效 }
+  /semantic-operations/models/{modelId}/tasks/{taskId}/dialogue:
+    get:
+      operationId: getSemanticModelTaskDialogue
+      description: 仅任务所有者的限定对话读取；新鲜IAM、登记及任务/提案/材料/来源/交接/ready证据引用复验。审核权限不开放作者对话。不返回附件、来源发现、提案全文、凭证或证据正文。不创建、确认、执行或发布。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$' } }
+        - { in: path, name: taskId, required: true, schema: { type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$' } }
+      responses:
+        '200': { description: task摘要及messages（仅user/assistant角色、content和可选time），evidenceState；最多64条、每条8192字符、合计128KiB。contentScope=owner_dialogue_only，executionEnabled=false，runtimeReadEnabled=false }
+        '400': { description: 不接受查询参数或写方法 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 当前身份不可访问任务 }
+        '409': { description: IAM、模型登记或引用变化，拒绝返回对话 }
+        '413': { description: 对话超预算或格式不支持；不静默截断 }
+  /semantic-operations/models/{modelId}/local-validation-tasks:
+    post:
+      operationId: createLocalValidationTask
+      description: 仅本地结构校验任务；稳定请求号/草稿CAS，明确创建，不自动确认或执行，不调用大模型或源系统。满200条记录拒绝，不淘汰历史。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LocalValidationTaskRequest' } } }
+      responses:
+        '201': { description: 创建待确认任务，返回任务摘要、taskFingerprint、taskId及证据状态 }
+        '200': { description: 同请求复用原任务，不自动执行 }
+        '400': { description: 方法、查询或请求载荷无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 草稿/任务/权限/证据变化；保留taskMayHaveCommitted与evidencePending，不自动重试 }
+  /semantic-operations/models/{modelId}/tasks/{taskId}/local-confirm:
+    post:
+      operationId: confirmLocalValidationTask
+      description: 仅所有者的validate_model任务；明确确认、完整任务CAS、整链复验，证据完成后返回一次性凭证和新的taskFingerprint。不执行。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string } }
+        - { in: path, name: taskId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LocalTaskConfirmationRequest' } } }
+      responses:
+        '200': { description: 确认证据ready后返回confirmationToken、expiresAt及新taskFingerprint；executionEnabled=false }
+        '400': { description: 方法、查询或请求无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: CAS、权限、类型或证据失败；不返回凭证，可能已经签发 }
+  /semantic-operations/models/{modelId}/tasks/{taskId}/local-execute:
+    post:
+      operationId: executeLocalValidationTask
+      description: 只执行本地validate_model，不开放建模采纳、Python模拟、发布或源系统写入；明确执行、完整任务CAS、一次性凭证，前后IAM及引用复验。不重试POST。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string } }
+        - { in: path, name: taskId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LocalTaskExecutionRequest' } } }
+      responses:
+        '200': { description: 任务摘要及校验状态；不返回正文、凭证或租约 }
+        '400': { description: 方法、查询或请求无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 执行拒绝/失败，可能已消费凭证或本地写入；保留taskMayHaveCommitted/workspaceWriteMayHaveCommitted }
+  /semantic-operations/models/{modelId}/tasks/{taskId}/confirmation-evidence-recover:
+    post:
+      operationId: recoverLocalConfirmationEvidence
+      description: 明确恢复当前所有者validate_model任务的既有确认证据；不重签、执行或返回遗失凭证。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string } }
+        - { in: path, name: taskId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [confirmed], properties: { confirmed: { type: boolean, const: true } } } } }
+      responses:
+        '200': { description: confirmationEvidenceState=ready、confirmationTokenReturned=false、executionEnabled=false }
+        '400': { description: 请求无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 权限或引用失效，或证据仍未完成 }
+  /semantic-operations/models:
+    get:
+      operationId: listSemanticModelWorkspaces
+      summary: 读取当前租户已登记的模型工作区
+      description: 服务端身份绑定租户；需管理层角色及语义运营页面权限。只返回注册元数据，不启用业务读取，不接受查询参数或客户端租户选择。
+      responses:
+        '200': { description: revision、models和runtimeSelectionEnabled=false }
+        '400': { description: 不允许的查询或请求 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 等待期间权限变更或仓储不可用，不返回模型元数据 }
+    post:
+      operationId: registerSemanticModelWorkspace
+      summary: 按当前注册修订登记独立模型
+      x-button-permission: meta_model.draft.save
+      description: 需管理层角色、语义运营页面及保存权限；注册不复制草稿、不发布、不授予来源访问。注册与IAM不是跨仓储原子事务；409带registrationMayHaveCommitted=true时需重新授权后只读核验，不能自动重发。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id, label, expectedRevision]
+              properties:
+                id: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$', description: 不允许默认模型oa-governance }
+                label: { type: string, minLength: 2, maxLength: 80 }
+                description: { type: string, maxLength: 1000 }
+                expectedRevision: { type: integer, minimum: 0 }
+      responses:
+        '201': { description: 新revision、model和runtimeSelectionEnabled=false；runtimeBinding=not_bound }
+        '400': { description: 不合法字段或客户端身份选择 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 修订冲突、重复、容量限制或权限/存储变化；可能含registrationMayHaveCommitted=true }
+  /semantic-operations/models/{modelId}/draft:
+    parameters:
+      - { in: path, name: modelId, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$' } }
+    get:
+      operationId: getScopedSemanticModelDraft
+      summary: 读取当前租户已登记模型的草稿结构
+      description: 需管理层及语义运营页面权限，等待后复验IAM及模型登记。返回草稿结构，不读取上游数据，不持久化模型选择。
+      responses:
+        '200': { description: modelId、draft（含fingerprint）、selectionScope=request_only、runtimeReadEnabled=false }
+        '400': { description: 不接受查询选择 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 当前租户未登记该模型 }
+        '409': { description: 权限、模型登记或仓储变化 }
+    post:
+      operationId: saveScopedSemanticModelDraft
+      summary: 明确确认并按结构指纹CAS保存指定模型草稿及快照
+      x-button-permission: meta_model.draft.save
+      description: 需管理层、语义运营页面及保存权限。input为限定结构补丁，省略字段保留；不接受modelId/tenantId、worldModel或任意额外顶层字段。事务内比对结构指纹，结构变更时草稿及快照原子保存；不审批、发布或操作上游系统。写入后409带workspaceWriteMayHaveCommitted=true时需只读核验，不能自动重发。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirmed, expectedFingerprint, input]
+              properties:
+                confirmed: { const: true }
+                expectedFingerprint: { type: string, pattern: '^[a-f0-9]{24}$' }
+                input:
+                  type: object
+                  additionalProperties: false
+                  minProperties: 1
+                  properties:
+                    modelingProfile: { type: string }
+                    scenario: { type: object }
+                    stateMachines: { type: array, maxItems: 30, items: { type: object } }
+                    events: { type: array, maxItems: 100, items: { type: object } }
+                    objectTypes: { type: array, minItems: 1, maxItems: 40, items: { type: object } }
+                    relationshipTypes: { type: array, maxItems: 40, items: { type: object } }
+                    policies: { type: array, maxItems: 12, items: { type: string, minLength: 1, maxLength: 2000 } }
+                    metrics: { type: array, maxItems: 50, items: { type: object } }
+                    glossaryTerms: { type: array, maxItems: 100, items: { type: object } }
+                    dataContracts: { type: array, maxItems: 50, items: { type: object } }
+                    qualityRules: { type: array, maxItems: 100, items: { type: object } }
+                    accessPolicies: { type: array, maxItems: 100, items: { type: object } }
+                    lineageEdges: { type: array, maxItems: 100, items: { type: object } }
+      responses:
+        '200': { description: 保存结果及可选snapshot；不代表业务校验、审批或发布成功 }
+        '400': { description: 未明确确认、非法补丁或输入超限 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 当前租户未登记该模型 }
+        '409': { description: 草稿结构指纹冲突、权限/存储变化；可能含workspaceWriteMayHaveCommitted=true }
+  /semantic-operations/models/{modelId}/validate:
+    post:
+      operationId: validateScopedSemanticModelDraft
+      summary: 按草稿结构指纹校验指定模型
+      x-button-permission: meta_model.draft.validate
+      description: 需当前管理层及语义运营页面/校验权限；明确确认且事务内核对结构指纹。返回检查名称/状态，不返回材料、审计或检查正文。校验failed仍返回200，不代表可发布；不调用外部服务。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScopedModelAnalysisRequest' }
+      responses:
+        '200': { description: validation状态/检查摘要、modelId和sourceFingerprint；runtimeReadEnabled=false }
+        '400': { description: 非法请求、查询参数或确认缺失 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 当前租户未登记模型 }
+        '409': { description: 指纹冲突、权限或仓储变化；可能含workspaceWriteMayHaveCommitted=true }
+  /semantic-operations/models/{modelId}/simulate:
+    post:
+      operationId: simulateScopedSemanticModelDraft
+      summary: 按草稿结构指纹生成指定模型的本地合成模拟
+      x-button-permission: meta_model.simulate
+      description: 需当前管理层及语义运营页面/模拟权限；明确确认且事务内核对结构指纹。仅内置本地结构/合成回放，返回数量与状态，不返回实例原文、判断回放正文或完整模型。不调用Python、上游或大模型，不发布、不证明真实业务可用。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScopedModelAnalysisRequest' }
+      responses:
+        '200': { description: simulation合成状态/检查/数量、modelId及sourceFingerprint；verifiesLiveSystems=false、runtimeReadEnabled=false }
+        '400': { description: 非法请求、查询参数或确认缺失 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 当前租户未登记模型 }
+        '409': { description: 指纹冲突、权限或仓储变化；可能含workspaceWriteMayHaveCommitted=true }
+        '422': { description: 校验未通过，未保存新的模拟成功状态 }
+  /semantic-operations/models/{modelId}/publish:
+    post:
+      operationId: publishLocalSemanticModelWorkspace
+      summary: 明确确认后发布指定模型至固定认证本机实例
+      x-button-permission: meta_model.publish
+      description: 需当前管理层、语义运营页面和发布权限；仅服务端已启用的认证回环实例。载荷不能指定租户、角色、地址、凭据、版本或授权。发送前和登记前复验IAM、模型登记、确认指纹、执行锁及实例配置。未知结果只查询原版本，不重发；远端副作用不能因本地拒绝而自动撤回。仅定义发布，runtimeReadEnabled=false，不启用业务读取；禁止GET和查询参数，SDK POST不自动重试。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScopedModelAnalysisRequest' }
+      responses:
+        '200': { description: modelId、publication状态/版本/指纹；projectionScope=definition_only，runtimeReadEnabled=false；无模型全文、实例地址或凭据 }
+        '400': { description: 非法载荷、查询、缺少确认或默认工作区 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 当前租户未登记模型（配置有效时） }
+        '409': { description: 本机目标未配置、指纹/权限/执行状态冲突或结果不确定；publicationMayHaveCommitted=true表示需核验，不能自动重发 }
+  /semantic-operations/models/{modelId}/simulation:
+    get:
+      operationId: getScopedSemanticModelSimulation
+      summary: 读取指定模型保存的合成模拟摘要
+      description: 需当前管理层及语义运营页面权限；未模拟或保存新草稿后simulation=null。不触发构建，不启用业务读取；不接受查询参数。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$' } }
+      responses:
+        '200': { description: modelId、simulation摘要或null；runtimeReadEnabled=false }
+        '400': { description: 非法请求或查询参数 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 当前租户未登记模型 }
+        '409': { description: 权限、模型登记或仓储变化 }
+  /semantic-operations/models/{modelId}/workspace:
+    get:
+      operationId: inspectSemanticModelWorkspace
+      summary: 请求范围内读取指定已登记模型的工作区摘要
+      description: 需管理层角色及语义运营页面权限；只返回草稿数量/指纹、模拟状态及发布摘要。selectionScope=request_only；不持久化选择、不改变共享路由、不返回材料原文、不启用智脑业务读取。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$' } }
+      responses:
+        '200': { description: 模型摘要、可用inspect_workspace及仍禁用的操作列表 }
+        '400': { description: 不允许的查询参数 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 当前租户未登记该模型 }
+        '409': { description: 权限、登记状态或仓储变化，不返回摘要 }
   /semantic-operations/knowledge-library/material-reviews/reviewers:
     get:
       operationId: listMaterialReviewers
@@ -2018,6 +2420,89 @@ components:
       required: true
       schema: { type: string, minLength: 1 }
   schemas:
+    PreviewRecoveryRequest:
+      type: object
+      additionalProperties: false
+      required: [confirmed, inputFingerprint, expectedCheckpointFingerprint, expectedDraftFingerprint]
+      properties:
+        confirmed: { type: boolean, const: true }
+        inputFingerprint: { type: string, pattern: '^[a-f0-9]{64}$' }
+        expectedCheckpointFingerprint: { type: string, pattern: '^[a-f0-9]{64}$' }
+        expectedDraftFingerprint: { type: string, pattern: '^[a-f0-9]{24}$' }
+    ModelSourceInspectionRequest:
+      type: object
+      additionalProperties: false
+      required: [systemCodes]
+      properties:
+        systemCodes: { type: array, minItems: 1, maxItems: 16, uniqueItems: true, items: { type: string, pattern: '^[A-Z][A-Z0-9_-]{0,39}$' } }
+    ModelSourceBindingRequest:
+      type: object
+      additionalProperties: false
+      required: [systemCodes, confirmed, expectedRevision, expectedSourceFingerprint]
+      properties:
+        systemCodes: { type: array, minItems: 1, maxItems: 16, uniqueItems: true, items: { type: string, pattern: '^[A-Z][A-Z0-9_-]{0,39}$' } }
+        confirmed: { type: boolean, const: true }
+        expectedRevision: { type: integer, minimum: 0 }
+        expectedSourceFingerprint: { type: string, pattern: '^[a-f0-9]{64}$' }
+    StructuredPreviewRequest:
+      type: object
+      additionalProperties: false
+      required: [confirmed, requestId, text, systemCodes, expectedDraftFingerprint]
+      properties:
+        confirmed: { type: boolean, const: true }
+        requestId: { type: string, pattern: '^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$' }
+        text: { type: string, minLength: 1, maxLength: 4000 }
+        systemCodes: { type: array, minItems: 1, maxItems: 16, uniqueItems: true, items: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,15}$' } }
+        expectedDraftFingerprint: { type: string, pattern: '^[a-f0-9]{24}$' }
+        attachments: { type: array, maxItems: 8, items: { type: object }, description: 由现有材料解析/安全/大小门禁处理，不表示非结构化或图像模型能力 }
+    PreviewRequestStatus:
+      type: object
+      additionalProperties: false
+      required: [modelId, state, inputFingerprint, preparationAllowed, automaticRetryAllowed, automaticTakeoverAllowed, executionEnabled, contentReturned, runtimeReadEnabled]
+      properties:
+        modelId: { type: string }
+        state: { type: string, enum: [reserved, prepared, committed] }
+        inputFingerprint: { type: string, pattern: '^[a-f0-9]{64}$' }
+        checkpointFingerprint: { type: string, pattern: '^[a-f0-9]{64}$' }
+        taskId: { type: string }
+        blocker: { type: string, enum: [preparation_checkpoint_absent] }
+        preparationAllowed: { type: boolean, const: false }
+        automaticRetryAllowed: { type: boolean, const: false }
+        automaticTakeoverAllowed: { type: boolean, const: false }
+        executionEnabled: { type: boolean, const: false }
+        contentReturned: { type: boolean, const: false }
+        runtimeReadEnabled: { type: boolean, const: false }
+    LocalValidationTaskRequest:
+      type: object
+      additionalProperties: false
+      required: [confirmed, kind, requestId, expectedDraftFingerprint]
+      properties:
+        confirmed: { type: boolean, const: true }
+        kind: { type: string, const: validate_model }
+        requestId: { type: string, pattern: '^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$' }
+        expectedDraftFingerprint: { type: string, pattern: '^[a-f0-9]{24}$' }
+    LocalTaskConfirmationRequest:
+      type: object
+      additionalProperties: false
+      required: [confirmed, expectedTaskFingerprint]
+      properties:
+        confirmed: { type: boolean, const: true }
+        expectedTaskFingerprint: { type: string, pattern: '^[a-f0-9]{24}$' }
+    LocalTaskExecutionRequest:
+      type: object
+      additionalProperties: false
+      required: [confirmed, expectedTaskFingerprint, confirmationToken]
+      properties:
+        confirmed: { type: boolean, const: true }
+        expectedTaskFingerprint: { type: string, pattern: '^[a-f0-9]{24}$' }
+        confirmationToken: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+    ScopedModelAnalysisRequest:
+      type: object
+      additionalProperties: false
+      required: [confirmed, expectedFingerprint]
+      properties:
+        confirmed: { const: true }
+        expectedFingerprint: { type: string, pattern: '^[a-f0-9]{24}$' }
     AnomalySource:
       type: object
       additionalProperties: false

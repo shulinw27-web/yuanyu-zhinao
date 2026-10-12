@@ -56,6 +56,29 @@ export function createSemanticOperationsClient({ baseUrl, platform = 'semantic-w
     return payload;
   };
   const post = (path, body) => request(path, { method: 'POST', ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  const localTaskPath = (modelId, taskId, action) => {
+    if (typeof modelId !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId)
+      || typeof taskId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u.test(taskId)) throw new TypeError('Invalid model task selector.');
+    return `/semantic-operations/models/${encodeURIComponent(modelId)}/tasks/${encodeURIComponent(taskId)}/${action}`;
+  };
+  const localTaskBody = (body, keys) => body && typeof body === 'object' && !Array.isArray(body) && body.confirmed === true && Object.keys(body).every(key => keys.includes(key));
+  const previewRecoveryPath = (modelId, requestId, body, action) => {
+    if (typeof modelId !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId)
+      || typeof requestId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(requestId)
+      || !localTaskBody(body, ['confirmed', 'inputFingerprint', 'expectedCheckpointFingerprint', 'expectedDraftFingerprint'])
+      || typeof body.inputFingerprint !== 'string' || !/^[a-f0-9]{64}$/u.test(body.inputFingerprint)
+      || typeof body.expectedCheckpointFingerprint !== 'string' || !/^[a-f0-9]{64}$/u.test(body.expectedCheckpointFingerprint)
+      || typeof body.expectedDraftFingerprint !== 'string' || !/^[a-f0-9]{24}$/u.test(body.expectedDraftFingerprint)) throw new TypeError('Invalid preview recovery request.');
+    return `/semantic-operations/models/${encodeURIComponent(modelId)}/preview-requests/${encodeURIComponent(requestId)}/${action}`;
+  };
+  const modelSourcePath = (modelId, body, bind) => {
+    if (typeof modelId !== 'string' || modelId === 'oa-governance' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId)
+      || !body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !(bind ? ['systemCodes', 'confirmed', 'expectedRevision', 'expectedSourceFingerprint'] : ['systemCodes']).includes(key))
+      || !Array.isArray(body.systemCodes) || !body.systemCodes.length || body.systemCodes.length > 16 || new Set(body.systemCodes).size !== body.systemCodes.length
+      || body.systemCodes.some(code => typeof code !== 'string' || !/^[A-Z][A-Z0-9_-]{0,39}$/u.test(code))
+      || bind && (body.confirmed !== true || !Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 0 || typeof body.expectedSourceFingerprint !== 'string' || !/^[a-f0-9]{64}$/u.test(body.expectedSourceFingerprint))) throw new TypeError('Invalid model source binding request.');
+    return `/semantic-operations/models/${encodeURIComponent(modelId)}/source-materials/${bind ? 'bind' : 'inspect'}`;
+  };
 
   const applyUser = (result) => {
     roleId = result?.user?.roleId || result?.access?.primaryRoleId || roleId;
@@ -63,6 +86,32 @@ export function createSemanticOperationsClient({ baseUrl, platform = 'semantic-w
   };
 
   return {
+    inspectPreparedPreview: (modelId, requestId, body) => post(previewRecoveryPath(modelId, requestId, body, 'inspect-prepared'), body),
+    resumePreparedPreview: (modelId, requestId, body) => post(previewRecoveryPath(modelId, requestId, body, 'resume'), body),
+    recoverPreviewCommit: (modelId, requestId, body) => post(previewRecoveryPath(modelId, requestId, body, 'recover-commit'), body),
+    inspectModelSources: (modelId, body) => post(modelSourcePath(modelId, body, false), body),
+    bindModelSources: (modelId, body) => post(modelSourcePath(modelId, body, true), body),
+    createStructuredPreview: (modelId, body) => {
+      if (typeof modelId !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId)
+        || !localTaskBody(body, ['confirmed', 'requestId', 'text', 'systemCodes', 'attachments', 'expectedDraftFingerprint'])
+        || typeof body.requestId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(body.requestId)
+        || typeof body.text !== 'string' || !body.text.trim() || body.text.length > 4000
+        || typeof body.expectedDraftFingerprint !== 'string' || !/^[a-f0-9]{24}$/u.test(body.expectedDraftFingerprint)
+        || !Array.isArray(body.systemCodes) || !body.systemCodes.length || body.systemCodes.length > 16 || new Set(body.systemCodes).size !== body.systemCodes.length
+        || body.systemCodes.some(code => typeof code !== 'string' || !/^[A-Z][A-Z0-9_]{1,15}$/u.test(code))
+        || body.attachments !== undefined && (!Array.isArray(body.attachments) || body.attachments.length > 8 || body.attachments.some(item => !item || typeof item !== 'object' || Array.isArray(item)))) throw new TypeError('Invalid structured preview body.');
+      return post(`/semantic-operations/models/${encodeURIComponent(modelId)}/structured-preview-tasks`, body);
+    },
+    recoverPreviewEvidence: (modelId, taskId, body) => {
+      const path = localTaskPath(modelId, taskId, 'preview-evidence-recover');
+      if (!localTaskBody(body, ['confirmed', 'expectedTaskFingerprint']) || typeof body.expectedTaskFingerprint !== 'string' || !/^[a-f0-9]{24}$/u.test(body.expectedTaskFingerprint)) throw new TypeError('Invalid preview evidence recovery body.');
+      return post(path, body);
+    },
+    getPreviewRequestStatus: (modelId, requestId) => {
+      if (typeof modelId !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId)
+        || typeof requestId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(requestId)) throw new TypeError('Invalid preview request selector.');
+      return request(`/semantic-operations/models/${encodeURIComponent(modelId)}/preview-requests/${encodeURIComponent(requestId)}`);
+    },
     knowledge: createKnowledgeClient(request, 'semantic-operations'),
     get apiBaseUrl() { return apiBaseUrl; },
     get deviceId() { return deviceId; },
@@ -95,6 +144,79 @@ export function createSemanticOperationsClient({ baseUrl, platform = 'semantic-w
       return deviceSession;
     },
     effectiveAccess: () => request('/access/me'),
+    modelWorkspaces: () => request('/semantic-operations/models'),
+    createLocalValidationTask: (modelId, body) => {
+      if (typeof modelId !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId) || !localTaskBody(body, ['confirmed', 'kind', 'requestId', 'expectedDraftFingerprint'])
+        || body.kind !== 'validate_model' || typeof body.requestId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(body.requestId)
+        || typeof body.expectedDraftFingerprint !== 'string' || !/^[a-f0-9]{24}$/u.test(body.expectedDraftFingerprint)) throw new TypeError('Invalid local validation task request.');
+      return post(`/semantic-operations/models/${encodeURIComponent(modelId)}/local-validation-tasks`, body);
+    },
+    confirmLocalValidationTask: (modelId, taskId, body) => {
+      const path = localTaskPath(modelId, taskId, 'local-confirm');
+      if (!localTaskBody(body, ['confirmed', 'expectedTaskFingerprint']) || typeof body.expectedTaskFingerprint !== 'string' || !/^[a-f0-9]{24}$/u.test(body.expectedTaskFingerprint)) throw new TypeError('Invalid local confirmation request.');
+      return post(path, body);
+    },
+    executeLocalValidationTask: (modelId, taskId, body) => {
+      const path = localTaskPath(modelId, taskId, 'local-execute');
+      if (!localTaskBody(body, ['confirmed', 'expectedTaskFingerprint', 'confirmationToken']) || typeof body.expectedTaskFingerprint !== 'string' || !/^[a-f0-9]{24}$/u.test(body.expectedTaskFingerprint)
+        || typeof body.confirmationToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/u.test(body.confirmationToken)) throw new TypeError('Invalid local execution request.');
+      return post(path, body);
+    },
+    recoverLocalConfirmationEvidence: (modelId, taskId, body) => {
+      const path = localTaskPath(modelId, taskId, 'confirmation-evidence-recover');
+      if (!localTaskBody(body, ['confirmed'])) throw new TypeError('Invalid evidence recovery request.');
+      return post(path, body);
+    },
+    registerModelWorkspace: (payload) => post('/semantic-operations/models', payload),
+    inspectModelWorkspace: (modelId) => {
+      if (typeof modelId !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/.test(modelId)) throw new TypeError('Invalid model workspace ID.');
+      return request(`/semantic-operations/models/${encodeURIComponent(modelId)}/workspace`);
+    },
+    modelDraft: (modelId) => {
+      if (typeof modelId !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId)) throw new TypeError('Invalid modelId.');
+      return request(`/semantic-operations/models/${encodeURIComponent(modelId)}/draft`);
+    },
+    saveModelDraft: (modelId, payload) => {
+      if (typeof modelId !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId)) throw new TypeError('Invalid modelId.');
+      return post(`/semantic-operations/models/${encodeURIComponent(modelId)}/draft`, payload);
+    },
+    validateModelDraft: (modelId, payload) => {
+      if (typeof modelId !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId)) throw new TypeError('Invalid modelId.');
+      return post(`/semantic-operations/models/${encodeURIComponent(modelId)}/validate`, payload);
+    },
+    simulateModelDraft: (modelId, payload) => {
+      if (typeof modelId !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId)) throw new TypeError('Invalid modelId.');
+      return post(`/semantic-operations/models/${encodeURIComponent(modelId)}/simulate`, payload);
+    },
+    publishModelWorkspace: (modelId, payload) => {
+      if (typeof modelId !== 'string' || modelId === 'oa-governance' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId)) throw new TypeError('Invalid modelId.');
+      if (!payload || Array.isArray(payload) || Object.keys(payload).some(key => !['confirmed', 'expectedFingerprint'].includes(key))
+        || payload.confirmed !== true || typeof payload.expectedFingerprint !== 'string' || !/^[a-f0-9]{24}$/u.test(payload.expectedFingerprint)) throw new TypeError('Explicit current fingerprint confirmation required.');
+      return post(`/semantic-operations/models/${encodeURIComponent(modelId)}/publish`, payload);
+    },
+    modelSimulation: (modelId) => {
+      if (typeof modelId !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId)) throw new TypeError('Invalid modelId.');
+      return request(`/semantic-operations/models/${encodeURIComponent(modelId)}/simulation`);
+    },
+    modelTasks: (modelId, filters = {}) => {
+      if (typeof modelId !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId)) throw new TypeError('Invalid modelId.');
+      if (!filters || typeof filters !== 'object' || Array.isArray(filters) || Object.keys(filters).some(key => !['offset', 'limit', 'includeArchived'].includes(key))) throw new TypeError('Invalid model task filters.');
+      if (filters.offset !== undefined && (!Number.isSafeInteger(filters.offset) || filters.offset < 0 || filters.offset > 1000000)
+        || filters.limit !== undefined && (!Number.isSafeInteger(filters.limit) || filters.limit < 1 || filters.limit > 100)
+        || filters.includeArchived !== undefined && typeof filters.includeArchived !== 'boolean') throw new TypeError('Invalid model task pagination.');
+      const query = new URLSearchParams(Object.entries(filters).map(([key, value]) => [key, String(value)]));
+      return request(`/semantic-operations/models/${encodeURIComponent(modelId)}/tasks${query.size ? `?${query}` : ''}`);
+    },
+    modelTaskDialogue: (modelId, taskId) => {
+      if (typeof modelId !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId)
+        || typeof taskId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u.test(taskId)) throw new TypeError('Invalid model task selector.');
+      return request(`/semantic-operations/models/${encodeURIComponent(modelId)}/tasks/${encodeURIComponent(taskId)}/dialogue`);
+    },
+    modelTask: (modelId, taskId) => {
+      if (typeof modelId !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId)
+        || typeof taskId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u.test(taskId)) throw new TypeError('Invalid model task selector.');
+      return request(`/semantic-operations/models/${encodeURIComponent(modelId)}/tasks/${encodeURIComponent(taskId)}`);
+    },
     onboarding: () => request('/semantic-operations/onboarding'),
     createOnboardingProject: (payload) => post('/semantic-operations/onboarding', payload),
     onboardingProject: (id) => request(`/semantic-operations/onboarding/${encodeURIComponent(id)}`),

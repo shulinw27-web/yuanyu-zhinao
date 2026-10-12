@@ -4,21 +4,26 @@ import { evaluateMockAlignment, validateMockAlignment } from '../src/services/mo
 import { onboardingAlignment } from '../../examples/mock-onboarding/alignment.mjs';
 import { onboardingMaterials } from '../../examples/mock-onboarding/materials.mjs';
 import { createMockOnboardingProject, saveMockOnboardingMaterial, testMockOnboardingConnection, saveMockOnboardingAlignment, getMockOnboardingAlignment, getMockOnboardingProject, handoffMockOnboardingModel, getMockOnboardingCalculations, previewMockOnboardingCalculation } from '../src/services/mock-onboarding-service.js';
-import { getSemanticOperationsTask, issueSemanticOperationsTaskConfirmation, executeSemanticOperationsTask } from '../src/services/semantic-operations-task-service.js';
+import { getSemanticOperationsTask, getSemanticOperationsTaskTrace, issueSemanticOperationsTaskConfirmation, executeSemanticOperationsTask, semanticTaskStateFingerprint } from '../src/services/semantic-operations-task-service.js';
+import { configureAgentEvidenceTraceRepository } from '../src/services/agent-evidence-trace-service.js';
+import { asyncRuntimeStateRepository } from '../src/repositories/async-runtime-state-repository.js';
 import { applySemanticOperationsProposal } from '../src/services/semantic-operations-agent-service.js';
 import { getRole } from '../src/services/authorization-service.js';
 import { runWithSemanticTenant } from '../src/services/semantic-tenant-context.js';
 import { getOAMetaModelDraft, saveOAMetaModelDraft } from '../src/services/meta-model-service.js';
 import { semanticFingerprint } from '../src/services/semantic-model-fingerprint.js';
-import { resetRuntimeState, writeState, listState } from '../src/repositories/runtime-state-repository.js';
+import { resetRuntimeState, writeState, listState, deleteState } from '../src/repositories/runtime-state-repository.js';
 import { createInitialIAMWorkspace, iamWorkspaceKey } from '../src/services/iam-workspace-model.js';
 import { runWithIAMStoreContext } from '../src/services/iam-store.js';
 import { createMockOnboardingOntologyAdapter } from '../src/services/mock-onboarding-ontology-adapter.js';
 import { readMockOnboardingSource } from '../src/services/mock-onboarding-source-service.js';
 import { executeOntologyReadPlan } from '../src/services/ontology-read-plan-service.js';
 import { plan } from '../../examples/knowledge/dual-agent-mock/scenario.mjs';
+import { semanticModelRegistry } from '../src/services/semantic-model-registry.js';
+import { readSemanticGovernanceState, mutateSemanticGovernanceState, configureSemanticGovernanceRepository } from '../src/services/semantic-governance-store.js';
 import { expected, complexReplayCases } from '../../examples/knowledge/dual-agent-mock/expected.mjs';
 import { handleGovernanceRoutes } from '../src/routes/governance-routes.js';
+import { modelWorkspaces } from '../src/domains/governance/model-workspaces.js';
 
 const tenantId = 'mock-onboarding-a';
 const context = { identityScope: { tenantId, subjectId: 'alice' }, role: 'executive' };
@@ -46,6 +51,150 @@ async function handoffReady() {
 }
 const handoff = (project, extra) => inside(() => handoffMockOnboardingModel({ ...context, id: project.id, body: { expectedRevision: project.revision } }, extra));
 const draftFingerprint = () => inside(() => runWithSemanticTenant(context.identityScope, async () => semanticFingerprint(await getOAMetaModelDraft())));
+
+test('registered models hand off actual scoped projects atomically; confirmation adopts only that model', async () => {
+  resetRuntimeState(['semantic_model_registry']); await ready();
+  await inside(() => runWithSemanticTenant(context.identityScope, async () => {
+    const role = getRole('executive');
+    for (const [expectedRevision, modelId] of ['fulfillment-model', 'finance-model'].entries()) {
+      await semanticModelRegistry.register({ role, identityScope: context.identityScope, body: { id: modelId, label: modelId, expectedRevision } });
+      await semanticModelRegistry.withWorkspace({ role, identityScope: context.identityScope, modelId, work: async () => {
+        const project = await handoffReady(); assert.equal(project.modelId, modelId);
+        const before = await draftFingerprint(); const result = await handoff(project);
+        assert.equal(result.error, undefined, JSON.stringify(result)); assert.equal(result.project.modelId, modelId);
+        assert.equal(await draftFingerprint(), before);
+        const task = await getSemanticOperationsTask({ taskId: result.taskId, identityScope: context.identityScope });
+        assert.equal(task.modelId, modelId); assert.equal(task.proposal.modelId, modelId); assert.equal(task.status, 'waiting_confirmation');
+        const probe = () => modelWorkspaces.inspectTaskReferences({ modelId, identityScope: context.identityScope, taskId: task.id });
+        assert.equal((await probe()).referenceState, 'valid', JSON.stringify(await probe()));
+        const key = JSON.stringify(['principal-role-v1', tenantId, context.identityScope.subjectId, 'executive']);
+        const original = (await readSemanticGovernanceState('mock_onboarding_v1', key, {}))[project.id];
+        for (const patch of [{ modelId: 'foreign-model' }, { materialRevision: 0 }, { handoff: { ...original.handoff, taskId: 'wrong-task' } }, { owner: 'other' }]) {
+          await mutateSemanticGovernanceState('mock_onboarding_v1', key, {}, index => { index[project.id] = { ...original, ...patch }; return { value: index }; });
+          assert.equal((await probe()).code, 'MODEL_TASK_ONBOARDING_CHANGED');
+        }
+        await mutateSemanticGovernanceState('mock_onboarding_v1', key, {}, index => { index[project.id] = structuredClone(original); Object.values(index[project.id].materials)[0].text += '\n篡改'; return { value: index }; });
+        assert.equal((await probe()).code, 'MODEL_TASK_ONBOARDING_CHANGED');
+        await mutateSemanticGovernanceState('mock_onboarding_v1', key, {}, index => { index[project.id] = original; return { value: index }; });
+        assert.equal((await probe()).referenceState, 'valid');
+        let reads = 0;
+        configureSemanticGovernanceRepository({ ...asyncRuntimeStateRepository, async readState(...args) {
+          const value = await asyncRuntimeStateRepository.readState(...args);
+          if (args[0] === 'mock_onboarding_v1' && ++reads >= 2) value[project.id].handoff.taskId = 'changed-during-read';
+          return value;
+        } });
+        try { assert.equal((await probe()).code, 'MODEL_TASK_ONBOARDING_CHANGED'); }
+        finally { configureSemanticGovernanceRepository(null); }
+        const storedTask = (await readSemanticGovernanceState('semantic_operations_agent_tasks', 'index', {}))[task.id];
+        for (const patch of [{ key: 'foreign-key' }, { basisRevision: original.revision }, { fingerprint: '0'.repeat(64) }]) {
+          await mutateSemanticGovernanceState('semantic_operations_agent_tasks', 'index', {}, index => { index[task.id] = { ...storedTask, onboardingSource: { ...storedTask.onboardingSource, ...patch } }; return { value: index }; });
+          assert.equal((await probe()).code, 'MODEL_TASK_ONBOARDING_CHANGED');
+        }
+        await mutateSemanticGovernanceState('semantic_operations_agent_tasks', 'index', {}, index => { index[task.id] = storedTask; return { value: index }; });
+        const again = await handoff(result.project); assert.equal(again.reused, true); assert.equal(again.taskId, task.id);
+        const confirmationOptions = { modelId, taskId: task.id, identityScope: context.identityScope };
+        assert.equal((await modelWorkspaces.confirmTask({ ...confirmationOptions, body: { confirmed: false, expectedTaskFingerprint: '0'.repeat(24) } })).status, 400);
+        const staleConfirmation = await modelWorkspaces.confirmTask({ ...confirmationOptions, body: { confirmed: true, expectedTaskFingerprint: '0'.repeat(24) } });
+        assert.equal(staleConfirmation.code, 'SEMANTIC_TASK_CONFIRMATION_STATE_CHANGED');
+        assert.equal((await getSemanticOperationsTask({ taskId: task.id, identityScope: context.identityScope })).confirmation.state, 'not_issued');
+        const record = (await readSemanticGovernanceState('semantic_operations_agent_tasks', 'index', {}))[task.id];
+        const confirmation = await modelWorkspaces.confirmTask({ ...confirmationOptions, body: { confirmed: true, expectedTaskFingerprint: semanticTaskStateFingerprint(record) } });
+        assert.ok(confirmation.confirmationToken, JSON.stringify(confirmation));
+        assert.equal(confirmation.confirmationEvidenceState, 'ready');
+        const executed = await executeSemanticOperationsTask({ taskId: task.id, role, identityScope: context.identityScope, confirmationToken: confirmation.confirmationToken });
+        assert.equal(executed.task?.status, 'completed', JSON.stringify(executed));
+        assert.equal(executed.result.snapshot.modelId, modelId); assert.equal(executed.result.proposal.modelId, modelId);
+        assert.equal((await probe()).referenceState, 'valid');
+        const trace = await getSemanticOperationsTaskTrace({ taskId: task.id, identityScope: context.identityScope, accessContext: { roleIds: ['executive'], buttonPermissionIds: ['meta_model.draft.save', 'meta_model.draft.review'] } });
+        assert.equal(trace.integrity.valid, true); assert.equal(trace.status, 'completed'); assert.equal(trace.modelId, modelId);
+        assert.equal(trace.events.filter(event => event.type === 'onboarding_handoff').length, 1);
+        assert.equal(trace.events.filter(event => event.type === 'semantic_confirmation_issued').length, 1);
+        await mutateSemanticGovernanceState('semantic_operations_agent_tasks', 'index', {}, index => { delete index[task.id]; return { value: index }; });
+        assert.equal((await handoff(result.project)).code, 'MOCK_HANDOFF_REFERENCE_STALE');
+      } });
+    }
+    assert.equal((await getOAMetaModelDraft()).objectTypes.some(object => object.id === 'CustomerOrder'), false);
+  }));
+});
+
+test('committed handoff evidence reply loss recovers the same trace and task without duplicate events', async () => {
+  const project = await handoffReady(); let writes = 0;
+  configureAgentEvidenceTraceRepository({ ...asyncRuntimeStateRepository, async mutateState(...args) {
+    const result = await asyncRuntimeStateRepository.mutateState(...args);
+    if (args[0] === 'agent_evidence_traces' && ++writes === 2) throw new Error('Synthetic reply loss after evidence commit');
+    return result;
+  } });
+  let pending;
+  try { pending = await handoff(project); }
+  finally { configureAgentEvidenceTraceRepository(null); }
+  assert.equal(pending.code, 'SEMANTIC_HANDOFF_EVIDENCE_PENDING'); assert.equal(pending.taskMayHaveCommitted, true);
+  const pendingRequest = { taskId: pending.taskId, identityScope: context.identityScope };
+  assert.equal((await inside(() => runWithSemanticTenant(context.identityScope, () => issueSemanticOperationsTaskConfirmation(pendingRequest)))).code, 'SEMANTIC_TASK_EVIDENCE_PENDING');
+  assert.equal((await inside(() => runWithSemanticTenant(context.identityScope, () => executeSemanticOperationsTask({ ...pendingRequest, role: getRole('executive') })))).code, 'SEMANTIC_TASK_EVIDENCE_PENDING');
+  const latest = await inside(() => getMockOnboardingProject({ ...context, id: project.id }));
+  const recovered = await handoff(latest.project);
+  assert.equal(recovered.reused, true); assert.equal(recovered.taskId, pending.taskId); assert.equal(recovered.evidenceState, 'ready');
+  const trace = await inside(() => runWithSemanticTenant(context.identityScope, () => getSemanticOperationsTaskTrace({ taskId: recovered.taskId, identityScope: context.identityScope, accessContext: { roleIds: ['executive'], buttonPermissionIds: ['meta_model.draft.save', 'meta_model.draft.review'] } })));
+  assert.equal(trace.integrity.valid, true); assert.equal(trace.eventCount, 2);
+  assert.equal(trace.events.filter(event => event.type === 'onboarding_handoff').length, 1);
+  const again = await handoff(recovered.project); assert.equal(again.traceId, recovered.traceId);
+  assert.equal(Object.keys(listState('semantic_operations_agent_tasks')[0].value).length, 1);
+});
+
+test('legacy handoff without a trace receives an explicit backfill rather than invented execution history', async () => {
+  const result = await handoff(await handoffReady());
+  await inside(() => runWithSemanticTenant(context.identityScope, () => mutateSemanticGovernanceState('semantic_operations_agent_tasks', 'index', {}, index => {
+    index[result.taskId].traceId = null; delete index[result.taskId].traceProvisioning; return { value: index };
+  })));
+  const backfilled = await handoff(result.project); assert.equal(backfilled.reused, true); assert.notEqual(backfilled.traceId, result.traceId);
+  const trace = await inside(() => runWithSemanticTenant(context.identityScope, () => getSemanticOperationsTaskTrace({ taskId: result.taskId, identityScope: context.identityScope,
+    accessContext: { roleIds: ['executive'], buttonPermissionIds: ['meta_model.draft.save', 'meta_model.draft.review'] } })));
+  assert.equal(trace.integrity.valid, true); assert.equal(trace.eventCount, 2);
+  assert.equal(trace.events.find(event => event.type === 'onboarding_handoff').details.backfilled, true);
+  assert.equal(trace.events.some(event => event.type === 'semantic_execution_completed'), false);
+});
+
+test('missing ready evidence blocks execution before token consumption and is never silently recreated', async () => {
+  const result = await handoff(await handoffReady());
+  const request = { taskId: result.taskId, identityScope: context.identityScope };
+  const confirmation = await inside(() => runWithSemanticTenant(context.identityScope, () => issueSemanticOperationsTaskConfirmation(request)));
+  assert.ok(confirmation.confirmationToken);
+  deleteState('agent_evidence_traces', result.traceId);
+  const execution = await inside(() => runWithSemanticTenant(context.identityScope, () => executeSemanticOperationsTask({ ...request, role: getRole('executive'), confirmationToken: confirmation.confirmationToken })));
+  assert.equal(execution.code, 'SEMANTIC_TASK_EVIDENCE_PENDING');
+  const task = await getSemanticOperationsTask(request); assert.equal(task.confirmation.state, 'issued');
+  assert.equal((await handoff(result.project)).code, 'SEMANTIC_HANDOFF_EVIDENCE_PENDING');
+  assert.equal(listState('agent_evidence_traces').some(row => row.key === result.traceId), false);
+  assert.equal((await getSemanticOperationsTask(request)).evidenceState, 'missing');
+});
+
+test('model project material changes invalidate adoption; revoked model preflight never creates a handoff task', async () => {
+  resetRuntimeState(['semantic_model_registry']); await ready();
+  await inside(() => runWithSemanticTenant(context.identityScope, async () => {
+    const role = getRole('executive');
+    await semanticModelRegistry.register({ role, identityScope: context.identityScope, body: { id: 'fulfillment-model', label: '履约模型', expectedRevision: 0 } });
+    await semanticModelRegistry.withWorkspace({ role, identityScope: context.identityScope, modelId: 'fulfillment-model', work: async () => {
+      const project = await handoffReady(); const result = await handoff(project); assert.equal(result.error, undefined, JSON.stringify(result));
+      const confirmation = await issueSemanticOperationsTaskConfirmation({ taskId: result.taskId, identityScope: context.identityScope });
+      const material = onboardingMaterials('fulfillment', tenantId).find(item => item.kind === 'requirements');
+      const changed = await saveMockOnboardingMaterial({ ...context, id: project.id, body: { expectedRevision: result.project.revision, kind: material.kind, name: material.name, text: `${material.text}\n新的合成需求修订，必须重新验证连接与对齐。` } });
+      assert.equal(changed.error, undefined, JSON.stringify(changed));
+      const before = await draftFingerprint();
+      const execution = await executeSemanticOperationsTask({ taskId: result.taskId, role, identityScope: context.identityScope, confirmationToken: confirmation.confirmationToken });
+      assert.ok(JSON.stringify(execution).includes('MODEL_ONBOARDING_BINDING_REQUIRED')); assert.equal(await draftFingerprint(), before);
+      const second = await handoffReady();
+      const denied = await handoff(second, { readSource: async request => {
+        const source = await readMockOnboardingSource(request);
+        await mutateSemanticGovernanceState('semantic_model_registry', 'index', null, state => ({ value: { ...state, models: [] } }));
+        return source;
+      } });
+      assert.equal(denied.code, 'SEMANTIC_MODEL_WORKSPACE_REVOKED');
+      const key = JSON.stringify(['principal-role-v1', tenantId, 'alice', 'executive']);
+      const projects = await readSemanticGovernanceState('mock_onboarding_v1', key, {});
+      assert.equal(projects[second.id].handoff, undefined);
+    } });
+  }));
+});
 
 test('handoff atomically creates a pending Agent task from fresh HTTP records and reuses unchanged input', async () => {
   const project = await handoffReady(); const before = await draftFingerprint(); const result = await handoff(project);

@@ -75,6 +75,8 @@ npm.cmd run run:event-worker
 - `alert.classified`、`alerting.configuration.published`；
 - `alert.voice.receipt_recorded`、`alert.escalation.requested`。
 - `governance.meta_model.published`、`governance.world_model.published`。
+- `governance.semantic_model.registered`：仅记录租户内模型元数据登记，包含`modelId/revision/runtimeBinding`；不代表工作区启用或模型发布。
+- 非默认内部模型工作区的治理发布事件在同一事务中由服务器为载荷补充`modelId`，Outbox仍使用全局受租户过滤的事件队列，不分割为无人消费的模型私有队列。默认模型保留原事件兼容性；不据此开放非默认模型生产发布。
 - `agent.tool_execution.succeeded`、`agent.tool_execution.failed`。
 
 `backend/src/infrastructure/domain-events/brokers/domain-event-broker.js` 提供四种 Broker。Demo 使用进程内投影适配器；Webhook 采用 CloudEvents 风格 Header、`eventId` 幂等键、HMAC-SHA256 签名、超时和非 2xx 重试/死信。Kafka 使用 `kafkajs` 幂等 Producer、`acks=-1`、事件 ID Header 和聚合键；RabbitMQ 使用 `amqplib` durable topic exchange、persistent message、publisher confirm 和 messageId。生产 Webhook/Kafka/RabbitMQ 分别要求 HTTPS、TLS/SASL、AMQPS；凭据由 KMS/Secret Manager 或工作负载身份注入，健康信息和日志不包含凭据。元模型和世界模型运行态已去除模块级可变缓存，草稿/校验使用持久化聚合，发布使用同事务 Outbox。Agent run 的成功/失败终态也与工具回执事件原子提交，Payload 仅含业务记录标识和稳定状态，不包含 Prompt、密钥或原始错误。每个新事件必须补充 Schema、幂等消费者测试、回滚测试和数据分级评审。

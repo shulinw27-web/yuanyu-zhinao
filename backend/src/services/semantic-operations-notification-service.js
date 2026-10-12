@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { mutateSemanticGovernanceState, readSemanticGovernanceState } from './semantic-governance-store.js';
 import { semanticOperationsOwnerMatches, semanticOperationsPrincipalKey } from './semantic-operations-identity.js';
+import { currentSemanticModel } from './semantic-tenant-context.js';
+import { semanticModelReferenceMatches } from './semantic-model-reference.js';
 
 export const SEMANTIC_NOTIFICATION_NAMESPACE = 'semantic_operations_notifications';
 const NAMESPACE = SEMANTIC_NOTIFICATION_NAMESPACE;
@@ -13,7 +15,10 @@ const mutateIndex = (callback) => mutateSemanticGovernanceState(NAMESPACE, KEY, 
 // notification in the same repository transaction.
 export function buildSemanticOperationsNotification({ identityScope, severity = 'info', title, message, sourceType, sourceId, action = null, audiencePermissionId = null, audienceSubjectId = null, createdAt = now() }) {
   const owner = semanticOperationsPrincipalKey(identityScope);
-  return { id: `semantic-notice-${randomUUID()}`, owner, audience: audiencePermissionId ? { tenantId: identityScope?.tenantId || 'demo-enterprise', permissionId: audiencePermissionId, ...(audienceSubjectId ? { subjectId: audienceSubjectId } : {}) } : null, severity, title: String(title || '元域智语提醒').slice(0, 120), message: String(message || '').slice(0, 800), sourceType: sourceType || 'system', sourceId: sourceId || null, action, createdAt, readAt: null };
+  const modelId = currentSemanticModel();
+  if (action?.modelId !== undefined && action.modelId !== modelId) throw new Error('SEMANTIC_NOTIFICATION_MODEL_MISMATCH');
+  action = action ? { ...action, modelId } : null;
+  return { id: `semantic-notice-${randomUUID()}`, owner, modelId, audience: audiencePermissionId ? { tenantId: identityScope?.tenantId || 'demo-enterprise', permissionId: audiencePermissionId, ...(audienceSubjectId ? { subjectId: audienceSubjectId } : {}) } : null, severity, title: String(title || '元域智语提醒').slice(0, 120), message: String(message || '').slice(0, 800), sourceType: sourceType || 'system', sourceId: sourceId || null, action, createdAt, readAt: null };
 }
 
 export function insertSemanticOperationsNotification(index, notification) {
@@ -36,11 +41,11 @@ export async function createSemanticOperationsNotification(input) {
 }
 
 const sameNotificationTenant = (item, identityScope) => item.audience?.tenantId === (identityScope?.tenantId || 'demo-enterprise');
-const canViewNotification = (item, identityScope, accessContext) => item.audience?.subjectId
+const canViewNotification = (item, identityScope, accessContext) => semanticModelReferenceMatches(item) && (!item.action || semanticModelReferenceMatches(item.action)) && (item.audience?.subjectId
   ? sameNotificationTenant(item, identityScope) && item.audience.subjectId === (accessContext?.subjectId || identityScope?.subjectId) && accessContext?.buttonPermissionIds?.includes(item.audience.permissionId)
   : semanticOperationsOwnerMatches(item.owner, identityScope)
   || Boolean(sameNotificationTenant(item, identityScope) && item.audience?.permissionId
-    && accessContext?.buttonPermissionIds?.includes(item.audience.permissionId));
+    && accessContext?.buttonPermissionIds?.includes(item.audience.permissionId)));
 
 export async function listSemanticOperationsNotifications({ identityScope, accessContext, limit = 50 }) {
   const index = await readIndex();

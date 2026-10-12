@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mockOnboardingScenarios as scenarios, mockOnboardingMaterialKinds as kinds, mockOnboardingLimits as limits, mockOnboardingBoundary as boundary, mockOnboardingDocumentMimeTypes as documentMimeTypes, mockOnboardingDocumentBoundary as documentBoundary } from '../data/mock-onboarding-catalog.js';
 import { inspectMultimodalInput, extractMultimodalEvidence } from './multimodal-input-service.js';
 import { getEffectiveAccess, hasButtonPermission } from './access-control-service.js';
-import { runWithSemanticTenant } from './semantic-tenant-context.js';
+import { runWithSemanticTenant, currentSemanticModel, DEFAULT_SEMANTIC_MODEL_ID } from './semantic-tenant-context.js';
+import { semanticModelAdmission, semanticModelEvidence } from '../domains/governance/public-api.js';
 import { semanticOperationsPrincipalKey } from './semantic-operations-identity.js';
 import { readSemanticGovernanceState, mutateSemanticGovernanceState, mutateSemanticGovernanceStates } from './semantic-governance-store.js';
 import { discoverSchemasFromAttachments, matrixToRecords } from './semantic-schema-discovery-service.js';
@@ -83,8 +84,14 @@ async function scoped(options, write, work) {
     if (!access.principalResolved || !access.roleIds.includes(roleId)) return fail('MOCK_ONBOARDING_ROLE_DENIED', '当前身份未获授此角色。', 403);
     if (!access.pagePermissionIds.includes('page.semantic-operations.view')) return fail('MOCK_ONBOARDING_PAGE_DENIED', '当前身份没有元域智语页面访问权限。', 403);
     if (write && (!hasButtonPermission(roleId, PERMISSION) || !access.buttonPermissionIds.includes(PERMISSION))) return fail('MOCK_ONBOARDING_PERMISSION_DENIED', `需要 ${PERMISSION} 权限。`, 403);
-    return await runWithSemanticTenant(identity, () => work({ owner: semanticOperationsPrincipalKey(identity), roleId, key: JSON.stringify(['principal-role-v1', identity.tenantId, identity.subjectId, roleId]) }));
+    return await runWithSemanticTenant(identity, async () => {
+      await semanticModelAdmission.assert();
+      const result = await work({ owner: semanticOperationsPrincipalKey(identity), roleId, key: JSON.stringify(['principal-role-v1', identity.tenantId, identity.subjectId, roleId]) });
+      await semanticModelAdmission.assert();
+      return result;
+    });
   } catch (error) {
+    if (error.code === 'SEMANTIC_MODEL_WORKSPACE_REVOKED') return { ...fail(error.code, '模型登记已失效，未返回项目内容。', 409), ...(write ? { projectMayHaveCommitted: true } : {}) };
     if (error.status === 403) return fail(error.code || 'MOCK_ONBOARDING_SCOPE_DENIED', '身份与当前租户工作区不一致。', 403);
     throw error;
   }
@@ -270,7 +277,7 @@ function publicProject(project) {
     : connection?.status === 'verified' ? '本地 Mock 只读验证完成，可核对映射及材料引用后显式交接建模；尚未发布模型。'
     : connection?.status === 'failed' ? `模拟连接未通过：${connection.issue.message} 可修正材料或更换故障模式后重新验证。` : '材料已通过本地格式检查；可测试本地 Mock 只读连接，并由人工审阅业务语义与证据。';
   const alignment = { configured: Boolean(project.alignment?.config), status: project.alignment?.report?.status || (project.alignment?.config ? 'pending' : 'not_configured'), issueCount: project.alignment?.report?.issues.length || 0, evidenceStatus: project.alignment?.report?.materialEvidence?.status || 'not_checked' };
-  return { id: project.id, name: project.name, scenarioId: project.scenarioId, revision: project.revision, mode: 'synthetic', createdAt: project.createdAt, updatedAt: project.updatedAt, materials, connection: connection ? structuredClone(connection) : null, alignment,
+  return { modelId: project.modelId || DEFAULT_SEMANTIC_MODEL_ID, id: project.id, name: project.name, scenarioId: project.scenarioId, revision: project.revision, mode: 'synthetic', createdAt: project.createdAt, updatedAt: project.updatedAt, materials, connection: connection ? structuredClone(connection) : null, alignment,
     handoff: project.handoff ? { taskId: project.handoff.taskId, proposalId: project.handoff.proposalId, createdAt: project.handoff.createdAt, current: project.handoff.basis === mockOnboardingBasis(project) } : null,
     readiness: { status: ready ? 'ready_for_review' : 'collecting', completed, total: kinds.length, missing, issues, nextAction: issues.length ? `修正材料：${issues[0]}` : missing.length ? `补充${missing[0].label}：${missing[0].reason}` : nextAction },
     milestones: [
@@ -283,7 +290,7 @@ function publicProject(project) {
     ], boundary };
 }
 
-const owned = (project, scope) => project?.owner === scope.owner && project.roleId === scope.roleId;
+const owned = (project, scope) => semanticModelAdmission.matches(project) && project.owner === scope.owner && project.roleId === scope.roleId;
 
 export async function listMockOnboarding(options) {
   return scoped(options, false, async scope => {
@@ -300,7 +307,7 @@ export async function createMockOnboardingProject(options) {
     return mutateSemanticGovernanceState(NAMESPACE, scope.key, {}, index => {
       if (Object.keys(index).length >= limits.projectsPerPrincipalRole) return { commit: false, result: fail('MOCK_ONBOARDING_PROJECT_LIMIT', `当前身份和角色最多可创建 ${limits.projectsPerPrincipalRole} 个模拟项目。`, 413) };
       const timestamp = new Date().toISOString();
-      const project = { id: `mock-onboarding-${randomUUID()}`, owner: scope.owner, roleId: scope.roleId, name: body.name.trim(), scenarioId: body.scenarioId, revision: 1, materialRevision: 1, mode: 'synthetic', createdAt: timestamp, updatedAt: timestamp, materials: {}, connection: null };
+      const project = { modelId: currentSemanticModel(), id: `mock-onboarding-${randomUUID()}`, owner: scope.owner, roleId: scope.roleId, name: body.name.trim(), scenarioId: body.scenarioId, revision: 1, materialRevision: 1, mode: 'synthetic', createdAt: timestamp, updatedAt: timestamp, materials: {}, connection: null };
       index[project.id] = project;
       return { value: index, result: { project: publicProject(project) } };
     });
@@ -500,15 +507,28 @@ export async function saveMockOnboardingAlignment(options) {
 }
 
 export async function handoffMockOnboardingModel(options, { readSource = readMockOnboardingSource } = {}) {
-  return scoped(options, true, () => runWithIAMStoreContext(() => scoped(options, true, async scope => {
+  options = structuredClone(options);
+  const outcome = await scoped(options, true, () => runWithIAMStoreContext(() => scoped(options, true, async scope => {
     const body = options.body;
     if (!record(body) || Object.keys(body).some(key => key !== 'expectedRevision') || !Number.isSafeInteger(body.expectedRevision)) return fail('MOCK_HANDOFF_INPUT_INVALID', '仅接受当前 expectedRevision；不接受模型、任务、租户或授权覆盖参数。');
+    const referenceVersion = getIAMVersion();
     const index = await readSemanticGovernanceState(NAMESPACE, scope.key) || {};
     const project = index[options.id];
     if (!owned(project, scope)) return missingProject();
     if (project.revision !== body.expectedRevision) return revisionConflict();
     const basis = mockOnboardingBasis(project);
-    if (project.handoff?.basis === basis) return { project: publicProject(project), taskId: project.handoff.taskId, proposalId: project.handoff.proposalId, reused: true };
+    if (project.handoff?.basis === basis) {
+      if (currentSemanticModel() !== DEFAULT_SEMANTIC_MODEL_ID) {
+        const task = await getSemanticOperationsTask({ taskId: project.handoff.taskId, identityScope: options.identityScope });
+        const proposal = await readSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${project.handoff.proposalId}`, null);
+        if (!semanticModelAdmission.matches(task) || !semanticModelAdmission.matches(proposal) || task.proposal?.id !== proposal.id
+          || proposal.onboardingBasis?.modelId !== currentSemanticModel() || proposal.onboardingBasis?.fingerprint !== basis) return fail('MOCK_HANDOFF_REFERENCE_STALE', '交接任务或提案关联已失效，未自动重复创建。', 409);
+        return runWithIAMStoreContext(() => scoped(options, true, () => getIAMVersion() !== referenceVersion
+          ? fail('MOCK_ONBOARDING_AUTHORIZATION_CHANGED', '读取交接关联期间权限已变化。', 409)
+          : { project: publicProject(project), taskId: project.handoff.taskId, proposalId: project.handoff.proposalId, reused: true }), options.identityScope.tenantId);
+      }
+      return { project: publicProject(project), taskId: project.handoff.taskId, proposalId: project.handoff.proposalId, reused: true };
+    }
     if (publicProject(project).readiness.status !== 'ready_for_review' || activeConnection(project)?.status !== 'verified'
       || project.alignment?.report?.status !== 'validated_scope') return fail('MOCK_HANDOFF_NOT_READY', '需先完成材料、连接及已配置业务对齐验证。', 409);
     const evidenceIssues = validateMockAlignmentEvidence(project.alignment.config, project.materials, { requireAll: true });
@@ -535,12 +555,13 @@ export async function handoffMockOnboardingModel(options, { readSource = readMoc
       requirements: documents.filter(document => ['requirements', 'rules'].includes(document.kind)).map(document => document.text).join('\n'),
       sampleRefs, prepareOnly: true });
     if (prepared.error) return prepared;
-    const onboardingSource = { projectId: project.id, materialRevision: project.materialRevision, basisRevision: project.revision,
+    const onboardingSource = { modelId: currentSemanticModel(), key: scope.key, fingerprint: basis, projectId: project.id, materialRevision: project.materialRevision, basisRevision: project.revision,
       snapshotId: source.snapshotId, sourceKind: 'local_mock_http', alignmentReport,
       boundary: '结构化材料生成候选；映射附件未编译为可执行业务规则，尚未采纳、发布或通过智脑问答验收。' };
-    prepared.proposal.onboardingBasis = { key: scope.key, projectId: project.id, fingerprint: basis };
+    prepared.proposal.onboardingBasis = { modelId: currentSemanticModel(), key: scope.key, projectId: project.id, fingerprint: basis };
     const preparedTask = await prepareOnboardingSemanticTask({ id: `semantic-task-${randomUUID()}`, proposal: prepared.publicProposal,
       identityScope: options.identityScope, roleId: scope.roleId, onboardingSource });
+    if (preparedTask.error) return preparedTask;
     preparedTask.task.materialRefs = workspace.refs; preparedTask.task.materialIncomplete = false;
     return runWithIAMStoreContext(() => scoped(options, true, finalScope => {
       if (getIAMVersion() !== authorizationVersion) return fail('MOCK_ONBOARDING_AUTHORIZATION_CHANGED', '交接期间权限发生变化，请重新登录后重试。', 409);
@@ -558,6 +579,11 @@ export async function handoffMockOnboardingModel(options, { readSource = readMoc
       });
     }), options.identityScope.tenantId);
   }), options.identityScope.tenantId));
+  if (outcome.error || !outcome.taskId) return outcome;
+  return runWithIAMStoreContext(() => scoped(options, true, async scope => {
+    const evidence = await semanticModelEvidence.attachOnboarding({ taskId: outcome.taskId, identityScope: options.identityScope, roleId: scope.roleId });
+    return evidence.error ? { ...evidence, taskId: outcome.taskId, proposalId: outcome.proposalId } : { ...outcome, ...evidence };
+  }), options.identityScope.tenantId);
 }
 
 async function readProjectCalculationContext(project, options) {

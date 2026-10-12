@@ -59,8 +59,21 @@ export function validateOntologyReadPlans(draft) {
             || !edge.fields.includes(x.stateField) || !Array.isArray(x.activeStates) || !x.activeStates.length || !Array.isArray(x.inactiveStates)
             || x.activeStates.length + x.inactiveStates.length > 32 || [...x.activeStates, ...x.inactiveStates].some(v => typeof v !== 'string' || v.length > 80)
             || x.activeStates.some(v => x.inactiveStates.includes(v))
-            || ![x.fromField, x.toField].every(name => edge.fieldDefinitions?.some(f => f.name === name && f.reference === type.id && (f.referenceField || type.key) === type.key))) fail('READ_EXPANSION_INVALID');
-          if ([x.fromField, x.toField].some(name => requiresMapping(edge.id, name, type.id, type.key))) fail('READ_MAPPING_EXECUTION_REQUIRED');
+            || ![x.fromField, x.toField].every(name => edge.fields.includes(name))) fail('READ_EXPANSION_INVALID');
+          for (const side of ['from', 'to']) {
+            const field = x[`${side}Field`]; const mapping = x[`${side}Mapping`];
+            if (mapping) {
+              // Incoming lookup converts node IDs to edge keys; outgoing lookup
+              // converts edge keys back to node IDs. Never infer the reversal.
+              const incoming = side === 'from';
+              ontologyMappingBinding(draft, incoming ? type : edge, incoming ? edge : type,
+                { sourceField: incoming ? type.key : field, field: incoming ? field : type.key, mapping });
+            } else {
+              if (!edge.fieldDefinitions?.some(f => f.name === field && f.reference === type.id && (f.referenceField || type.key) === type.key)) fail('READ_EXPANSION_INVALID');
+              if (requiresMapping(edge.id, field, type.id, type.key)) fail('READ_MAPPING_EXECUTION_REQUIRED');
+            }
+          }
+          if (x.fromMapping && x.toMapping && Date.parse(x.fromMapping.asOf) !== Date.parse(x.toMapping.asOf)) fail('READ_MAPPING_TIME_CONFLICT');
         }
       }
       location = { kind: 'section', section: 'readPlans', index: plans.indexOf(plan), field: 'coverage' };
@@ -193,7 +206,7 @@ export function calculateOntologyReadPlan(plan, datasets) {
 export async function executeOntologyReadPlan({ draft, plan, target, roleId, scope, retrieve }) {
   if (validateOntologyReadPlans(draft).status !== 'passed' || !plan || !identifier(plan.id) || !draft.scenario.readPlans.some(p => fingerprint(p) === fingerprint(plan)) || typeof target !== 'string' || !target || target.length > 100) fail('READ_PLAN_INVALID');
   // Preflight every object before the first source request. Recheck each hop.
-  const requiredTypes = [...new Set(plan.datasets.flatMap(ds => [ds.objectType, ...(ds.expand ? [ds.expand.edgeObjectType] : []), ...(ds.where[0].mapping ? [ds.where[0].mapping.objectType] : [])]))];
+  const requiredTypes = [...new Set(plan.datasets.flatMap(ds => [ds.objectType, ...(ds.expand ? [ds.expand.edgeObjectType, ...['fromMapping', 'toMapping'].flatMap(key => ds.expand[key] ? [ds.expand[key].objectType] : [])] : []), ...(ds.where[0].mapping ? [ds.where[0].mapping.objectType] : [])]))];
   requiredTypes.forEach(type => requireOntologyObjectAccess(draft, type, roleId, scope));
   const datasets = {}; const queries = []; const started = Date.now(); const extraRecords = new Map(); let processed = 0;
   const fetchRows = async (ds, query) => {
@@ -206,6 +219,30 @@ export async function executeOntologyReadPlan({ draft, plan, target, roleId, sco
     return admitted;
   };
   const expansions = []; const mappingRuns = [];
+  const remember = row => {
+    const key = `${row.system}:${row.objectType}:${row.id}`; const old = extraRecords.get(key);
+    if (old && fingerprint(old) !== fingerprint(row)) fail('READ_RECORD_CONFLICT');
+    extraRecords.set(key, row);
+  };
+  const convert = async (sourceType, targetType, source, sourceField, field, binding, alias) => {
+    const contract = ontologyMappingBinding(draft, sourceType, targetType, { sourceField, field, mapping: binding });
+    const values = [...new Set(source.map(row => row.payload[sourceField]))];
+    if (values.length > 100) fail('READ_JOIN_VALUES_INVALID');
+    const rows = await fetchRows({ id: alias, objectType: contract.type.id }, { schemaVersion: 'ontology-query.v1', objectType: contract.type.id, fields: contract.type.fields, filter: { field: contract.readFromField, values }, limit: 100 });
+    rows.forEach(remember);
+    return { contract, source, pairs: resolveOntologyMappingRows(contract, source, rows) };
+  };
+  const recordConversion = (mapped, targets, field) => {
+    for (const pair of mapped.pairs) {
+      const found = targets.filter(row => row.payload[field] === pair.target);
+      if (!found.length) fail('READ_MAPPING_TARGET_MISSING');
+      for (const source of mapped.source.filter(row => row.payload[mapped.contract.sourceField] === pair.source)) for (const targetRow of found) {
+        const from = mapped.contract.reverse ? targetRow : source; const to = mapped.contract.reverse ? source : targetRow;
+        mappingRuns.push({ from: JSON.stringify(['instance', from.system, from.objectType, from.id]), to: JSON.stringify(['instance', to.system, to.objectType, to.id]), predicate: mapped.contract.relation.predicate, fromType: from.objectType, toType: to.objectType, mappingVersion: mapped.contract.relation.keyMapping.version, asOf: mapped.contract.binding.asOf });
+        if (mappingRuns.length > 2000) fail('READ_MAPPING_PAIR_LIMIT');
+      }
+    }
+  };
   for (const ds of plan.datasets) {
     if (Date.now() - started > 60000) fail('READ_DEADLINE');
     let query = ontologyDatasetQuery(draft, ds, datasets, target); let mapped = null;
@@ -237,11 +274,22 @@ export async function executeOntologyReadPlan({ draft, plan, target, roleId, sco
     if (ds === plan.datasets[0] && datasets[ds.id].length !== 1) fail('READ_ROOT_NOT_FOUND');
     if (ds.expand) {
       const x = ds.expand; const type = object(draft, ds.objectType); const edgeType = object(draft, x.edgeObjectType);
-      const seen = new Map(datasets[ds.id].map(r => [r.id, r])); let frontier = [...seen.keys()]; const edges = new Map(); let depth = 0;
+      const seen = new Map(datasets[ds.id].map(r => [r.id, r])); let frontier = [...seen.keys()]; const edges = new Map(); const incomingKeys = new Map(); let depth = 0;
       const makeQuery = (t, field, values) => ({ schemaVersion: 'ontology-query.v1', objectType: t.id, fields: t.fields, filter: { field, values }, limit: 100 });
       while (frontier.length) {
         if (frontier.length > 100) fail('READ_JOIN_VALUES_INVALID');
-        const found = await fetchRows({ id: `${ds.id}:edges`, objectType: edgeType.id }, makeQuery(edgeType, x.fromField, frontier));
+        const incoming = x.fromMapping ? await convert(type, edgeType, frontier.map(id => seen.get(id)), type.key, x.fromField, x.fromMapping, `${ds.id}:from-mapping`) : null;
+        if (incoming && new Set(incoming.pairs.map(pair => pair.target)).size !== incoming.pairs.length) fail('READ_MAPPING_CONFLICT');
+        for (const pair of incoming?.pairs || []) {
+          if (incomingKeys.has(pair.target) && incomingKeys.get(pair.target) !== pair.source) fail('READ_MAPPING_CONFLICT');
+          incomingKeys.set(pair.target, pair.source);
+        }
+        const found = await fetchRows({ id: `${ds.id}:edges`, objectType: edgeType.id }, makeQuery(edgeType, x.fromField, incoming ? [...new Set(incoming.pairs.map(pair => pair.target))] : frontier));
+        // A leaf may have no edges. It still needs a confirmed incoming key
+        // conversion, but absence of an edge is not a missing node.
+        if (incoming) recordConversion({ ...incoming, pairs: incoming.pairs.filter(pair => found.some(row => row.payload[x.fromField] === pair.target)) }, found, x.fromField);
+        const active = found.filter(edge => x.activeStates.includes(edge.payload[x.stateField]));
+        const outgoing = x.toMapping ? await convert(edgeType, type, active, x.toField, type.key, x.toMapping, `${ds.id}:to-mapping`) : null;
         const next = new Set();
         for (const edge of found) {
           const key = `${edge.system}:${edge.objectType}:${edge.id}`; const old = extraRecords.get(key);
@@ -250,7 +298,9 @@ export async function executeOntologyReadPlan({ draft, plan, target, roleId, sco
           const state = edge.payload[x.stateField];
           if (x.inactiveStates.includes(state)) continue;
           if (!x.activeStates.includes(state)) fail('READ_EDGE_STATE_UNKNOWN');
-          const parent = edge.payload[x.fromField]; const child = edge.payload[x.toField];
+          const parent = incoming ? incoming.pairs.find(pair => pair.target === edge.payload[x.fromField])?.source : edge.payload[x.fromField];
+          const child = outgoing ? outgoing.pairs.find(pair => pair.source === edge.payload[x.toField])?.target : edge.payload[x.toField];
+          if (typeof parent !== 'string' || !parent || !frontier.includes(parent)) fail('READ_DANGLING_EDGE');
           if (typeof child !== 'string' || !child) fail('READ_DANGLING_EDGE');
           if (!edges.has(parent)) edges.set(parent, new Set()); edges.get(parent).add(child);
           if (!seen.has(child)) next.add(child);
@@ -259,10 +309,11 @@ export async function executeOntologyReadPlan({ draft, plan, target, roleId, sco
         const visiting = new Set(); const visited = new Set();
         const visit = id => { if (visiting.has(id)) fail('READ_GRAPH_CYCLE'); if (visited.has(id)) return; visiting.add(id); for (const child of edges.get(id) || []) visit(child); visiting.delete(id); visited.add(id); };
         for (const id of edges.keys()) visit(id);
-        if (!next.size) break;
+        if (!next.size) { if (outgoing) recordConversion(outgoing, [...seen.values()], type.key); break; }
         if (depth++ >= x.maxDepth) fail('READ_EXPANSION_DEPTH_LIMIT');
         const children = await fetchRows({ id: `${ds.id}:children`, objectType: type.id }, makeQuery(type, type.key, [...next]));
         if (children.length !== next.size) fail('READ_DANGLING_EDGE');
+        if (outgoing) recordConversion(outgoing, [...seen.values(), ...children], type.key);
         children.forEach(r => seen.set(r.id, r)); frontier = [...next];
       }
       datasets[ds.id] = [...seen.values()]; expansions.push({ dataset: ds.id, status: 'complete', nodes: seen.size, depth, maxDepth: x.maxDepth, remainingFrontier: 0, termination: 'no_new_descendants', direction: 'forward_only' });

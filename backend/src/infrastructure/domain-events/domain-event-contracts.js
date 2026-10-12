@@ -20,6 +20,7 @@ const definitions = [
   ['alert.voice.receipt_recorded', 'VoiceCall', ['action', 'riskId', 'receiptStatus']],
   ['alert.escalation.requested', 'VoiceCall', ['action', 'riskId', 'receiptStatus', 'escalationDeliveryIds']],
   ['governance.meta_model.published', 'MetaModel', ['version', 'validationStatus']],
+  ['governance.semantic_model.registered', 'SemanticModelRegistry', ['modelId', 'revision', 'runtimeBinding']],
   ['governance.world_model.published', 'WorldModel', ['version', 'templateId', 'targetId', 'validationStatus']]
 ].map(([type, aggregateType, requiredPayload]) => Object.freeze({ type, version: 1, aggregateType, requiredPayload: Object.freeze(requiredPayload) }));
 

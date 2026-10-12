@@ -251,7 +251,6 @@ export const CROSS_DOMAIN_EDGE_BASELINE = new Set([
   'semantic-operations-agent-service.js -> mock-onboarding-basis.js',
   'semantic-operations-agent-service.js -> multimodal-input-service.js',
   'semantic-operations-planner-service.js -> local-model-gateway.js',
-  'semantic-operations-task-service.js -> agent-evidence-trace-service.js',
   'semantic-operations-task-service.js -> agent-turn-understanding-service.js',
   'semantic-operations-task-service.js -> local-model-gateway.js',
   'semantic-operations-task-service.js -> meta-model-service.js',

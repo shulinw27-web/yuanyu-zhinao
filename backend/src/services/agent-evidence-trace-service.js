@@ -22,6 +22,11 @@ const normalizeIdentityScope = (roleId, identityScope = {}) => ({
   source: identityScope.source ? clip(identityScope.source, 80) : null
 });
 const sameSubject = (left, right) => left?.tenantId === right?.tenantId && left?.subjectId === right?.subjectId;
+const modelMatches = (trace, expectedModelId, expectedTenantId) => Boolean(trace)
+  && (!expectedTenantId || trace.identityScope?.tenantId === expectedTenantId)
+  && (expectedModelId === undefined || verifyAgentEvidenceTrace(trace).valid)
+  && (expectedModelId && expectedModelId !== 'oa-governance'
+    ? trace.modelId === expectedModelId : trace.modelId === undefined || trace.modelId === 'oa-governance');
 
 export function configureAgentEvidenceTraceRepository(repository = null) {
   if (repository && typeof repository.mutateState !== 'function') throw new TypeError('Evidence Trace repository does not implement the asynchronous runtime-state port.');
@@ -98,6 +103,7 @@ export function normalizeEvidenceSnapshots(items = [], capturedAt = now()) {
 }
 
 const eventPayload = (traceId, sequence, event, previousHash, createdAt) => ({
+  ...(event.idempotencyKey ? { idempotencyKey: clip(event.idempotencyKey, 120) } : {}),
   id: `trace-event-${randomUUID()}`,
   traceId,
   sequence,
@@ -115,6 +121,7 @@ const eventPayload = (traceId, sequence, event, previousHash, createdAt) => ({
 const calculateEventHash = (event) => digest(stableStringify(event));
 const manifestPayload = (trace) => ({
   id: trace.id,
+  ...(trace.modelId !== undefined ? { modelId: trace.modelId } : {}),
   kind: trace.kind,
   runId: trace.runId,
   requestId: trace.requestId,
@@ -167,8 +174,11 @@ const publicTrace = (trace) => {
   };
 };
 
-const trimTraces = async () => {
+const trimTraces = async (created) => {
   const traces = (postgresRepository ? await postgresRepository.listState(TRACE_NAMESPACE) : listState(TRACE_NAMESPACE))
+    .filter(row => created.modelId !== undefined
+      ? row.value.modelId === created.modelId && row.value.identityScope?.tenantId === created.identityScope.tenantId
+      : row.value.modelId === undefined)
     .sort((a, b) => String(b.value.createdAt).localeCompare(String(a.value.createdAt)));
   for (const row of traces.slice(MAX_TRACES)) {
     if (row.value.runId) {
@@ -180,12 +190,15 @@ const trimTraces = async () => {
   }
 };
 
-export async function createAgentEvidenceTrace({ roleId, identityScope: suppliedIdentityScope, input, requestId = null, platform = null, kind = 'agent_task' }) {
+export async function createAgentEvidenceTrace({ roleId, identityScope: suppliedIdentityScope, input, requestId = null, platform = null, kind = 'agent_task', modelId, reservedTraceId }) {
+  if (modelId !== undefined && (kind !== 'semantic_operations_task' || typeof modelId !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId))) throw new Error('EVIDENCE_MODEL_BINDING_INVALID');
+  if (reservedTraceId !== undefined && (kind !== 'semantic_operations_task' || !modelId || typeof reservedTraceId !== 'string' || !/^trace-[A-Za-z0-9-]{1,120}$/u.test(reservedTraceId))) throw new Error('EVIDENCE_TRACE_ID_INVALID');
   const createdAt = now();
   const identityScope = normalizeIdentityScope(roleId, suppliedIdentityScope);
   const inputText = String(input || '');
   const trace = {
-    id: `trace-${randomUUID()}`,
+    id: reservedTraceId || `trace-${randomUUID()}`,
+    ...(modelId !== undefined ? { modelId } : {}),
     kind: clip(kind, 80),
     runId: null,
     requestId: requestId ? clip(requestId, 120) : null,
@@ -203,23 +216,37 @@ export async function createAgentEvidenceTrace({ roleId, identityScope: supplied
     completedAt: null,
     events: []
   };
-  if (postgresRepository) await postgresRepository.writeState(TRACE_NAMESPACE, trace.id, refreshManifestHash(trace));
-  else writeState(TRACE_NAMESPACE, trace.id, refreshManifestHash(trace));
-  await trimTraces();
-  await appendAgentEvidenceEvent(trace.id, {
+  const first = eventPayload(trace.id, 1, {
     type: 'task_received',
     stage: 'request',
     status: 'accepted',
     actor: { type: 'user', roleId: trace.roleId, subjectFingerprint: digest(identityScope.subjectId).slice(0, 20) },
     summary: '智脑已接收任务并创建独立证据追踪。',
     details: { inputFingerprint: trace.inputFingerprint, inputLength: trace.inputLength, requestId: trace.requestId, platform: trace.platform }
-  });
-  return getAgentEvidenceTraceInternal(trace.id);
+  }, null, createdAt);
+  trace.events = [{ ...first, hash: calculateEventHash(first) }]; trace.eventCount = 1; trace.headHash = trace.events[0].hash;
+  const insert = existing => {
+    if (!existing) return { value: refreshManifestHash(trace), result: clone(trace) };
+    if (!modelMatches(existing, modelId) || !sameSubject(existing.identityScope, identityScope) || existing.roleId !== trace.roleId
+      || existing.requestId !== trace.requestId || existing.inputFingerprint !== trace.inputFingerprint) throw new Error('EVIDENCE_TRACE_ID_CONFLICT');
+    return { commit: false, result: clone(existing) };
+  };
+  const saved = postgresRepository ? await postgresRepository.mutateState(TRACE_NAMESPACE, trace.id, null, insert) : mutateState(TRACE_NAMESPACE, trace.id, null, insert);
+  await trimTraces(saved);
+  return saved;
 }
 
-export async function appendAgentEvidenceEvent(traceId, event) {
+export async function appendAgentEvidenceEvent(traceId, event, { expectedModelId, expectedTenantId } = {}) {
   const mutation = (trace) => {
-    if (!trace) return { commit: false, result: null };
+    if (!modelMatches(trace, expectedModelId, expectedTenantId)) return { commit: false, result: null };
+    if (event.idempotencyKey) {
+      const previous = trace.events.find(item => item.idempotencyKey === clip(event.idempotencyKey, 120));
+      if (previous) {
+        if (previous.type !== clip(event.type || 'unknown', 100) || previous.summary !== clip(event.summary || event.type || '证据事件', 800)
+          || stableStringify(previous.details) !== stableStringify(sanitizeDetails(event.details || {}))) throw new Error('EVIDENCE_EVENT_ID_CONFLICT');
+        return { commit: false, result: clone(previous) };
+      }
+    }
     const createdAt = now();
     const sequence = trace.events.length + 1;
     if (sequence > MAX_EVENTS_PER_TRACE) {
@@ -241,7 +268,8 @@ export async function appendAgentEvidenceEvent(traceId, event) {
 
 export async function bindAgentEvidenceTraceRun(traceId, { runId, roleId, domain }) {
   const mutateTrace = (trace) => {
-    if (!trace) return { commit: false, result: null };
+    // Non-default model run indexes are not supported by the legacy global index.
+    if (!modelMatches(trace)) return { commit: false, result: null };
     trace.runId = clip(runId, 180);
     trace.roleId = clip(roleId || trace.roleId, 100);
     trace.domain = clip(domain || trace.domain || 'unknown', 100);
@@ -267,9 +295,9 @@ export async function bindAgentEvidenceTraceRun(traceId, { runId, roleId, domain
   return result;
 }
 
-export async function setAgentEvidenceTraceStatus(traceId, status, { completed = false } = {}) {
+export async function setAgentEvidenceTraceStatus(traceId, status, { completed = false, expectedModelId, expectedTenantId } = {}) {
   const mutation = (trace) => {
-    if (!trace) return { commit: false, result: null };
+    if (!modelMatches(trace, expectedModelId, expectedTenantId)) return { commit: false, result: null };
     trace.status = clip(status, 80);
     trace.updatedAt = now();
     if (completed) trace.completedAt = trace.updatedAt;
@@ -281,9 +309,10 @@ export async function setAgentEvidenceTraceStatus(traceId, status, { completed =
     : mutateState(TRACE_NAMESPACE, traceId, null, mutation));
 }
 
-export async function getAgentEvidenceTraceInternal(traceId) {
+export async function getAgentEvidenceTraceInternal(traceId, { expectedModelId } = {}) {
   await waitForTraceMutations(traceId);
-  return postgresRepository ? postgresRepository.readState(TRACE_NAMESPACE, traceId) : readState(TRACE_NAMESPACE, traceId);
+  const trace = postgresRepository ? await postgresRepository.readState(TRACE_NAMESPACE, traceId) : readState(TRACE_NAMESPACE, traceId);
+  return modelMatches(trace, expectedModelId) ? trace : null;
 }
 
 export async function getAgentEvidenceTraceByRunIdInternal(runId) {
@@ -291,10 +320,10 @@ export async function getAgentEvidenceTraceByRunIdInternal(runId) {
   return traceId ? getAgentEvidenceTraceInternal(traceId) : null;
 }
 
-export async function getAgentEvidenceTrace(traceId, roleIds, suppliedIdentityScope) {
+export async function getAgentEvidenceTrace(traceId, roleIds, suppliedIdentityScope, { expectedModelId } = {}) {
   const allowedRoleIds = new Set((Array.isArray(roleIds) ? roleIds : [roleIds]).filter(Boolean));
   if (!allowedRoleIds.size || !suppliedIdentityScope?.tenantId || !suppliedIdentityScope?.subjectId) return null;
-  const trace = await getAgentEvidenceTraceInternal(traceId);
+  const trace = await getAgentEvidenceTraceInternal(traceId, { expectedModelId });
   const identityScope = normalizeIdentityScope([...allowedRoleIds][0], suppliedIdentityScope);
   if (!trace || !allowedRoleIds.has(trace.roleId) || !sameSubject(trace.identityScope, identityScope)) return null;
   return publicTrace(trace);
@@ -312,7 +341,7 @@ export async function listAgentEvidenceTraces(roleIds, suppliedIdentityScope, li
   const rows = postgresRepository ? await postgresRepository.listState(TRACE_NAMESPACE) : listState(TRACE_NAMESPACE);
   return rows
     .map((row) => row.value)
-    .filter((trace) => allowedRoleIds.has(trace.roleId) && sameSubject(trace.identityScope, identityScope))
+    .filter((trace) => modelMatches(trace) && allowedRoleIds.has(trace.roleId) && sameSubject(trace.identityScope, identityScope))
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
     .slice(0, Math.min(Math.max(Number(limit) || 20, 1), 100))
     .map(publicTrace);

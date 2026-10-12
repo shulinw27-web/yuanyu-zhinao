@@ -16,6 +16,56 @@ import { CANDIDATE_CATALOG, CANDIDATE_CATALOG_SIZE, listCatalogGaps, listUncover
 
 const identity = { tenantId: 'semantic-test', subjectId: 'architect-01', deviceId: 'device-01' };
 
+test('natural-language reviewed field removal stays in the replacement task and invalidates confirmation', async () => {
+  resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);
+  const role = getRole('executive'); const baseline = await getOAMetaModelDraft();
+  let task = await createSemanticOperationsTask({ body: { text: '建立供应商语义模型。', systemCodes: ['ERP'], adoptionMode: 'replace' }, role, identityScope: identity });
+  assert.equal(task.proposal.adoptionMode, 'replace');
+  const id = task.id; const objectId = task.proposal.objectTypes[0].id;
+  const edit = text => createSemanticOperationsTask({ body: { text, parentTaskId: task.id, parentProposalRevision: task.proposal.revision }, role, identityScope: identity });
+  task = await edit(`给“${objectId}”新增字段“legacy_hint”，类型“string”`); assert.ok(!task.error, task.error);
+  // Fixture models an already present, source-mapped field in the original
+  // proposal, not an in-use enterprise record or a user database migration.
+  await mutateSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${task.proposal.id}`, null, stored => {
+    const field = stored.draft.objectTypes[0].fieldDefinitions.find(value => value.name === 'legacy_hint');
+    field.mappingStatus = 'mapped'; field.sourceField = 'legacy_hint'; stored.originalDraft = structuredClone(stored.draft);
+    return { value: stored };
+  });
+  const revision = task.proposal.revision;
+  task = await edit(`移除模型字段“${objectId}.legacy_hint”`); assert.ok(!task.error, task.error);
+  assert.equal(task.id, id); assert.equal(task.proposal.revision, revision + 1);
+  assert.ok(!task.proposal.objectTypes[0].fields.includes('legacy_hint')); assert.equal(task.confirmation.state, 'not_issued');
+  assert.equal((await getOAMetaModelDraft()).fingerprint, baseline.fingerprint);
+  assert.equal((await edit(`移除模型字段“${objectId}.${task.proposal.objectTypes[0].key}”`)).code, 'SEMANTIC_REVIEWED_REMOVAL_KEY');
+  const confirmation = await issueSemanticOperationsTaskConfirmation({ taskId: task.id, identityScope: identity });
+  assert.ok(confirmation.confirmationToken, JSON.stringify(confirmation));
+  const applied = await executeSemanticOperationsTask({ taskId: task.id, role, identityScope: identity, confirmationToken: confirmation.confirmationToken });
+  assert.ok(!applied.error, applied.error); assert.equal(applied.task.status, 'completed');
+  assert.ok(!(await getOAMetaModelDraft()).objectTypes.find(item => item.id === objectId).fields.includes('legacy_hint'));
+  assert.equal((await listSemanticOperationsSnapshots({ identityScope: identity })).length, 1);
+});
+
+test('reviewed model removal enforces replacement mode, exact scope, private dependencies and stale confirmations', async () => {
+  resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);
+  const role = getRole('executive'); const baseline = await getOAMetaModelDraft();
+  let task = await createSemanticOperationsTask({ body: { text: '建立供应商语义模型。', systemCodes: ['ERP'] }, role, identityScope: identity });
+  const targetObject = task.proposal.objectTypes[0]; const field = { name: 'legacy_hint' };
+  task = await createSemanticOperationsTask({ body: { text: `给“${targetObject.id}”新增字段“legacy_hint”，类型“string”`, parentTaskId: task.id, parentProposalRevision: task.proposal.revision }, role, identityScope: identity });
+  const target = { kind: 'field', objectId: targetObject.id, fieldName: field.name };
+  const removalBody = () => ({ revision: task.proposal.revision, modelRemoval: target, objectTypes: task.proposal.objectTypes.map(item => ({ ...item, fields: item.fields.filter(name => name !== field.name), fieldDefinitions: item.fieldDefinitions.filter(value => value.name !== field.name) })), relationshipTypes: task.proposal.relationshipTypes });
+  const update = extra => updateSemanticOperationsProposal({ proposalId: task.proposal.id, ...removalBody(), ...extra, role, identityScope: identity });
+  assert.equal((await update()).code, 'SEMANTIC_REVIEWED_REMOVAL_REPLACE_REQUIRED');
+  await mutateSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${task.proposal.id}`, null, stored => { stored.adoptionMode = 'replace'; stored.originalDraft = structuredClone(stored.draft); stored.draft.policies = [`${field.name}需要保留`]; return { value: stored }; });
+  assert.equal((await update()).code, 'SEMANTIC_REVIEWED_REMOVAL_DEPENDENCIES');
+  await mutateSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${task.proposal.id}`, null, stored => { stored.draft.policies = []; return { value: stored }; });
+  const extraObjects = structuredClone(removalBody().objectTypes); extraObjects[0].label = '夹带改名';
+  assert.equal((await update({ objectTypes: extraObjects })).code, 'SEMANTIC_REVIEWED_REMOVAL_SCOPE');
+  const revised = await update(); assert.ok(!revised.error, revised.error); assert.equal(revised.revision, task.proposal.revision + 1);
+  assert.ok(!revised.objectTypes[0].fields.includes(field.name));
+  assert.equal((await getOAMetaModelDraft()).fingerprint, baseline.fingerprint); assert.equal((await listSemanticOperationsSnapshots({ identityScope: identity })).length, 0);
+  assert.equal((await update()).code, 'SEMANTIC_PROPOSAL_REVISION_CONFLICT');
+});
+
 test('field checks and withdrawal both enforce private policies and preserve confirmation on read-only checks', async () => {
   resetRuntimeState(['semantic_operations_agent_proposals', 'semantic_operations_agent_tasks', 'semantic_operations_agent_snapshots', 'oa_meta_model_runtime']);
   const role = getRole('executive'); const baseline = await getOAMetaModelDraft();

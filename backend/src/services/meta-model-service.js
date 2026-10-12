@@ -3,7 +3,7 @@ import { semanticRecordContract } from './semantic-record-contract-service.js';
 import { buildOntologyImpact, inferObjectGranularity, modelingProfiles, objectGranularities, replayOntologyDecisions, validateOntologyContract } from './ontology-contract-service.js';
 import { getBusinessDecisionCatalog } from './business-decision-service.js';
 import { semanticFingerprint } from './semantic-model-fingerprint.js';
-import { assertSemanticTenant, currentSemanticTenant } from './semantic-tenant-context.js';
+import { assertSemanticTenant, currentSemanticTenant, currentSemanticModel, DEFAULT_SEMANTIC_MODEL_ID } from './semantic-tenant-context.js';
 import { sanitizeKeyMapping } from '../domain-contracts/key-mapping.js';
 
 const now = () => new Date().toISOString();
@@ -272,8 +272,10 @@ export const getOAMetaModelDraft = () => mapMaybe(getOARuntime(), (runtime) => {
   return { ...draft, fingerprint: semanticFingerprint(draft) };
 });
 export const getOAMetaModelDraftFromRuntime = (runtime) => clone(normalizeSemanticDraft(runtime?.oaDraft || makeDraft()));
-export const getPublishedOntologyModel = () => mapMaybe(getOARuntime(), (runtime) => runtime.publishedModel ? clone(runtime.publishedModel) : null);
+export const getPublishedOntologyModel = () => mapMaybe(getOARuntime(), (runtime) => runtime.publishedModel
+  ? { ...clone(runtime.publishedModel), ...(currentSemanticModel() !== DEFAULT_SEMANTIC_MODEL_ID ? { modelId: currentSemanticModel(), runtimeReadEnabled: false } : {}) } : null);
 export const getPublishedDecisionContext = (capabilityId) => mapMaybe(getOARuntime(), (runtime) => {
+  if (currentSemanticModel() !== DEFAULT_SEMANTIC_MODEL_ID) return null;
   const published = runtime.publishedModel;
   if (!published?.draft?.scenario?.decisionBindings?.some((item) => item.capabilityId === capabilityId)) return null;
   return { modelVersion: published.version, modelFingerprint: published.fingerprint, publishedAt: published.publishedAt,
@@ -351,9 +353,10 @@ export const saveOAMetaModelDraft = (input, role) => {
   });
 };
 
-export const validateOAMetaModelDraft = (role) => {
+export const validateOAMetaModelDraft = (role, { expectedFingerprint } = {}) => {
   if (!canConfigure(role)) return { error: '当前角色没有校验元模型草稿的权限。' };
   return mutateSemanticGovernanceState(OA_NAMESPACE, OA_KEY, initialOARuntime, (runtime) => {
+    if (expectedFingerprint !== undefined && semanticFingerprint(getOAMetaModelDraftFromRuntime(runtime)) !== expectedFingerprint) return { commit: false, result: { error: '草稿结构已改变，请重新核对。', code: 'MODEL_DRAFT_FINGERPRINT_CONFLICT', status: 409 } };
     runtime.oaDraft = normalizeSemanticDraft(runtime.oaDraft || makeDraft());
     runtime.oaDraft.validation = validateDraft(runtime.oaDraft);
     runtime.oaDraft.updatedAt = now(); runtime.oaDraft.updatedBy = role.name;
@@ -362,9 +365,10 @@ export const validateOAMetaModelDraft = (role) => {
   });
 };
 
-export const simulateBuildOAMetaModel = (role) => {
+export const simulateBuildOAMetaModel = (role, { expectedFingerprint } = {}) => {
   if (!canConfigure(role)) return { error: '当前角色无权模拟构建 OA 元模型。' };
   return mutateSemanticGovernanceState(OA_NAMESPACE, OA_KEY, initialOARuntime, (runtime) => {
+  if (expectedFingerprint !== undefined && semanticFingerprint(getOAMetaModelDraftFromRuntime(runtime)) !== expectedFingerprint) return { commit: false, result: { error: '草稿结构已改变，请重新核对。', code: 'MODEL_DRAFT_FINGERPRINT_CONFLICT', status: 409 } };
   runtime.oaDraft = normalizeSemanticDraft(runtime.oaDraft || makeDraft());
   runtime.oaDraft.validation = validateDraft(runtime.oaDraft);
   if (runtime.oaDraft.validation.status !== 'passed') return { commit: false, result: { error: '请先修复元模型草稿的校验问题，再模拟构建。', draft: clone(runtime.oaDraft) } };
@@ -381,6 +385,7 @@ export const simulateBuildOAMetaModel = (role) => {
     { name: '已绑定判断回放', status: decisionReplay.status === 'failed' ? 'failed' : 'passed', detail: decisionReplay.status === 'not_configured' ? '未绑定判断，仅验证模型结构，不代表业务判断已验收。' : '已执行内置合成判断用例；不代表真实历史数据或外部写入验收。' }
   ];
   runtime.oaSimulation = {
+    ...(expectedFingerprint !== undefined ? { sourceFingerprint: expectedFingerprint } : {}),
     id: 'oa-sim-20260731-001', status: 'simulated', builtAt: now(), builtBy: role.name,
     instances, decisionReplay, sourceMode: 'synthetic', verifiesLiveSystems: false, validation: { status: checks.every((item) => item.status === 'passed') ? 'passed' : 'failed', checks },
     audit: [{ time: now(), actor: role.name, action: '模拟构建元模型', detail: '已生成模板或结构示例并回放已绑定判断；未连接真实业务系统。' }]

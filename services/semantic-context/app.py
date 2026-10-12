@@ -19,6 +19,7 @@ import json
 import os
 import re
 from instance_store import InstanceStore
+from model_graph import ModelGraphs
 
 try:
     from semantica.context import ContextGraph
@@ -44,6 +45,16 @@ INGESTED_EDGES: set[tuple[str, str, str]] = set()
 RUNS: dict[str, dict] = {}
 FACTS: dict[str, dict] = {}
 MODEL_DEFINITION: dict | None = None
+MODEL_DEFINITIONS: dict[str, dict] = {}
+MODEL_GRAPHS = ModelGraphs(ContextGraph if SEMANTICA_AVAILABLE else None)
+INSTANCE_IDENTITY = None
+MAX_MODEL_NAMESPACES = 31  # Plus the backwards-compatible default workspace.
+
+
+def valid_model_namespace(value):
+    return isinstance(value, str) and value != "oa-governance" and re.fullmatch(r"[a-z][a-z0-9-]{1,63}", value) is not None
+
+
 CORE_META_OBJECTS = {"Person", "RawMaterial", "Product", "Equipment", "Store"}
 
 SEMANTIC_TYPE_CATALOG = {
@@ -88,15 +99,18 @@ def timestamp() -> str:
 
 
 def snapshot_state():
-    return {"version": 1, "graph": GRAPH.to_dict() if GRAPH is not None else None,
+    return {"version": 3 if any(state.get("projections") for state in MODEL_GRAPHS.states.values()) else 2 if MODEL_GRAPHS.states else 1, "graph": GRAPH.to_dict() if GRAPH is not None else None,
             "records": sorted(INGESTED_RECORD_IDS), "edges": sorted(INGESTED_EDGES),
-            "runs": RUNS, "facts": FACTS, "model": MODEL_DEFINITION}
+            "runs": RUNS, "facts": FACTS, "model": MODEL_DEFINITION, "models": MODEL_DEFINITIONS,
+            "modelGraphs": MODEL_GRAPHS.snapshot()}
 
 
-def restore_state(value):
+def restore_state(value, identity=None):
     """Validate before replacing globals; invalid stored data must not become an empty graph."""
-    global GRAPH, RUNS, FACTS, MODEL_DEFINITION, INGESTED_RECORD_IDS, INGESTED_EDGES
-    if not isinstance(value, dict) or value.get("version") != 1 or not isinstance(value.get("runs"), dict) or not isinstance(value.get("facts"), dict):
+    global GRAPH, RUNS, FACTS, MODEL_DEFINITION, MODEL_DEFINITIONS, INGESTED_RECORD_IDS, INGESTED_EDGES
+    if not isinstance(value, dict) or value.get("version") not in (1, 2, 3) or not isinstance(value.get("runs"), dict) or not isinstance(value.get("facts"), dict):
+        raise ValueError("SEMANTIC_SNAPSHOT_INVALID")
+    if not isinstance(value.get("modelGraphs", {}), dict) or (value["version"] != 1) != bool(value.get("modelGraphs")) or (value["version"] == 3) != any(state.get("projections") for state in value.get("modelGraphs", {}).values() if isinstance(state, dict)):
         raise ValueError("SEMANTIC_SNAPSHOT_INVALID")
     records = value.get("records")
     edges = value.get("edges")
@@ -116,13 +130,22 @@ def restore_state(value):
     if set(run_fact_ids) != set(records) or len(run_fact_ids) != len(records):
         raise ValueError("SEMANTIC_SNAPSHOT_INVALID")
     model = value.get("model")
-    if model is not None:
-        normalized, validation = validate_model_definition(model)
-        if validation["status"] != "passed" or not model.get("publishedAt"):
+    models = value.get("models", {})  # Existing version-1 snapshots require no migration.
+    if not isinstance(models, dict) or len(models) > MAX_MODEL_NAMESPACES or any(not valid_model_namespace(key) or not isinstance(item, dict) for key, item in models.items()):
+        raise ValueError("SEMANTIC_SNAPSHOT_INVALID")
+    for candidate in [model, *models.values()]:
+        if candidate is None:
+            continue
+        if not isinstance(candidate, dict):
+            raise ValueError("SEMANTIC_SNAPSHOT_INVALID")
+        normalized, validation = validate_model_definition(candidate)
+        if validation["status"] != "passed" or not candidate.get("publishedAt"):
             raise ValueError("SEMANTIC_SNAPSHOT_INVALID")
         serialized = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        if model.get("fingerprint") != sha256(serialized.encode("utf-8")).hexdigest()[:20]:
+        if candidate.get("fingerprint") != sha256(serialized.encode("utf-8")).hexdigest()[:20]:
             raise ValueError("SEMANTIC_SNAPSHOT_INVALID")
+    owner = identity or INSTANCE_IDENTITY
+    model_graphs = MODEL_GRAPHS.restore(value.get("modelGraphs", {}), models, validate_model_definition, owner.get("tenantId") if owner else None)
     graph = None
     if value.get("graph") is not None:
         if not SEMANTICA_AVAILABLE:
@@ -140,11 +163,14 @@ def restore_state(value):
         raise ValueError("SEMANTIC_SNAPSHOT_INVALID")
     GRAPH = graph
     RUNS = deepcopy(value["runs"]); FACTS = deepcopy(value["facts"]); MODEL_DEFINITION = deepcopy(model)
+    MODEL_DEFINITIONS = deepcopy(models)
+    MODEL_GRAPHS.states = model_graphs
     INGESTED_RECORD_IDS = set(records); INGESTED_EDGES = {tuple(item) for item in edges}
 
 
 def initialize_storage(identity, env=None):
-    global STORE
+    global STORE, INSTANCE_IDENTITY
+    INSTANCE_IDENTITY = identity
     env = os.environ if env is None else env
     location = env.get("SEMANTIC_INSTANCE_DB")
     if not location:
@@ -157,7 +183,7 @@ def initialize_storage(identity, env=None):
     try:
         snapshot = store.load()
         if snapshot is not None:
-            restore_state(snapshot)
+            restore_state(snapshot, identity)
         else:
             store.save(snapshot_state())
     except Exception:
@@ -387,7 +413,18 @@ def validate_model_definition(definition: object) -> tuple[dict | None, dict]:
             "granularity": str(item.get("granularity", "unspecified")),
         })
     object_ids = {item["id"] for item in normalized_objects if item["id"]}
+    for original, normalized in zip(objects, normalized_objects):
+        if "fieldDefinitions" in original:
+            fields = original["fieldDefinitions"]
+            if not isinstance(fields, list) or len(fields) > 100 or any(not isinstance(field, dict) or field.get("name") not in normalized["fields"] for field in fields):
+                return None, {"status": "failed", "checks": [{"name": "字段引用", "status": "failed", "detail": "字段定义必须引用已声明字段；不静默丢弃。"}]}
+            normalized["fieldDefinitions"] = deepcopy(fields)
     normalized_relationships = [{"from": str(item.get("from", "")).strip(), "to": str(item.get("to", "")).strip(), "predicate": str(item.get("predicate", "")).strip(), "cardinality": item.get("cardinality", "1:n"), "evidence": item.get("evidence", ""), "provenanceType": item.get("provenanceType", "declared"), "validFrom": item.get("validFrom"), "validTo": item.get("validTo")} for item in relationships]
+    for original, normalized in zip(relationships, normalized_relationships):
+        if "keyMapping" in original:
+            if not isinstance(original["keyMapping"], dict):
+                return None, {"status": "failed", "checks": [{"name": "主键映射", "status": "failed", "detail": "映射定义必须为对象；未执行转换。"}]}
+            normalized["keyMapping"] = deepcopy(original["keyMapping"])
     metrics = definition.get("metrics", []) if isinstance(definition.get("metrics", []), list) else []
     data_contracts = definition.get("dataContracts", []) if isinstance(definition.get("dataContracts", []), list) else []
     quality_rules = definition.get("qualityRules", []) if isinstance(definition.get("qualityRules", []), list) else []
@@ -409,10 +446,55 @@ def validate_model_definition(definition: object) -> tuple[dict | None, dict]:
     return normalized, validation
 
 
-def model_definition_status() -> dict:
-    if not MODEL_DEFINITION:
-        return {"status": "not_published", "engine": "semantica", "objectCount": 0, "relationshipCount": 0}
-    return {"status": "published", "engine": "semantica", "id": MODEL_DEFINITION["id"], "version": MODEL_DEFINITION["version"], "fingerprint": MODEL_DEFINITION["fingerprint"], "sourceFingerprint": MODEL_DEFINITION.get("sourceFingerprint", ""), "objectCount": len(MODEL_DEFINITION["objectTypes"]), "relationshipCount": len(MODEL_DEFINITION["relationshipTypes"]), "publishedAt": MODEL_DEFINITION["publishedAt"]}
+def model_definition_status(model_id=None) -> dict:
+    definition = MODEL_DEFINITION if model_id is None else MODEL_DEFINITIONS.get(model_id)
+    receipt = {} if model_id is None else {"modelId": model_id, "modelProtocol": 1, "projectionScope": "definition_only", "runtimeReadEnabled": False}
+    if not definition:
+        return {"status": "not_published", "engine": "semantica", "objectCount": 0, "relationshipCount": 0, **receipt}
+    return {"status": "published", "engine": "semantica", "id": definition["id"], "version": definition["version"], "fingerprint": definition["fingerprint"], "sourceFingerprint": definition.get("sourceFingerprint", ""), "objectCount": len(definition["objectTypes"]), "relationshipCount": len(definition["relationshipTypes"]), "publishedAt": definition["publishedAt"], **receipt}
+
+
+@durable_mutation
+def publish_namespaced_model(model_id, payload):
+    if not valid_model_namespace(model_id):
+        return 400, {"error": "invalid_model_namespace"}
+    if set(payload) - {"definition", "expectedFingerprint"} or "expectedFingerprint" not in payload:
+        return 400, {"error": "model_publication_contract_invalid"}
+    normalized, validation = validate_model_definition(payload.get("definition"))
+    if validation["status"] != "passed":
+        return 422, {"status": "failed", "validation": validation}
+    serialized = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    fingerprint = sha256(serialized.encode("utf-8")).hexdigest()[:20]
+    existing = MODEL_DEFINITIONS.get(model_id)
+    if existing and existing["fingerprint"] == fingerprint:
+        return 200, {"status": "published", "deployment": model_definition_status(model_id), "validation": validation, "idempotentReplay": True}
+    expected = existing["fingerprint"] if existing else None
+    if payload["expectedFingerprint"] != expected:
+        return 409, {"error": "model_publication_conflict", "modelId": model_id}
+    if existing is None and len(MODEL_DEFINITIONS) >= MAX_MODEL_NAMESPACES:
+        return 409, {"error": "model_namespace_capacity"}
+    MODEL_DEFINITIONS[model_id] = {**normalized, "fingerprint": fingerprint, "publishedAt": timestamp()}
+    return 200, {"status": "published", "deployment": model_definition_status(model_id), "validation": validation}
+
+
+@durable_mutation
+def ingest_namespaced_graph(model_id, payload, tenant_id):
+    if os.environ.get("SEMANTIC_DEMO_INGEST_ENABLED", "true").lower() not in {"1", "true", "yes"}:
+        return 403, {"error": "demo_ingest_disabled"}
+    return MODEL_GRAPHS.ingest(model_id, payload, MODEL_DEFINITIONS.get(model_id), tenant_id)
+
+
+@durable_mutation
+def reset_namespaced_graph(model_id, payload, tenant_id):
+    return MODEL_GRAPHS.reset(model_id, payload, MODEL_DEFINITIONS.get(model_id), tenant_id)
+
+
+@durable_mutation
+def materialize_namespaced_relationships(model_id, payload, tenant_id):
+    # Authenticated synthetic instance operation; never an enterprise IAM grant.
+    if os.environ.get("SEMANTIC_DEMO_INGEST_ENABLED", "true").lower() not in {"1", "true", "yes"}:
+        return 403, {"error": "demo_ingest_disabled"}
+    return MODEL_GRAPHS.materialize_relationships(model_id, payload, MODEL_DEFINITIONS.get(model_id), tenant_id)
 
 
 @durable_mutation
@@ -421,10 +503,13 @@ def publish_model_definition(payload: dict) -> tuple[int, dict]:
     normalized, validation = validate_model_definition(payload.get("definition"))
     if validation["status"] != "passed":
         return 422, {"engine": "semantica", "status": "failed", "validation": validation}
-    if MODEL_DEFINITION and normalized.get("sourceFingerprint") and MODEL_DEFINITION.get("sourceFingerprint") == normalized.get("sourceFingerprint"):
-        return 200, {"engine": "semantica", "status": "published", "validation": validation, "deployment": model_definition_status(), "idempotentReplay": True}
     serialized = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    MODEL_DEFINITION = {**normalized, "fingerprint": sha256(serialized.encode("utf-8")).hexdigest()[:20], "publishedAt": timestamp()}
+    fingerprint = sha256(serialized.encode("utf-8")).hexdigest()[:20]
+    if MODEL_DEFINITION and MODEL_DEFINITION["fingerprint"] == fingerprint:
+        return 200, {"engine": "semantica", "status": "published", "validation": validation, "deployment": model_definition_status(), "idempotentReplay": True}
+    if MODEL_DEFINITION and normalized.get("sourceFingerprint") and MODEL_DEFINITION.get("sourceFingerprint") == normalized.get("sourceFingerprint"):
+        return 409, {"error": "model_source_fingerprint_conflict", "status": "failed"}
+    MODEL_DEFINITION = {**normalized, "fingerprint": fingerprint, "publishedAt": timestamp()}
     return 200, {"engine": "semantica", "status": "published", "validation": validation, "deployment": model_definition_status()}
 
 
@@ -481,6 +566,7 @@ def model_candidates() -> dict:
 class Handler(BaseHTTPRequestHandler):
     def authorize_instance(self) -> bool:
         self.instance_authorized = False
+        self.model_namespace = None
         instance = getattr(self.server, "instance_config", None)
         if instance is None:
             return True
@@ -497,6 +583,20 @@ class Handler(BaseHTTPRequestHandler):
         self.instance_authorized = True
         return True
 
+    def model_route(self, path):
+        """Authenticated bounded model protocols; no namespace fallback or business grant."""
+        if not path.startswith("/models/"):
+            return None
+        match = re.fullmatch(r"/models/([a-z][a-z0-9-]{1,63})/(instance|definition|definition/validate|definition/publish|graph|graph/ingest|graph/reset|graph/runs/[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}|graph/relationships/materialize|graph/relationships/runs/[A-Za-z0-9][A-Za-z0-9_.:-]{0,119})", path)
+        if not getattr(self, "instance_authorized", False):
+            self.send_json(403, {"error": "instance_access_denied"})
+            return False
+        if not match or not valid_model_namespace(match[1]):
+            self.send_json(400, {"error": "invalid_model_namespace"})
+            return False
+        self.model_namespace = match[1]
+        return match[1], match[2]
+
     def send_json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
@@ -508,6 +608,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("X-Semantic-Tenant", instance["tenantId"])
             self.send_header("X-Semantic-Deployment", instance["deploymentId"])
             self.send_header("X-Semantic-Protocol", "1")
+            if getattr(self, "model_namespace", None):
+                self.send_header("X-Semantic-Model", self.model_namespace)
+                self.send_header("X-Semantic-Model-Protocol", "1")
+                self.send_header("X-Semantic-Graph-Protocol", "1")
+                self.send_header("X-Semantic-Relationship-Protocol", "1")
         self.end_headers()
         self.wfile.write(body)
 
@@ -537,6 +642,27 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(503, {"error": "semantic_storage_unavailable"})
             return
         path = urlparse(self.path).path
+        route = self.model_route(path)
+        if route is False:
+            return
+        if route:
+            model_id, operation = route
+            if operation == "instance":
+                self.send_json(200, {"status": "ready", "modelId": model_id, "modelProtocol": 1,
+                                     "projectionScope": "definition_only", "runtimeReadEnabled": False, **storage_status()})
+            elif operation == "definition":
+                self.send_json(200, model_definition_status(model_id))
+            elif operation.startswith("graph/relationships/runs/"):
+                result = MODEL_GRAPHS.relationship_summary(model_id, operation.removeprefix("graph/relationships/runs/"),
+                    MODEL_DEFINITIONS.get(model_id), self.server.instance_config["tenantId"])
+                self.send_json(409 if result.get("error") else 404 if result["status"] == "not_found" else 200, result)
+            elif operation == "graph" or operation.startswith("graph/runs/"):
+                run_id = operation.removeprefix("graph/runs/") if operation.startswith("graph/runs/") else None
+                result = MODEL_GRAPHS.summary(model_id, MODEL_DEFINITIONS.get(model_id), run_id)
+                self.send_json(409 if result.get("error") else 404 if result["status"] == "not_found" else 200, result)
+            else:
+                self.send_json(405, {"error": "method_not_allowed"})
+            return
         if path == "/instance" and getattr(self, "instance_authorized", False):
             self.send_json(200, {"status": "ready", "protocol": 1,
                                  "engine": "semantica" if SEMANTICA_AVAILABLE else "projection-fallback",
@@ -572,6 +698,31 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(503, {"error": "semantic_storage_unavailable"})
             return
         path = urlparse(self.path).path
+        route = self.model_route(path)
+        if route is False:
+            return
+        if route:
+            model_id, operation = route
+            if operation not in ("definition/validate", "definition/publish", "graph/ingest", "graph/reset", "graph/relationships/materialize"):
+                self.send_json(405, {"error": "method_not_allowed"})
+                return
+            payload, error = self.read_json()
+            if error:
+                self.send_json(400, {"error": "invalid_json"})
+                return
+            if operation.startswith("graph/"):
+                tenant_id = self.server.instance_config["tenantId"]
+                action = {"graph/ingest": ingest_namespaced_graph, "graph/reset": reset_namespaced_graph,
+                          "graph/relationships/materialize": materialize_namespaced_relationships}[operation]
+                status, response = action(model_id, payload, tenant_id)
+                self.send_json(status, response)
+            elif operation == "definition/validate":
+                _, validation = validate_model_definition(payload.get("definition"))
+                self.send_json(200, {"modelId": model_id, "status": validation["status"], "validation": validation})
+            else:
+                status, response = publish_namespaced_model(model_id, payload)
+                self.send_json(status, response)
+            return
         if path == "/demo/ingest":
             payload, error = self.read_json()
             if error:

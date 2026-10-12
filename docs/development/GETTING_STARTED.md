@@ -1,10 +1,10 @@
 # 本地开发与启动
 
-更新：2026-09-03。以下命令在项目根目录执行；默认只用于开发和模拟数据，不用于生产。
+更新：2026-10-11。以下命令在项目根目录执行；默认只用于开发和模拟数据，不用于生产。
 
 ## 环境
 
-- Node.js：现有 CI 使用 22；本次整理验证环境为 24.14.1。项目使用 `node:sqlite`，请使用包含该能力的版本，不要切回旧版 Node。
+- Node.js：现有 CI 使用 22；本机验证环境为 24.14.1。桌面下载器要求至少 22.12.0，项目还使用 `node:sqlite`；不要切回旧版 Node。下载器升级和 D 盘打包缓存说明见[供应链安全基线](../operations/SOFTWARE_SUPPLY_CHAIN.md)。
 - npm：使用根目录 `package-lock.json` 和 workspaces，在根目录执行 `npm ci`。
 - Python：用于独立 Semantica 服务和文档工具。优先复用项目已有虚拟环境，缺失时再创建；依赖见 [requirements.txt](../../services/semantic-context/requirements.txt)。
 - Windows Electron：开发依赖随 npm 安装；Tauri/移动原生打包另需相应平台工具链，Web 构建不等于原生发布。

@@ -38,6 +38,100 @@ function mappingFixture(t) {
   return { draft, plan, records, queries, run, scope };
 }
 
+function recursiveMappingFixture(t) {
+  const f = mappingFixture(t);
+  const node = { id: 'Node', key: 'id', fields: ['id', 'qty'], sourceSystems: ['ERP'] };
+  const edge = { id: 'Edge', key: 'id', fields: ['id', 'parent', 'child', 'state'], sourceSystems: ['MES'] };
+  const crosswalk = (id, field) => ({ id, key: 'id', fields: ['id', 'edge_key', 'node_key', 'status', 'revision', 'start', 'end'], sourceSystems: ['MDM'], fieldDefinitions: [{ name: 'edge_key', reference: 'Edge', referenceField: field }, { name: 'node_key', reference: 'Node', referenceField: 'id' }] });
+  const parent = crosswalk('ParentMap', 'parent'); const child = crosswalk('ChildMap', 'child');
+  f.draft.objectTypes = [node, edge, parent, child];
+  f.draft.relationshipTypes = ['parent', 'child'].map(field => ({ from: 'Edge', to: 'Node', predicate: `mapped_${field}`, keyMapping: { basis: 'master_data_lookup', fromField: field, toField: 'id', lookupSource: field === 'parent' ? 'ParentMap' : 'ChildMap', owner: 'mock', version: 'map-v1' } }));
+  const binding = field => ({ predicate: `mapped_${field}`, objectType: field === 'parent' ? 'ParentMap' : 'ChildMap', fromField: 'edge_key', toField: 'node_key', statusField: 'status', versionField: 'revision', validFromField: 'start', validToField: 'end', asOf: '2026-10-09T00:00:00Z', ...(field === 'parent' ? { direction: 'reverse' } : {}) });
+  f.plan.datasets = [{ id: 'nodes', objectType: 'Node', where: [{ field: 'id', target: true }], expand: { edgeObjectType: 'Edge', fromField: 'parent', toField: 'child', stateField: 'state', activeStates: ['active'], inactiveStates: ['inactive'], maxDepth: 3, fromMapping: binding('parent'), toMapping: binding('child') } }];
+  f.plan.outputs = [{ id: 'total', label: '递归节点数量', unit: '件', expression: { op: 'sum', dataset: 'nodes', value: { op: 'field', dataset: 'nodes', field: 'qty' } } }];
+  f.plan.coverage = { mode: 'bounded_declared_graph', requiredExpansions: ['nodes'] };
+  f.draft.accessPolicies = f.draft.objectTypes.map(type => ({ objectType: type.id, roles: ['executive'], effect: 'allow', condition: 'iam_scope' }));
+  process.env.ONTOLOGY_RUNTIME_GRANTS_JSON = JSON.stringify({ 'demo-enterprise': { executive: { objects: Object.fromEntries(f.draft.objectTypes.map(type => [type.id, { system: type.sourceSystems[0], fields: type.fields, classifications: ['internal'] }])) } } });
+  const record = (type, id, payload) => ({ id, objectType: type, system: f.draft.objectTypes.find(item => item.id === type).sourceSystems[0], tenantId: f.scope.tenantId, organizationId: 'org-quality-dept', classification: 'internal', version: 'snapshot-v1', occurredAt: '2026-10-08T00:00:00Z', payload: { id, ...payload } });
+  f.records.splice(0, f.records.length,
+    ...['N1', 'N2', 'N3'].map((id, index) => record('Node', id, { qty: index + 1 })),
+    record('Edge', 'E1', { parent: 'MES-A', child: 'MES-B', state: 'active' }), record('Edge', 'E2', { parent: 'MES-B', child: 'MES-C', state: 'active' }),
+    ...['ParentMap', 'ChildMap'].flatMap(type => ['A', 'B', 'C'].map((key, index) => record(type, `${type}-${key}`, { edge_key: `MES-${key}`, node_key: `N${index + 1}`, status: 'confirmed', revision: 'map-v1', start: '2026-10-01T00:00:00Z', end: null }))));
+  f.run = () => executeOntologyReadPlan({ draft: f.draft, plan: f.plan, target: 'N1', roleId: 'executive', scope: f.scope, retrieve: async (type, query) => { f.queries.push(query); return f.records.filter(row => row.objectType === type.id && query.filter.values.includes(row.payload[query.filter.field])); } });
+  return f;
+}
+
+test('recursive cross-system expansion resolves confirmed incoming and outgoing mappings at every level', async t => {
+  const f = recursiveMappingFixture(t); assert.equal(validateOntologyReadPlans(f.draft).status, 'passed');
+  const result = await f.run(); assert.equal(result.results[0].value, 6);
+  assert.equal(result.coverage.expansions[0].nodes, 3); assert.equal(result.coverage.expansions[0].depth, 2);
+  assert.equal(result.coverage.mappings, 4); assert.equal(result.executionAuthorized, false);
+  assert.deepEqual(result.datasets.nodes.map(row => row.id), ['N1', 'N2', 'N3']);
+  const graph = buildOntologyResultGraph(f.draft, result.records, 'v1', 'fp', [result.mappingEvidence]);
+  assert.equal(graph.relationships.filter(row => row.predicate === 'mapped_parent' || row.predicate === 'mapped_child').length, 4);
+});
+
+test('recursive mappings preflight all grants and reject scripts or conflicting UTC points before retrieval', async t => {
+  const f = recursiveMappingFixture(t); const grants = JSON.parse(process.env.ONTOLOGY_RUNTIME_GRANTS_JSON);
+  delete grants['demo-enterprise'].executive.objects.ChildMap; process.env.ONTOLOGY_RUNTIME_GRANTS_JSON = JSON.stringify(grants);
+  await assert.rejects(f.run(), /READ_OBJECT_FORBIDDEN/u); assert.equal(f.queries.length, 0);
+  const expansion = f.plan.datasets[0].expand;
+  expansion.toMapping.asOf = '2026-10-08T00:00:00Z';
+  assert.equal(validateOntologyReadPlans(f.draft).code, 'READ_MAPPING_TIME_CONFLICT');
+  expansion.toMapping.asOf = expansion.fromMapping.asOf; expansion.toMapping.script = 'return input';
+  await assert.rejects(f.run(), /READ_PLAN_INVALID/u); assert.equal(f.queries.length, 0);
+});
+
+test('recursive missing, expired and unconfirmed second-level mappings, cycles and depth cuts never yield partial outputs', async t => {
+  for (const scenario of ['missing', 'expired', 'pending', 'cycle', 'depth']) await t.test(scenario, async subtest => {
+    const f = recursiveMappingFixture(subtest); const row = f.records.find(item => item.id === 'ChildMap-C');
+    if (scenario === 'missing') f.records.splice(f.records.indexOf(row), 1);
+    if (scenario === 'expired') row.payload.end = '2026-10-08T00:00:00Z';
+    if (scenario === 'pending') row.payload.status = 'pending';
+    if (scenario === 'cycle') f.records.find(item => item.id === 'E2').payload.child = 'MES-A';
+    if (scenario === 'depth') f.plan.datasets[0].expand.maxDepth = 1;
+    await assert.rejects(f.run(), new RegExp({ missing: 'READ_MAPPING_MISSING', expired: 'READ_MAPPING_EXPIRED', pending: 'READ_MAPPING_UNCONFIRMED', cycle: 'READ_GRAPH_CYCLE', depth: 'READ_EXPANSION_DEPTH_LIMIT' }[scenario]));
+  });
+});
+
+test('revoking recursive mapping access during an edge read fails closed', async t => {
+  const f = recursiveMappingFixture(t);
+  await assert.rejects(executeOntologyReadPlan({ draft: f.draft, plan: f.plan, target: 'N1', roleId: 'executive', scope: f.scope, retrieve: async (type, query) => {
+    if (type.id === 'Edge') { const grants = JSON.parse(process.env.ONTOLOGY_RUNTIME_GRANTS_JSON); delete grants['demo-enterprise'].executive.objects.ChildMap; process.env.ONTOLOGY_RUNTIME_GRANTS_JSON = JSON.stringify(grants); }
+    return f.records.filter(row => row.objectType === type.id && query.filter.values.includes(row.payload[query.filter.field]));
+  } }), /READ_OBJECT_FORBIDDEN/u);
+});
+
+test('recursive incoming key aliasing across depths is rejected instead of reparenting an edge', async t => {
+  const f = recursiveMappingFixture(t);
+  f.records.find(row => row.id === 'ParentMap-B').payload.edge_key = 'MES-A';
+  await assert.rejects(f.run(), /READ_MAPPING_CONFLICT/u);
+});
+
+test('recursive mappings survive governed save, replay and Mock publication and drive the published Agent query', async t => {
+  const f = recursiveMappingFixture(t); resetRuntimeState(['oa_meta_model_runtime', 'ontology_publication', 'domain_event_outbox']);
+  const grants = JSON.parse(process.env.ONTOLOGY_RUNTIME_GRANTS_JSON); grants['demo-enterprise'].executive.metadata = true;
+  process.env.ONTOLOGY_RUNTIME_GRANTS_JSON = JSON.stringify(grants);
+  const objects = f.draft.objectTypes.map(type => ({ ...type, label: type.id, source: `mock.${type.sourceSystems[0]}.${type.id}`, coreObject: type.id, classification: '内部', fieldDefinitions: type.fields.map(name => ({ name, type: name === 'qty' ? 'number' : 'string', ...(type.fieldDefinitions?.find(item => item.name === name) || {}), ...(name === 'id' ? { primaryKey: true } : {}) })) }));
+  const definition = { ...f.draft, objectTypes: objects, modelingProfile: 'general', scenario: { ...f.draft.scenario, objective: '合成跨系统递归追溯', questions: ['递归影响节点数量？'], actionBindings: [] }, policies: ['只读合成演练'], stateMachines: [], events: [], metrics: [], glossaryTerms: [{ term: '影响节点', definition: '确认映射连接的声明图节点', objectType: 'Node' }], dataContracts: objects.map(o => ({ id: o.id, objectType: o.id, sourceSystem: o.sourceSystems[0], schemaVersion: 'mock-v1' })), qualityRules: objects.map(o => ({ id: o.id, objectType: o.id, rule: 'not_null' })), lineageEdges: objects.map(o => ({ from: o.source, to: o.id })) };
+  const role = getRole('executive'); assert.ok(!(await saveOAMetaModelDraft(definition, role)).error);
+  assert.equal((await validateOAMetaModelDraft(role)).draft.validation.status, 'passed');
+  await simulateBuildOAMetaModel(role); const candidateFingerprint = (await getOAMetaModelDraft()).fingerprint;
+  const bad = structuredClone(f.records); bad.find(row => row.id === 'ChildMap-C').payload.status = 'pending';
+  const replay = await runOntologyReadReplay({ role, identityScope: f.scope, body: { candidateFingerprint, cases: [{ planId: f.plan.id, target: 'N1', records: f.records, expected: { total: 6 } }, { planId: f.plan.id, target: 'N1', records: bad, expectedError: 'READ_MAPPING_UNCONFIRMED' }] } });
+  assert.equal(replay.status, 'passed', JSON.stringify(replay));
+  assert.ok(!(await publishGovernedOntology({ role, identityScope: f.scope, deploy: async (_candidate, version) => ({ status: 'published', deployment: { sourceFingerprint: candidateFingerprint, version } }) })).error);
+  const ontology = await getPublishedAgentOntology('executive', f.scope); assert.ok(ontology);
+  const previousFetch = globalThis.fetch; const previousConfig = process.env.ENTERPRISE_CONNECTORS_CONFIG_JSON;
+  t.after(() => { globalThis.fetch = previousFetch; if (previousConfig === undefined) delete process.env.ENTERPRISE_CONNECTORS_CONFIG_JSON; else process.env.ENTERPRISE_CONNECTORS_CONFIG_JSON = previousConfig; });
+  process.env.ENTERPRISE_CONNECTORS_CONFIG_JSON = JSON.stringify(Object.fromEntries(['erp', 'mes', 'mdm'].map(system => [system, { endpoint: 'http://127.0.0.1:19998' }])));
+  globalThis.fetch = async (_url, request) => { const { query } = JSON.parse(request.body); return new Response(JSON.stringify({ records: f.records.filter(row => row.objectType === query.objectType && query.filter.values.includes(row.payload[query.filter.field])), queryCoverage: { schemaVersion: 'ontology-query.v1', complete: true, queryFingerprint: ontologyQueryFingerprint(query) } })); };
+  const result = await runPublishedOntologyRead({ ontology, roleId: 'executive', scope: f.scope, target: 'N1', planId: f.plan.id, allowModelAnalysis: false });
+  assert.equal(result.status, 'completed', JSON.stringify(result)); assert.equal(result.results[0].value, 6);
+  assert.equal(result.coverage.roots[0].expansions[0].nodes, 3);
+  assert.equal(result.graph.relationships.filter(row => row.predicate === 'mapped_parent' || row.predicate === 'mapped_child').length, 4);
+});
+
 function chainedMappingFixture(t) {
   const f = mappingFixture(t);
   const sale = { id: 'Sale', key: 'id', fields: ['id', 'product', 'amount'], sourceSystems: ['POS'] };

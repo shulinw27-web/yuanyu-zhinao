@@ -21,6 +21,8 @@ import {
   discoverSemanticSources,
   executeSemanticOperationsTask,
   semanticTaskWorkspace,
+  modelWorkspaces,
+  modelSystemMaterials,
   getSemanticOperationsTaskTrace,
   issueSemanticOperationsTaskConfirmation,
   listSemanticOperationsSnapshots,
@@ -75,6 +77,101 @@ export function handleGovernanceRoutes(context) {
 }
 
 async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity, effectiveAccess, selectActionRole, denyButton, readBody, send }) {
+  const previewRecovery = url.pathname.match(/^\/api\/semantic-operations\/models\/([a-z][a-z0-9-]{1,63})\/preview-requests\/([a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})\/(inspect-prepared|resume|recover-commit)$/u);
+  if (previewRecovery) {
+    if (req.method !== 'POST' || url.search) { send(res, 400, { message: '候选恢复需要明确POST，不接受查询覆盖。', code: 'MODEL_PREVIEW_RECOVERY_INPUT_INVALID' }); return true; }
+    const body = await readBody(req);
+    if (!body || Array.isArray(body) || Object.keys(body).some(key => !['confirmed', 'inputFingerprint', 'expectedCheckpointFingerprint', 'expectedDraftFingerprint'].includes(key))) {
+      send(res, 400, { message: '恢复载荷不得覆盖路径中的模型、请求号或身份。', code: 'MODEL_PREVIEW_RECOVERY_INPUT_INVALID' }); return true;
+    }
+    const method = { 'inspect-prepared': 'inspectPreparedPreview', resume: 'resumePreparedPreview', 'recover-commit': 'recoverPreviewCommit' }[previewRecovery[3]];
+    const result = await modelWorkspaces[method]({ identityScope: agentIdentity, modelId: previewRecovery[1], body: { ...body, requestId: previewRecovery[2] } });
+    send(res, result.error ? result.status || 400 : 200, result.error ? { message: result.error, code: result.code,
+      ...(result.taskMayHaveCommitted ? { taskMayHaveCommitted: true } : {}), ...(result.preparationMayHaveCommitted ? { preparationMayHaveCommitted: true } : {}) } : result); return true;
+  }
+  const modelSources = url.pathname.match(/^\/api\/semantic-operations\/models\/([a-z][a-z0-9-]{1,63})\/source-materials\/(inspect|bind)$/u);
+  if (modelSources) {
+    if (req.method !== 'POST' || url.search) { send(res, 400, { message: '来源检查或绑定需要明确POST范围，不接受查询覆盖。', code: 'MODEL_SOURCE_INPUT_INVALID' }); return true; }
+    const result = await modelSystemMaterials[modelSources[2]]({ identityScope: agentIdentity, modelId: modelSources[1], body: await readBody(req) });
+    send(res, result.error ? result.status || 400 : 200, result.error ? { message: result.error, code: result.code,
+      ...(result.bindingMayHaveCommitted ? { bindingMayHaveCommitted: true } : {}) } : result); return true;
+  }
+  const structuredPreview = url.pathname.match(/^\/api\/semantic-operations\/models\/([a-z][a-z0-9-]{1,63})\/structured-preview-tasks$/u);
+  if (structuredPreview) {
+    if (req.method !== 'POST' || url.search) { send(res, 400, { message: '结构化候选预览需要明确POST，不接受查询覆盖。', code: 'MODEL_PREVIEW_INPUT_INVALID' }); return true; }
+    const result = await modelWorkspaces.previewModelTask({ identityScope: agentIdentity, modelId: structuredPreview[1], body: await readBody(req) });
+    send(res, result.error ? result.status || 400 : result.reused ? 200 : 201, result.error ? { message: result.error, code: result.code,
+      ...(result.taskMayHaveCommitted ? { taskMayHaveCommitted: true } : {}), ...(result.preparationMayHaveCommitted ? { preparationMayHaveCommitted: true } : {}) } : result); return true;
+  }
+  const previewEvidence = url.pathname.match(/^\/api\/semantic-operations\/models\/([a-z][a-z0-9-]{1,63})\/tasks\/([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})\/preview-evidence-recover$/u);
+  if (previewEvidence) {
+    if (req.method !== 'POST' || url.search) { send(res, 400, { message: '候选证据恢复需要明确POST，不接受查询覆盖。', code: 'MODEL_PREVIEW_RECOVERY_INPUT_INVALID' }); return true; }
+    const result = await modelWorkspaces.recoverPreviewEvidence({ identityScope: agentIdentity, modelId: previewEvidence[1], taskId: previewEvidence[2], body: await readBody(req) });
+    send(res, result.error ? result.status || 400 : 200, result.error ? { message: result.error, code: result.code,
+      ...(result.taskMayHaveCommitted ? { taskMayHaveCommitted: true } : {}), ...(result.evidencePending ? { evidencePending: true } : {}) } : result); return true;
+  }
+  const previewStatus = url.pathname.match(/^\/api\/semantic-operations\/models\/([a-z][a-z0-9-]{1,63})\/preview-requests\/([^/]+)$/u);
+  if (previewStatus) {
+    if (req.method !== 'GET' || url.search) { send(res, 400, { message: '预览请求状态仅支持明确模型和原请求号的只读请求。', code: 'MODEL_PREVIEW_STATUS_INPUT_INVALID' }); return true; }
+    const result = await modelWorkspaces.previewRequestStatus({ identityScope: agentIdentity, modelId: previewStatus[1], requestId: previewStatus[2] });
+    send(res, result.error ? result.status || 400 : 200, result.error ? { message: result.error, code: result.code } : result); return true;
+  }
+  const localCreate = url.pathname.match(/^\/api\/semantic-operations\/models\/([a-z][a-z0-9-]{1,63})\/local-validation-tasks$/u);
+  const localAction = url.pathname.match(/^\/api\/semantic-operations\/models\/([a-z][a-z0-9-]{1,63})\/tasks\/([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})\/(local-confirm|local-execute|confirmation-evidence-recover)$/u);
+  if (localCreate || localAction) {
+    if (req.method !== 'POST' || url.search) { send(res, 400, { message: '本地任务动作需要明确的POST请求，不接受查询覆盖参数。', code: 'MODEL_LOCAL_TASK_REQUEST_INVALID' }); return true; }
+    const body = await readBody(req);
+    const options = { identityScope: agentIdentity, modelId: (localCreate || localAction)[1], ...(localAction ? { taskId: localAction[2], localValidationOnly: true } : {}), body };
+    if (localAction?.[3] === 'confirmation-evidence-recover' && (!body || Array.isArray(body) || Object.keys(body).some(key => key !== 'confirmed') || body.confirmed !== true)) {
+      send(res, 400, { message: '证据恢复需要明确确认，不接受其他覆盖参数。', code: 'MODEL_LOCAL_TASK_REQUEST_INVALID' }); return true;
+    }
+    const result = await (localCreate ? modelWorkspaces.createLocalTask(options) : localAction[3] === 'local-confirm' ? modelWorkspaces.confirmTask(options)
+      : localAction[3] === 'local-execute' ? modelWorkspaces.executeTask(options) : modelWorkspaces.recoverConfirmationEvidence(options));
+    const uncertainty = Object.fromEntries(['taskMayHaveCommitted', 'workspaceWriteMayHaveCommitted', 'evidencePending'].filter(key => result[key] === true).map(key => [key, true]));
+    send(res, result.error ? result.status || 400 : localCreate && !result.reused ? 201 : 200, result.error ? { message: result.error, code: result.code, ...uncertainty,
+      ...(result.evidencePending && result.taskId ? { taskId: result.taskId } : {}) } : result); return true;
+  }
+  const modelDialogueMatch = url.pathname.match(/^\/api\/semantic-operations\/models\/([a-z][a-z0-9-]{1,63})\/tasks\/([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})\/dialogue$/u);
+  if (modelDialogueMatch) {
+    if (req.method !== 'GET' || url.search) { send(res, 400, { message: '模型对话仅支持明确模型与任务的只读请求。', code: 'MODEL_TASK_REQUEST_INVALID' }); return true; }
+    const result = await modelWorkspaces.dialogue({ identityScope: agentIdentity, modelId: modelDialogueMatch[1], taskId: modelDialogueMatch[2] });
+    send(res, result.error ? result.status || 400 : 200, result.error ? { message: result.error, code: result.code } : result); return true;
+  }
+  const modelTaskMatch = url.pathname.match(/^\/api\/semantic-operations\/models\/([a-z][a-z0-9-]{1,63})\/tasks(?:\/([a-zA-Z0-9][a-zA-Z0-9._-]{0,127}))?$/u);
+  if (modelTaskMatch) {
+    const keys = [...url.searchParams.keys()];
+    if (req.method !== 'GET' || modelTaskMatch[2] && url.search || new Set(keys).size !== keys.length
+      || keys.some(key => !['offset', 'limit', 'includeArchived'].includes(key))
+      || ['offset', 'limit'].some(key => url.searchParams.has(key) && !/^\d{1,7}$/u.test(url.searchParams.get(key)))
+      || url.searchParams.has('includeArchived') && !['true', 'false'].includes(url.searchParams.get('includeArchived'))) {
+      send(res, 400, { message: '模型任务只支持限定的只读分页请求。', code: 'MODEL_TASK_REQUEST_INVALID' }); return true;
+    }
+    const filters = Object.fromEntries(keys.map(key => [key, key === 'includeArchived' ? url.searchParams.get(key) === 'true' : Number(url.searchParams.get(key))]));
+    const result = modelTaskMatch[2] ? await modelWorkspaces.task({ identityScope: agentIdentity, modelId: modelTaskMatch[1], taskId: modelTaskMatch[2] })
+      : await modelWorkspaces.tasks({ identityScope: agentIdentity, modelId: modelTaskMatch[1], filters });
+    send(res, result.error ? result.status || 400 : 200, result.error ? { message: result.error, code: result.code } : result); return true;
+  }
+  const modelWorkspaceMatch = url.pathname.match(/^\/api\/semantic-operations\/models(?:\/([a-z][a-z0-9-]{1,63})\/(workspace|draft|validate|simulate|simulation|publish))?$/u);
+  if (modelWorkspaceMatch) {
+    const operation = modelWorkspaceMatch[2];
+    if (url.search || !['GET', 'POST'].includes(req.method) || req.method === 'POST' && ['workspace', 'simulation'].includes(operation)
+      || req.method === 'GET' && ['validate', 'simulate', 'publish'].includes(operation)) {
+      send(res, 400, { message: '模型入口不接受额外选择参数或此方法。', code: 'MODEL_WORKSPACE_REQUEST_INVALID' }); return true;
+    }
+    const result = ['validate', 'simulate', 'publish'].includes(operation)
+      ? await modelWorkspaces[operation]({ identityScope: agentIdentity, modelId: modelWorkspaceMatch[1], body: await readBody(req) })
+      : operation === 'simulation' ? await modelWorkspaces.simulation({ identityScope: agentIdentity, modelId: modelWorkspaceMatch[1] })
+      : operation === 'draft'
+      ? req.method === 'POST' ? await modelWorkspaces.saveDraft({ identityScope: agentIdentity, modelId: modelWorkspaceMatch[1], body: await readBody(req) })
+        : await modelWorkspaces.draft({ identityScope: agentIdentity, modelId: modelWorkspaceMatch[1] })
+      : req.method === 'POST'
+      ? await modelWorkspaces.register({ identityScope: agentIdentity, body: await readBody(req) })
+      : modelWorkspaceMatch[1] ? await modelWorkspaces.inspect({ identityScope: agentIdentity, modelId: modelWorkspaceMatch[1] })
+        : await modelWorkspaces.list({ identityScope: agentIdentity });
+    send(res, result.error ? result.status || 400 : req.method === 'POST' && !modelWorkspaceMatch[1] ? 201 : 200,
+      result.error ? { message: result.error, code: result.code, ...(result.registrationMayHaveCommitted ? { registrationMayHaveCommitted: true } : {}), ...(result.workspaceWriteMayHaveCommitted ? { workspaceWriteMayHaveCommitted: true } : {}), ...(result.publicationMayHaveCommitted ? { publicationMayHaveCommitted: true } : {}) } : result);
+    return true;
+  }
   const onboardingMatch = url.pathname.match(/^\/api\/semantic-operations\/onboarding(?:\/([^/]+)(?:\/(materials|connection|preview|alignment|handoff|calculations))?)?$/u);
   if (onboardingMatch && ['GET', 'POST'].includes(req.method)) {
     const [, encodedId, action] = onboardingMatch;
@@ -95,7 +192,8 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
         : action === 'handoff' ? await handoffMockOnboardingModel({ ...options, id: decodeURIComponent(encodedId), body })
         : action === 'materials' ? await saveMockOnboardingMaterial({ ...options, id: decodeURIComponent(encodedId), body }) : await createMockOnboardingProject({ ...options, body });
     }
-    send(res, result.error ? result.status || 400 : req.method === 'POST' && !action ? 201 : 200, result.error ? { message: result.error, code: result.code } : result);
+    send(res, result.error ? result.status || 400 : req.method === 'POST' && !action ? 201 : 200, result.error ? { message: result.error, code: result.code,
+      ...(result.evidencePending ? { evidencePending: true, taskMayHaveCommitted: true, taskId: result.taskId, proposalId: result.proposalId } : {}) } : result);
     return true;
   }
   // ── 系统接入（阶段 2：从管理 Web config 页迁出，命名空间统一到元域智语端） ──────

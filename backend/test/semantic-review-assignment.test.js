@@ -29,6 +29,15 @@ test.beforeEach(async () => {
   writeState('semantic_operations_agent_tasks', 'index', { 'review-fixture': { id: 'review-fixture', owner: semanticOperationsPrincipalKey(admin), originRoleId: 'executive', createdAt: at, updatedAt: at, title: '合成模型审核', status: 'waiting_confirmation', command: 'apply_proposal', requiredPermission: 'meta_model.draft.save', reviewPermission: 'meta_model.draft.review', confirmationRequired: true, confirmation: { state: 'not_issued' }, proposal: { id: 'proposal-fixture', revision: 1, critic: { status: 'passed' }, mappingValidation: { blocked: false }, objectTypes: [], relationshipTypes: [] }, reviewContext: { draftFingerprint: fingerprint, proposalRevision: 1 }, events: [] } });
 });
 test.afterEach(() => configureSemanticGovernanceRepository(null));
+
+test('wrong-model review tasks cannot be assigned and do not create notifications', () => within(async () => {
+  mutateState('semantic_operations_agent_tasks', 'index', {}, index => {
+    index['review-fixture'].modelId = 'finance'; return { value: index };
+  });
+  assert.equal((await assignment(admin, quality.subjectId)).code, 'SEMANTIC_TASK_NOT_FOUND');
+  assert.equal(Object.keys(readState('semantic_operations_notifications', 'index', {})).length, 0);
+  assert.equal(readState('semantic_operations_agent_tasks', 'index', {})['review-fixture'].reviewAssignment, undefined);
+}));
 test('assignment uses active tenant IAM reviewers, invalidates tokens and persists a targeted notice atomically', () => within(async () => {
   const roster = await workspace.reviewers({ identityScope: admin });
   assert.ok(roster.reviewers.some(user => user.subjectId === quality.subjectId));

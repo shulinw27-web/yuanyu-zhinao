@@ -1,6 +1,6 @@
 import { getMockScenarioSemanticFacts } from './mock-scenario-service.js';
 import { semanticFingerprint } from './semantic-model-fingerprint.js';
-import { currentSemanticTenant } from './semantic-tenant-context.js';
+import { currentSemanticTenant, currentSemanticModel, currentSemanticModelRegistered, DEFAULT_SEMANTIC_MODEL_ID } from './semantic-tenant-context.js';
 import { semanticInstanceConnection, requestSemanticInstance } from './semantic-instance-transport.js';
 
 const isEnabled = () => process.env.SEMANTICA_DEMO_BRIDGE_ENABLED === 'true' || (!process.env.NODE_ENV || process.env.NODE_ENV === 'development');
@@ -9,7 +9,9 @@ function unavailable(reason, detail) {
   return { status: 'unavailable', engine: 'local-projection', reason, detail, checkedAt: new Date().toISOString() };
 }
 
-function boundary(connection) {
+function boundary(connection, definitionOnly = false) {
+  if (currentSemanticModel() !== DEFAULT_SEMANTIC_MODEL_ID && (!definitionOnly || !connection.guarded)) return { ...unavailable('model_namespace_unsupported', '独立模型定义需要认证实例；共享图与业务事实入口仍未启用。'), requestAttempted: false };
+  if (currentSemanticModel() !== DEFAULT_SEMANTIC_MODEL_ID && !currentSemanticModelRegistered()) return { ...unavailable('model_workspace_unregistered', '独立模型未经注册工作区准入；未发送请求。'), requestAttempted: false };
   const reason = connection.reason || (!isEnabled() ? 'bridge_disabled' : null);
   return reason ? { ...unavailable(reason, '语义实例未启用、未绑定或配置无效；未访问共享图。'), requestAttempted: false } : null;
 }
@@ -75,9 +77,11 @@ export async function getSemanticaModelDiscovery() {
 }
 
 export async function getSemanticaModelDeployment() {
-  const connection = semanticInstanceConnection(); const blocked = boundary(connection); if (blocked) return blocked;
+  const connection = semanticInstanceConnection(); const blocked = boundary(connection, true); if (blocked) return blocked;
   try {
-    return await requestSemanticInstance(connection, '/demo/model-definition');
+    const modelId = currentSemanticModel();
+    return await requestSemanticInstance(connection, modelId === DEFAULT_SEMANTIC_MODEL_ID ? '/demo/model-definition' : `/models/${modelId}/definition`,
+      modelId === DEFAULT_SEMANTIC_MODEL_ID ? {} : { modelId });
   } catch (error) {
     return requestFailure(error);
   }
@@ -104,19 +108,33 @@ const semanticDefinition = (model, version = 'draft') => ({
 });
 
 export async function validateSemanticaModelDefinition(model) {
-  const connection = semanticInstanceConnection(); const blocked = boundary(connection); if (blocked) return blocked;
+  const connection = semanticInstanceConnection(); const blocked = boundary(connection, true); if (blocked) return blocked;
   try {
-    const result = await requestSemanticInstance(connection, '/demo/model-definition/validate', { method: 'POST', body: { definition: semanticDefinition(model) } });
+    const modelId = currentSemanticModel(); const namespaced = modelId !== DEFAULT_SEMANTIC_MODEL_ID;
+    const result = await requestSemanticInstance(connection, namespaced ? `/models/${modelId}/definition/validate` : '/demo/model-definition/validate',
+      { method: 'POST', body: { definition: semanticDefinition(model) }, ...(namespaced ? { modelId } : {}) });
     return { ...result, checkedAt: new Date().toISOString() };
   } catch (error) {
     return requestFailure(error);
   }
 }
 
-export async function publishSemanticaModelDefinition(model, version) {
-  const connection = semanticInstanceConnection(); const blocked = boundary(connection); if (blocked) return blocked;
+export async function publishSemanticaModelDefinition(model, version, { expectedDeployment, beforeDispatch } = {}) {
+  const connection = semanticInstanceConnection(); const blocked = boundary(connection, true); if (blocked) return blocked;
   try {
-    const result = await requestSemanticInstance(connection, '/demo/model-definition/publish', { method: 'POST', body: { definition: semanticDefinition(model, version) } });
+    const modelId = currentSemanticModel(); const namespaced = modelId !== DEFAULT_SEMANTIC_MODEL_ID;
+    if (namespaced && (!expectedDeployment || expectedDeployment.modelId !== modelId
+      || expectedDeployment.instance?.tenantId !== connection.tenantId || expectedDeployment.instance?.deploymentId !== connection.deploymentId
+      || expectedDeployment.instance?.modelId !== modelId || expectedDeployment.instance?.identityVerified !== true
+      || expectedDeployment.instance?.modelProtocol !== 1 || expectedDeployment.projectionScope !== 'definition_only'
+      || expectedDeployment.runtimeReadEnabled !== false || !['published', 'not_published'].includes(expectedDeployment.status)
+      || expectedDeployment.status === 'published' && !/^[a-f0-9]{20}$/.test(expectedDeployment.fingerprint))) {
+      return { ...unavailable('model_deployment_unverified', '缺少同一模型及部署的受控预检回执，未发送发布请求。'), requestAttempted: false };
+    }
+    const result = await requestSemanticInstance(connection, namespaced ? `/models/${modelId}/definition/publish` : '/demo/model-definition/publish',
+      { method: 'POST', body: { definition: semanticDefinition(model, version),
+        ...(namespaced ? { expectedFingerprint: expectedDeployment.status === 'published' ? expectedDeployment.fingerprint : null } : {}) },
+      ...(namespaced ? { modelId } : {}), ...(beforeDispatch !== undefined ? { beforeDispatch } : {}) });
     return { ...result, requestAttempted: true, checkedAt: new Date().toISOString() };
   } catch (error) {
     return requestFailure(error);

@@ -27,8 +27,14 @@ import { affirmativeRequest, boundedMaterial, understandAgentTurn } from './agen
 import { inspectMultimodalInput, extractMultimodalEvidence } from './multimodal-input-service.js';
 import { hasButtonPermission } from './access-control-service.js';
 import { extendSemanticMaterials, discoverWorkspaceSchemas, materialSchemaIndex } from './semantic-material-workspace-service.js';
-import { appendAgentEvidenceEvent, createAgentEvidenceTrace, getAgentEvidenceTrace, setAgentEvidenceTraceStatus } from './agent-evidence-trace-service.js';
+import { semanticModelEvidence, modelSystemMaterials, semanticModelAdmission } from '../domains/governance/public-api.js';
+const appendAgentEvidenceEvent = (...args) => semanticModelEvidence.append(...args);
+const createAgentEvidenceTrace = (...args) => semanticModelEvidence.create(...args);
+const getAgentEvidenceTrace = (...args) => semanticModelEvidence.get(...args);
+const setAgentEvidenceTraceStatus = (...args) => semanticModelEvidence.status(...args);
 import { createSemanticOperationsNotification } from './semantic-operations-notification-service.js';
+import { currentSemanticModel, DEFAULT_SEMANTIC_MODEL_ID } from './semantic-tenant-context.js';
+import { assertCurrentSemanticModelAdmission, semanticModelReferenceMatches } from './semantic-model-reference.js';
 
 const TASK_NAMESPACE = 'semantic_operations_agent_tasks';
 const TASK_INDEX_KEY = 'index';
@@ -48,7 +54,7 @@ const readTaskIndex = () => readSemanticGovernanceState(TASK_NAMESPACE, TASK_IND
 const mutateTaskIndex = (callback) => mutateSemanticGovernanceState(TASK_NAMESPACE, TASK_INDEX_KEY, {}, callback);
 const appendTaskMessage = (id, role, content) => mutateTaskIndex((index) => {
   const task = index[id];
-  if (!task) return { commit: false };
+  if (!semanticModelReferenceMatches(task)) return { commit: false };
   const at = now();
   task.messages ||= [];
   task.messages.push({ role, content: String(content || '').slice(0, 4000), time: at });
@@ -63,13 +69,14 @@ const currentDraftFingerprint = () => mapMaybe(getOAMetaModelDraft(), semanticFi
 const reviewPermissionOf = (task) => task?.reviewPermission || (task?.proposal && task.command === 'apply_proposal' ? 'meta_model.draft.review' : null);
 const taskTenantId = (task) => { try { return JSON.parse(task.owner)?.[0] || null; } catch { return null; } };
 const sameTaskTenant = (task, identityScope) => taskTenantId(task) === (identityScope?.tenantId || 'demo-enterprise');
-const taskCanBeReviewed = (task, identityScope, accessContext) => Boolean(reviewPermissionOf(task) && sameTaskTenant(task, identityScope)
+const taskCanBeReviewed = (task, identityScope, accessContext) => Boolean(semanticModelReferenceMatches(task) && reviewPermissionOf(task) && sameTaskTenant(task, identityScope)
   && (!task.reviewAssignment?.subjectId || task.reviewAssignment.subjectId === (accessContext?.subjectId || identityScope?.subjectId))
   && (accessContext
     ? accessContext.buttonPermissionIds?.includes(reviewPermissionOf(task)) && accessContext.buttonPermissionIds?.includes(task.requiredPermission)
     : semanticOperationsOwnerMatches(task.owner, identityScope)
       && hasButtonPermission(task.originRoleId, reviewPermissionOf(task)) && hasButtonPermission(task.originRoleId, task.requiredPermission)));
 const taskCanBeViewed = (task, accessContext, identityScope) => {
+  if (!semanticModelReferenceMatches(task)) return false;
   const owner = semanticOperationsOwnerMatches(task.owner, identityScope);
   const reviewer = taskCanBeReviewed(task, identityScope, accessContext);
   if (!owner && !reviewer) return false;
@@ -356,9 +363,12 @@ const commandLabel = {
 };
 
 const publicTask = (task) => task && ({
+  evidenceState: task.traceProvisioning || (task.traceId ? 'existing' : 'not_recorded'),
+  creationMode: task.creationMode || 'configured_agent',
   workspaceContext: task.workspaceContext || null,
   onboardingSource: task.onboardingSource || null,
   id: task.id,
+  modelId: task.modelId || DEFAULT_SEMANTIC_MODEL_ID,
   traceId: task.traceId || null,
   parentTaskId: task.parentTaskId || null,
   threadId: task.threadId || task.id,
@@ -378,6 +388,7 @@ const publicTask = (task) => task && ({
   confirmationRequired: task.confirmationRequired,
   confirmation: task.confirmation ? {
     state: task.confirmation.state,
+    evidenceState: task.confirmation.evidenceState || 'legacy_async',
     issuedAt: task.confirmation.issuedAt || null,
     expiresAt: task.confirmation.expiresAt || null,
     consumedAt: task.confirmation.consumedAt || null
@@ -401,10 +412,13 @@ const publicTask = (task) => task && ({
 // Internal preparation port for the sandbox onboarding transaction. No model
 // inference, publication, confirmation token or independent persistence here.
 export async function prepareOnboardingSemanticTask({ id, proposal, identityScope, roleId, onboardingSource }) {
+  if (currentSemanticModel() !== DEFAULT_SEMANTIC_MODEL_ID
+    && !await semanticModelAdmission.verifyOnboarding({ proposal, identityScope, roleId, onboardingSource })) return { error: '来源接入项目与当前模型或材料修订不一致。', code: 'MODEL_ONBOARDING_BINDING_REQUIRED' };
   const createdAt = now();
   const response = `已从模拟接入材料生成 ${proposal.objectTypes.length} 个对象、${proposal.relationshipTypes.length} 条关系的候选提案。结构校验${proposal.critic.status === 'passed' ? '通过' : '未通过'}，样本验证${proposal.mappingValidation.status === 'passed' ? '通过' : '待处理'}；尚未采纳或发布。业务映射仅作为审阅附件，不自动变成指标或执行规则。`;
   const request = '根据当前已校对的模拟企业接入材料生成候选模型，等待人工审阅。';
-  const task = { id, threadId: id, parentTaskId: null, turn: 1, traceId: null, owner: identityKey(identityScope),
+  const task = { id, threadId: id, parentTaskId: null, turn: 1, traceId: `trace-${randomBytes(16).toString('hex')}`, traceProvisioning: 'pending', owner: identityKey(identityScope),
+    modelId: currentSemanticModel(),
     createdAt, updatedAt: createdAt, status: 'waiting_confirmation', intent: 'build_model', title: '模拟企业接入 · 建模交接', request,
     originRoleId: roleId, originDeviceId: identityScope.deviceId || null,
     command: 'apply_proposal', requiredPermission: 'meta_model.draft.save', reviewPermission: 'meta_model.draft.review', confirmationRequired: true, confirmation: { state: 'not_issued' },
@@ -432,8 +446,14 @@ const inspectStatus = async (identityScope) => {
   };
 };
 
-export async function createSemanticOperationsTask({ body, role, identityScope, accessContext }) {
+export async function createSemanticOperationsTask({ body, role, identityScope, accessContext, structuredPreview = false, beforeTaskCommit, checkpointPreparedTask, commitPreparedTask }) {
+  body = structuredClone(body || {}); identityScope = structuredClone(identityScope); accessContext = structuredClone(accessContext);
+  if (body?.modelId !== undefined && body.modelId !== currentSemanticModel()) return { error: '任务模型引用与当前工作区不一致。', status: 409, code: 'SEMANTIC_TASK_MODEL_MISMATCH' };
+  await assertCurrentSemanticModelAdmission();
   const text = normalize(body?.text);
+  if (structuredPreview && (body.parentTaskId || body.workspaceContext || classifySemanticOperationsIntent(text, { hasAttachments: Boolean(body.attachments?.length) }).intent !== 'build_model')) {
+    return { error: '结构化预览仅接受独立建模诉求，不处理聊天、上文修订、确认或发布。', code: 'SEMANTIC_STRUCTURED_PREVIEW_BUILD_ONLY', status: 400 };
+  }
   if (!text && !body?.attachments?.length) return { error: '请输入元域智语目标，或上传一份受控材料。', status: 400 };
   const promptSafety = inspectModelPromptSafety(text);
   if (!promptSafety.safe) return { error: '运营指令未通过安全检查，未创建任务。', status: 400 };
@@ -477,7 +497,7 @@ export async function createSemanticOperationsTask({ body, role, identityScope, 
     if (Number(body.parentProposalRevision) !== parent.proposal.revision) return { error: '候选修订已经变化，请刷新当前任务后继续修改。', status: 409, code: 'SEMANTIC_PROPOSAL_REVISION_CONFLICT' };
     const edit = parseSemanticModelEdit(text, parent.proposal, await getOAMetaModelDraft());
     if (edit.error) return { ...edit, status: 422 };
-    const revised = await reviseSemanticOperationsTaskProposal({ taskId: parent.id, body: { ...edit.body, candidateFieldWithdrawal: edit.withdrawal, candidateObjectWithdrawal: edit.objectWithdrawal, candidateRelationshipWithdrawal: edit.relationshipWithdrawal, revision: parent.proposal.revision }, role, identityScope });
+    const revised = await reviseSemanticOperationsTaskProposal({ taskId: parent.id, body: { ...edit.body, modelRemoval: edit.modelRemoval, candidateFieldWithdrawal: edit.withdrawal, candidateObjectWithdrawal: edit.objectWithdrawal, candidateRelationshipWithdrawal: edit.relationshipWithdrawal, revision: parent.proposal.revision }, role, identityScope });
     if (revised.error) return { ...revised, status: 409 };
     await appendTaskMessage(parent.id, 'user', text);
     await appendTaskMessage(parent.id, 'assistant', `已修订当前候选：${edit.summary}。${revised.response || ''}未采纳到草稿、未发布；旧确认凭证失效。`);
@@ -488,10 +508,21 @@ export async function createSemanticOperationsTask({ body, role, identityScope, 
   }
   const multimodal = inspectMultimodalInput(body, role);
   if (multimodal.error) return { error: multimodal.error, status: 400 };
+  let systemMaterialBinding = null; let boundSystemDocuments = [];
+  if (currentSemanticModel() !== DEFAULT_SEMANTIC_MODEL_ID && SOURCE_BOUND_INTENTS.includes(classifySemanticOperationsIntent(text, { hasAttachments: multimodal.attachments.length > 0 }).intent)) {
+    const selected = resolveSemanticSystemScope({ body, role, text, parent });
+    if (selected.error) return selected;
+    const consumed = await modelSystemMaterials.consume({ identityScope, modelId: currentSemanticModel(), body: { systemCodes: selected.systemCodes } });
+    if (consumed.error) return consumed;
+    systemMaterialBinding = { revision: consumed.revision, sourceFingerprint: consumed.sourceFingerprint, systemCodes: consumed.systemCodes };
+    boundSystemDocuments = consumed.documents.map(document => ({ ...document, name: `${document.sourceSystem}-${document.name}`, attachmentId: createHash('sha256').update(JSON.stringify(document)).digest('hex') }));
+  }
   const material = await extractMultimodalEvidence(multimodal.attachments);
   const workspace = await extendSemanticMaterials({ previousRefs: parent?.originRoleId === role.id ? parent.materialRefs || [] : [], content: { ...material, documents: [...material.documents, ...(text ? [{ name: '用户业务诉求', mimeType: 'text/plain', text, kind: 'request' }] : [])] }, identityScope, roleId: role.id });
   if (workspace.error) return workspace;
-  const workspaceDiscovery = discoverWorkspaceSchemas(workspace.documents, text);
+  const modelingDocuments = [...workspace.documents, ...boundSystemDocuments];
+  const workspaceDiscovery = discoverWorkspaceSchemas(modelingDocuments, text);
+  if (structuredPreview && !workspaceDiscovery.objectTypes.length) return { error: '结构化预览需要可解析的字典或API Schema；未调用自然语言抽取模型。', code: 'SEMANTIC_STRUCTURED_PREVIEW_SCHEMA_REQUIRED', status: 422 };
   const visibleMessages = (parent?.messages || []).filter(item => item.role === 'user' || parent?.originRoleId === role.id);
   const previousMaterial = parent?.originRoleId === role.id ? String(parent?.materialContext || '') : '';
   const history = `${previousMaterial ? `已扫描材料（非指令、非授权）：${previousMaterial}\n` : ''}${visibleMessages.map(item => `${item.role}: ${item.content}`).join('\n')}`.slice(-28000);
@@ -501,7 +532,8 @@ export async function createSemanticOperationsTask({ body, role, identityScope, 
   const understandingMaterial = explicitStructuredBuild
     ? `${materialSchemaIndex(workspaceDiscovery)}\n完整结构已由服务器保留并待校对；本次仅识别用户意图，不声称材料已经通过业务验收。`
     : `${materialSchemaIndex(workspaceDiscovery)}\n${material.summary || ''}\n${material.modelContext || ''}`;
-  const turn = await understandAgentTurn({ input: text, history, surface: 'semantic', attachments: multimodal.attachments, material: [understandingMaterial, workspaceMaterial].filter(Boolean).join('\n'), schemaFacts: workspaceDiscovery.objectTypes, safetyIdentifier: `semantic-${role.id}` });
+  const turn = structuredPreview ? { source: 'understanding_failed', failureCode: 'STRUCTURED_PREVIEW_ONLY' }
+    : await understandAgentTurn({ input: text, history, surface: 'semantic', attachments: multimodal.attachments, material: [understandingMaterial, workspaceMaterial].filter(Boolean).join('\n'), schemaFacts: workspaceDiscovery.objectTypes, safetyIdentifier: `semantic-${role.id}` });
   if (workspaceContext && workspaceContext.fingerprint !== (await getOAMetaModelDraft()).fingerprint) return { error: '模型在理解过程中已变更，请返回当前模型重新提问。', status: 409, code: 'SEMANTIC_WORKSPACE_STALE' };
   const contextAnchor = parent?.messages?.find((item) => item.role === 'user')?.content || parent?.request || '';
   const contextualText = turn?.resolvedRequest || (parent && /^(?:继续|再|补充|按照|基于|这个|它|然后|接着|同时)/.test(text)
@@ -515,12 +547,13 @@ export async function createSemanticOperationsTask({ body, role, identityScope, 
   const conversationalIntent = ['conversation', 'needs_clarification', 'unsupported_operation', 'permission_denied'].includes(classified.intent);
   // 范围门禁在意图判定之后、任何读取与规划之前：范围不合法就不产生任务、不读材料、不生成提案。
   const sourceBound = SOURCE_BOUND_INTENTS.includes(classified.intent);
+  if (sourceBound && currentSemanticModel() !== DEFAULT_SEMANTIC_MODEL_ID && !systemMaterialBinding) return { error: '本轮模型来源未明确绑定，请选择来源并重新提出明确建模或来源检查诉求。', code: 'MODEL_SOURCE_TASK_SCOPE_REQUIRED', status: 409 };
   const scope = sourceBound ? resolveSemanticSystemScope({ body, role, text: contextualText, parent }) : null;
   if (scope?.error) return { error: scope.error, status: scope.status, code: scope.code };
   if (classified.intent === 'approve_model') {
     await mutateTaskIndex((index) => {
       const current = index[parent.id];
-      if (!current || current.status !== 'waiting_confirmation' || !current.proposal || current.command !== 'apply_proposal') return { commit: false };
+      if (!current || !canConfirmTask(current, identityScope, accessContext) || current.status !== 'waiting_confirmation' || !current.proposal || current.command !== 'apply_proposal') return { commit: false };
       const at = now();
       current.messages ||= [];
       current.events ||= [];
@@ -548,12 +581,13 @@ export async function createSemanticOperationsTask({ body, role, identityScope, 
       systemCodes: scope.systemCodes
     })
     : null;
-  const planning = conversationalIntent ? null : await planSemanticOperationsRequest({ request: contextualText || '根据上传材料建设语义模型', authoritativeIntent: classified.intent, sourceDiscovery, identityScope,
+  const planning = conversationalIntent ? null : structuredPreview ? { mode: 'deterministic_preview', provider: 'none', authoritativeIntent: classified.intent, rationale: '仅解析结构化材料并形成候选，不调用大模型。' } : await planSemanticOperationsRequest({ request: contextualText || '根据上传材料建设语义模型', authoritativeIntent: classified.intent, sourceDiscovery, identityScope,
     materialFacts: { objects: workspaceDiscovery.objectTypes.map(item => ({ id: item.id, key: item.key, granularity: item.granularity, systems: item.sourceSystems,
       fields: item.fieldDefinitions.map(f => ({ name: f.name, type: f.type, unit: f.unit, reference: f.reference, referenceField: f.referenceField })) })),
       relationshipCount: workspaceDiscovery.relationshipTypes.length, documentNames: workspace.documents.map(item => item.name) } });
   const task = {
     id,
+    modelId: currentSemanticModel(),
     traceId: trace.id,
     parentTaskId: parent?.id || null,
     workspaceContext: workspaceContext ? { fingerprint: workspaceContext.fingerprint, objectId: workspaceContext.objectId } : null,
@@ -565,13 +599,15 @@ export async function createSemanticOperationsTask({ body, role, identityScope, 
     status: classified.intent === 'needs_clarification' ? 'needs_input' : classified.intent === 'permission_denied' ? 'denied' : nonExecutingIntent ? 'completed' : 'waiting_confirmation',
     // 模型理解不可用时的降级标记。状态本身由服务端确定性分类决定（不再是死路一条的
     // 'failed'），但降级事实必须对前端与审计可见，不得静默。
-    modelUnavailable: turnUnavailable || null,
+    modelUnavailable: structuredPreview ? null : turnUnavailable || null,
+    ...(structuredPreview ? { creationMode: 'structured_preview' } : {}),
     intent: classified.intent,
     title: text.slice(0, 42) || '根据受控材料建设语义模型',
     request: text,
     messages: [...visibleMessages, { role: 'user', content: text, time: createdAt }].slice(-80),
     materialContext: boundedMaterial([material.modelContext, previousMaterial].filter(Boolean).join('\n'), 12000),
     materialRefs: workspace.refs,
+    systemMaterialBinding,
     materialIncomplete: Boolean((parent?.originRoleId === role.id && parent?.materialIncomplete) || material.reports.some(item => !item.modelContentEligible || item.partial || (item.truncated && !item.extractionComplete))),
     materialReview: material.reports.length ? { summary: material.summary, reports: material.reports } : parent?.materialReview || null,
     command: classified.command,
@@ -601,14 +637,15 @@ export async function createSemanticOperationsTask({ body, role, identityScope, 
       unassignedObjects: []
     } : null,
     events: [
-      ...(turnUnavailable ? [{ time: createdAt, type: 'model_understanding_unavailable', detail: `模型理解不可用（${turn.failureCode || 'MODEL_RESULT_UNAVAILABLE'}）；已回落到服务端确定性分类，规则判定为“${classified.intent}”。发布动作不参与回落。` }] : []),
+      ...(structuredPreview ? [{ time: createdAt, type: 'structured_preview_prepared', detail: '显式结构化候选预览，不调用大模型理解、规划或非结构化抽取。' }]
+        : turnUnavailable ? [{ time: createdAt, type: 'model_understanding_unavailable', detail: `模型理解不可用（${turn.failureCode || 'MODEL_RESULT_UNAVAILABLE'}）；已回落到服务端确定性分类，规则判定为“${classified.intent}”。发布动作不参与回落。` }] : []),
       { time: createdAt, type: conversationalIntent ? 'conversation_routed' : 'intent_understood', detail: conversationalIntent ? `服务器识别为“${classified.intent}”，未创建可执行命令。` : `服务器已绑定“${classified.intent}”任务，尚未执行修改。` }
     ]
   };
   if (planning) task.events.push({ time: now(), type: 'planning_completed', detail: ['local_model_advisory', 'external_model_advisory'].includes(planning.mode) ? `${planning.provider === 'ark' ? '火山方舟' : planning.mode === 'local_model_advisory' ? '本地模型' : '云端模型'}已生成结构化规划建议；执行边界仍由服务器控制。` : '已使用确定性规划；执行边界由服务器控制。' });
   if (classified.intent === 'build_model') {
     const sourceMaterialIncomplete = task.materialIncomplete || (!workspace.refs.length && /【附件记忆为节选/.test(previousMaterial));
-    const proposal = await createSemanticOperationsProposalFromRequest({ body: { ...body, text: contextualText, sourceMaterial: `${visibleMessages.filter(item => item.role === 'user').map(item => item.content).join('\n')}\n${text}` }, role, identityScope, scannedMaterial: material, sourceMaterialIncomplete, workspaceDocuments: workspace.documents, scopeSystems: scope.systemCodes });
+    const proposal = await createSemanticOperationsProposalFromRequest({ body: { ...body, text: contextualText, sourceMaterial: `${visibleMessages.filter(item => item.role === 'user').map(item => item.content).join('\n')}\n${text}` }, role, identityScope, scannedMaterial: material, sourceMaterialIncomplete, workspaceDocuments: modelingDocuments, scopeSystems: scope.systemCodes, structuredOnly: structuredPreview });
     if (proposal.error) {
       if (proposal.code !== 'SEMANTIC_PROPOSAL_NO_GROUNDED_OBJECTS') return proposal;
       task.intent = 'needs_clarification';
@@ -670,7 +707,29 @@ export async function createSemanticOperationsTask({ body, role, identityScope, 
     };
   }
   task.messages.push({ role: 'assistant', content: task.response, time: now() });
-  await mutateTaskIndex((index) => {
+  if (systemMaterialBinding) {
+    const consumed = await modelSystemMaterials.consume({ identityScope, modelId: currentSemanticModel(), body: { systemCodes: systemMaterialBinding.systemCodes } });
+    if (consumed.error || consumed.revision !== systemMaterialBinding.revision || consumed.sourceFingerprint !== systemMaterialBinding.sourceFingerprint) return { error: '资料绑定或权限已变化，未返回本轮任务，请重新核对来源。', code: 'MODEL_SOURCE_TASK_BINDING_CHANGED', status: 409 };
+  }
+  await assertCurrentSemanticModelAdmission();
+  if (beforeTaskCommit && await beforeTaskCommit() !== true) return { error: '任务提交前准入未通过；材料或候选准备可能已保存，未提交任务。', code: 'SEMANTIC_TASK_CREATION_ADMISSION_CHANGED', status: 409, preparationMayHaveCommitted: true };
+  await assertCurrentSemanticModelAdmission();
+  if (beforeTaskCommit && systemMaterialBinding) {
+    const current = await modelSystemMaterials.consume({ identityScope, modelId: currentSemanticModel(), body: { systemCodes: systemMaterialBinding.systemCodes } });
+    if (current.error || current.revision !== systemMaterialBinding.revision || current.sourceFingerprint !== systemMaterialBinding.sourceFingerprint) return { error: '提交前来源绑定已变化；准备记录可能已保存，未提交任务。', code: 'MODEL_SOURCE_TASK_BINDING_CHANGED', status: 409, preparationMayHaveCommitted: true };
+  }
+  if (checkpointPreparedTask) {
+    if (!structuredPreview || typeof checkpointPreparedTask !== 'function' || typeof commitPreparedTask !== 'function') return { error: '准备检查点仅允许内部结构化预览联合提交。', code: 'SEMANTIC_PREVIEW_CHECKPOINT_UNSUPPORTED', status: 409, preparationMayHaveCommitted: true };
+    const checkpoint = await checkpointPreparedTask(structuredClone(task));
+    if (checkpoint?.state !== 'prepared') return { error: '准备检查点未完成，未提交任务。', code: checkpoint?.code || 'SEMANTIC_PREVIEW_CHECKPOINT_REJECTED', status: checkpoint?.status || 409, preparationMayHaveCommitted: true };
+    await assertCurrentSemanticModelAdmission();
+  }
+  if (commitPreparedTask) {
+    if (!structuredPreview || typeof commitPreparedTask !== 'function') return { error: '联合提交仅允许内部结构化预览。', code: 'SEMANTIC_PREVIEW_COMMIT_UNSUPPORTED', status: 409, preparationMayHaveCommitted: true };
+    const receipt = await commitPreparedTask(structuredClone(task));
+    if (receipt?.state !== 'committed' || receipt.taskId !== task.id) return { error: '任务与请求回执未完成联合提交。', code: receipt?.code || 'SEMANTIC_PREVIEW_COMMIT_REJECTED', status: receipt?.status || 409, preparationMayHaveCommitted: true };
+    task.traceProvisioning = 'pending';
+  } else await mutateTaskIndex((index) => {
     index[id] = task;
     return { value: index };
   });
@@ -691,6 +750,10 @@ export async function createSemanticOperationsTask({ body, role, identityScope, 
     await createSemanticOperationsNotification({ identityScope, severity: 'action_required', title: '语义模型待审核',
       message: `Agent 已生成“${task.title}”语义模型图，包含 ${task.proposal.objectTypes?.length || 0} 个业务对象、${task.proposal.relationshipTypes?.length || 0} 条对象关系。请在 Agent 工作台查看对象关系与底层系统链路，可用自然语言提出修改或审核通过。`,
       sourceType: 'semantic_model_review', sourceId: task.id, audiencePermissionId: task.reviewPermission || 'meta_model.draft.review', action: { type: 'open_semantic_task', taskId: task.id } });
+  }
+  if (systemMaterialBinding) {
+    const consumed = await modelSystemMaterials.consume({ identityScope, modelId: currentSemanticModel(), body: { systemCodes: systemMaterialBinding.systemCodes } });
+    if (consumed.error || consumed.revision !== systemMaterialBinding.revision || consumed.sourceFingerprint !== systemMaterialBinding.sourceFingerprint) return { error: '资料绑定或权限已变化，任务可能已保存，请重新核对来源。', code: 'MODEL_SOURCE_TASK_BINDING_CHANGED', status: 409, taskMayHaveCommitted: true };
   }
   return publicTask(task);
 }
@@ -724,7 +787,7 @@ export function getSemanticOperationsTask({ taskId: id, identityScope, accessCon
 export function archiveSemanticOperationsTask({ taskId: id, identityScope }) {
   return mutateTaskIndex((index) => {
     const task = index[id];
-    if (!task || !semanticOperationsOwnerMatches(task.owner, identityScope)) return { commit: false, result: { error: '未找到属于当前身份的元域智语任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
+    if (!semanticModelReferenceMatches(task) || !semanticOperationsOwnerMatches(task.owner, identityScope)) return { commit: false, result: { error: '未找到属于当前身份的元域智语任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
     if (task.status === 'executing') return { commit: false, result: { error: '执行中的任务不能归档。', code: 'SEMANTIC_TASK_ARCHIVE_BLOCKED' } };
     task.archivedAt = now();
     task.updatedAt = task.archivedAt;
@@ -742,7 +805,7 @@ export async function recordSemanticOperationsReportExport({ taskId: id, receipt
   if (!valid) return { error: '报告导出回执无效，未写入审计记录。', code: 'SEMANTIC_REPORT_RECEIPT_INVALID' };
   const result = await mutateTaskIndex((index) => {
     const task = index[id];
-    if (!task || !semanticOperationsOwnerMatches(task.owner, identityScope)) return { commit: false, result: { error: '未找到属于当前身份的元域智语任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
+    if (!semanticModelReferenceMatches(task) || !semanticOperationsOwnerMatches(task.owner, identityScope)) return { commit: false, result: { error: '未找到属于当前身份的元域智语任务。', code: 'SEMANTIC_TASK_NOT_FOUND' } };
     const time = now();
     task.events.push({ time, type: 'governed_report_exported', detail: `已导出 ${receipt.fileName}（${receipt.bytes} bytes，SHA-256 ${receipt.sha256.slice(0, 12)}…）。` });
     task.updatedAt = time; index[id] = task;
@@ -755,7 +818,7 @@ export async function recordSemanticOperationsReportExport({ taskId: id, receipt
 export function reviseSemanticOperationsTaskProposal({ taskId: id, body, role, identityScope }) {
   const operationResult = mapMaybe(getIndex(), (indexSnapshot) => {
   const task = indexSnapshot[id];
-  if (!task || !semanticOperationsOwnerMatches(task.owner, identityScope)) return { error: '未找到属于当前身份的元域智语任务。', code: 'SEMANTIC_TASK_NOT_FOUND' };
+  if (!semanticModelReferenceMatches(task) || !semanticOperationsOwnerMatches(task.owner, identityScope)) return { error: '未找到属于当前身份的元域智语任务。', code: 'SEMANTIC_TASK_NOT_FOUND' };
   if (task.status !== 'waiting_confirmation' || task.command !== 'apply_proposal' || !task.proposal?.id) return { error: '当前任务没有可修订的待确认模型提案。', code: 'SEMANTIC_TASK_PROPOSAL_NOT_EDITABLE' };
     return mapMaybe(updateSemanticOperationsProposal({
     proposalId: task.proposal.id,
@@ -770,6 +833,7 @@ export function reviseSemanticOperationsTaskProposal({ taskId: id, body, role, i
     candidateFieldWithdrawal: body?.candidateFieldWithdrawal,
     candidateObjectWithdrawal: body?.candidateObjectWithdrawal,
     candidateRelationshipWithdrawal: body?.candidateRelationshipWithdrawal,
+    modelRemoval: body?.modelRemoval,
     role,
     identityScope
   }), (proposal) => {
@@ -836,7 +900,7 @@ export function reviseSemanticOperationsTaskProposal({ taskId: id, body, role, i
   task.events.push({ time: task.updatedAt, type: 'proposal_revised', detail: `提案修订为 revision=${proposal.revision}，Critic=${proposal.critic.status}，Mapping=${proposal.mappingValidation.status}。` });
   const mutation = mutateTaskIndex((index) => {
     const current = index[id];
-    if (!current || !semanticOperationsOwnerMatches(current.owner, identityScope) || current.status !== 'waiting_confirmation' || current.proposal?.revision !== proposal.revision - 1) return { commit: false, result: { error: '任务状态或模型修订已并发变化，请刷新后重新审阅。', code: 'SEMANTIC_TASK_PROPOSAL_CONCURRENT_STATE' } };
+    if (!semanticModelReferenceMatches(current) || !semanticOperationsOwnerMatches(current.owner, identityScope) || current.status !== 'waiting_confirmation' || current.proposal?.revision !== proposal.revision - 1) return { commit: false, result: { error: '任务状态或模型修订已并发变化，请刷新后重新审阅。', code: 'SEMANTIC_TASK_PROPOSAL_CONCURRENT_STATE' } };
     // A revision may await sample validation while another reviewer transfers
     // the task. Preserve the latest assignment, messages and execution state.
     index[id] = { ...current, proposal, updatedAt: task.updatedAt, confirmation: task.confirmation, reviewContext: task.reviewContext, response: task.response, events: [...(current.events || []), task.events.at(-1)] };
@@ -852,13 +916,22 @@ export function reviseSemanticOperationsTaskProposal({ taskId: id, body, role, i
   });
 }
 
-export function issueSemanticOperationsTaskConfirmation({ taskId: id, identityScope, accessContext }) {
+// A task CAS covers the whole task record, not the ontology shape fingerprint.
+export const semanticTaskStateFingerprint = task => createHash('sha256').update(JSON.stringify(task || null)).digest('hex').slice(0, 24);
+export function issueSemanticOperationsTaskConfirmation({ taskId: id, identityScope, accessContext, expectedTaskFingerprint, beforeCommit, evidenceReceiptRequired = false }) {
   const rawToken = randomBytes(32).toString('base64url');
-  const operationResult = mapMaybe(currentDraftFingerprint(), (draftFingerprint) => mutateTaskIndex((index) => {
+  const operationResult = mapMaybe(currentDraftFingerprint(), (draftFingerprint) => mapMaybe(beforeCommit ? beforeCommit() : true, admitted => {
+    if (admitted !== true) return { error: '确认前模型或权限复验未通过。', code: 'SEMANTIC_TASK_CONFIRMATION_ADMISSION_CHANGED' };
+    return mutateTaskIndex((index) => {
     const task = index[id];
+    if (expectedTaskFingerprint !== undefined && (!/^[a-f0-9]{24}$/u.test(expectedTaskFingerprint) || semanticTaskStateFingerprint(task) !== expectedTaskFingerprint)) {
+      return { commit: false, result: { error: '任务已变化，未签发确认凭证。', code: 'SEMANTIC_TASK_CONFIRMATION_STATE_CHANGED' } };
+    }
     if (!task || !canConfirmTask(task, identityScope, accessContext)) {
       return { commit: false, result: { error: '当前角色无权审核该语义模型，或任务不属于当前租户。', code: 'SEMANTIC_TASK_REVIEW_ACCESS_DENIED' } };
     }
+    if (['pending', 'missing'].includes(task.traceProvisioning)) return { commit: false, result: { error: '任务证据仍待恢复，暂不能确认。', code: 'SEMANTIC_TASK_EVIDENCE_PENDING' } };
+    if (task.confirmation?.evidenceState === 'pending') return { commit: false, result: { error: '上次确认证据待恢复，未重新签发。', code: 'SEMANTIC_CONFIRMATION_EVIDENCE_PENDING' } };
     if (task.status === 'executing' && task.execution?.leaseExpiresAt && Date.parse(task.execution.leaseExpiresAt) <= Date.now()) {
       task.status = 'retryable';
       task.events.push({ time: now(), type: 'execution_lease_recovered', detail: '上一次执行租约已超时，任务已恢复为可重试。' });
@@ -877,14 +950,15 @@ export function issueSemanticOperationsTaskConfirmation({ taskId: id, identitySc
     }
     const issuedAt = now();
     const expiresAt = new Date(Date.now() + CONFIRMATION_TTL_MS).toISOString();
-    task.confirmation = { state: 'issued', tokenHash: confirmationTokenHash(rawToken), issuedAt, expiresAt };
+    task.confirmation = { state: 'issued', tokenHash: confirmationTokenHash(rawToken), issuedAt, expiresAt, ...(evidenceReceiptRequired ? { evidenceState: 'pending' } : {}) };
     task.updatedAt = issuedAt;
     task.events.push({ time: issuedAt, type: 'confirmation_issued', detail: '已签发一次性确认凭证，有效期 10 分钟。' });
     index[id] = task;
     return { value: index, result: { task: publicTask(task), confirmationToken: rawToken, expiresAt } };
+    });
   }));
   return mapMaybe(operationResult, (result) => {
-    if (result?.task?.traceId) {
+    if (result?.task?.traceId && !evidenceReceiptRequired) {
       void traceEvent(result.task.traceId, 'semantic_confirmation_issued', 'confirmation', 'awaiting_user', '已签发绑定草稿指纹和提案版本的一次性确认凭证。', { expiresAt: result.expiresAt, proposalRevision: result.task.proposal?.revision }).catch(() => {});
       void setAgentEvidenceTraceStatus(result.task.traceId, 'confirmed_pending_execution').catch(() => {});
     }
@@ -892,11 +966,16 @@ export function issueSemanticOperationsTaskConfirmation({ taskId: id, identitySc
   });
 }
 
-const reserveExecution = ({ id, identityScope, accessContext, confirmationToken }) => mapMaybe(currentDraftFingerprint(), (draftFingerprint) => mutateTaskIndex((index) => {
+const reserveExecution = ({ id, identityScope, accessContext, confirmationToken, expectedTraceId, expectedTaskFingerprint, beforeReserve }) => mapMaybe(currentDraftFingerprint(), draftFingerprint => mapMaybe(beforeReserve ? beforeReserve() : true, admitted => {
+  if (admitted !== true) return { error: '执行准入已变化，未消费凭证。', code: 'SEMANTIC_TASK_EXECUTION_ADMISSION_CHANGED' };
+  return mutateTaskIndex((index) => {
   const task = index[id];
+  if (expectedTaskFingerprint !== undefined && (!/^[a-f0-9]{24}$/u.test(expectedTaskFingerprint) || semanticTaskStateFingerprint(task) !== expectedTaskFingerprint)) return { commit: false, result: { error: '任务已变化，未消费凭证。', code: 'SEMANTIC_TASK_EXECUTION_STATE_CHANGED' } };
   if (!task || !canConfirmTask(task, identityScope, accessContext)) {
     return { commit: false, result: { error: '当前角色无权审核该语义模型，或任务不属于当前租户。', code: 'SEMANTIC_TASK_REVIEW_ACCESS_DENIED' } };
   }
+  if (['pending', 'missing'].includes(task.traceProvisioning) || task.traceProvisioning === 'ready' && task.traceId !== expectedTraceId) return { commit: false, result: { error: '任务证据仍待恢复或关联已变化，暂不能执行。', code: 'SEMANTIC_TASK_EVIDENCE_PENDING' } };
+  if (task.confirmation?.evidenceState === 'pending') return { commit: false, result: { error: '确认证据仍待恢复，未消费凭证。', code: 'SEMANTIC_CONFIRMATION_EVIDENCE_PENDING' } };
   if (!['waiting_confirmation', 'retryable'].includes(task.status)) {
     return { commit: false, result: { error: '该任务已经执行、正在执行或不可重复确认。', code: 'SEMANTIC_TASK_NOT_CONFIRMABLE' } };
   }
@@ -918,19 +997,21 @@ const reserveExecution = ({ id, identityScope, accessContext, confirmationToken 
   const startedAt = now();
   task.status = 'executing';
   task.updatedAt = startedAt;
-  task.execution = { attempt: (task.execution?.attempt || 0) + 1, startedAt, leaseExpiresAt: new Date(Date.now() + 2 * 60 * 1000).toISOString() };
+  task.execution = { attempt: (task.execution?.attempt || 0) + 1, startedAt, leaseToken: randomBytes(24).toString('base64url'), leaseExpiresAt: new Date(Date.now() + 2 * 60 * 1000).toISOString() };
   task.confirmation = { ...task.confirmation, state: 'consumed', tokenHash: null, consumedAt: startedAt };
   task.events.push({ time: startedAt, type: 'execution_started', detail: commandLabel[task.command] });
   index[id] = task;
   return { value: index, result: { task: structuredClone(task) } };
+  });
 }));
 
-const finalizeExecution = ({ id, identityScope, accessContext, result }) => mutateTaskIndex((index) => {
+const finalizeExecution = ({ id, identityScope, accessContext, result, leaseToken }) => mutateTaskIndex((index) => {
   const task = index[id];
   if (!task || !canConfirmTask(task, identityScope, accessContext)) {
     return { commit: false, result: { error: '执行结果无法归档：任务不存在或当前角色无权审核。', code: 'SEMANTIC_TASK_REVIEW_ACCESS_DENIED' } };
   }
-  if (task.status !== 'executing') {
+  if (task.status !== 'executing' || !leaseToken || task.execution?.leaseToken !== leaseToken
+    || !Number.isFinite(Date.parse(task.execution.leaseExpiresAt)) || Date.parse(task.execution.leaseExpiresAt) <= Date.now()) {
     return { commit: false, result: { error: '执行结果无法归档：任务状态不一致。', code: 'SEMANTIC_TASK_STATE_CONFLICT' } };
   }
   task.updatedAt = now();
@@ -953,14 +1034,34 @@ const finalizeExecution = ({ id, identityScope, accessContext, result }) => muta
     : { task: publicTask(task), result } };
 });
 
-export async function executeSemanticOperationsTask({ taskId: id, role, identityScope, accessContext, confirmationToken }) {
-  const reservation = await reserveExecution({ id, identityScope, accessContext, confirmationToken });
+export async function executeSemanticOperationsTask({ taskId: id, role, identityScope, accessContext, confirmationToken, expectedTaskFingerprint, executionAdmission }) {
+  try { await assertCurrentSemanticModelAdmission(); }
+  catch { return { error: '模型工作区准入已失效，未执行任务。', code: 'SEMANTIC_MODEL_WORKSPACE_REVOKED' }; }
+  const existing = (await getIndex())[id];
+  if (existing?.confirmation?.evidenceState === 'pending' && canConfirmTask(existing, identityScope, accessContext)) return { error: '确认证据待恢复，未消费凭证。', code: 'SEMANTIC_CONFIRMATION_EVIDENCE_PENDING' };
+  if (existing?.traceProvisioning === 'ready' && canConfirmTask(existing, identityScope, accessContext)) {
+    try { if (!await semanticModelEvidence.verifyTaskTrace(existing)) return { error: '证据关联缺失或无效，未执行任务。', code: 'SEMANTIC_TASK_EVIDENCE_PENDING' }; }
+    catch { return { error: '证据复验不可用，未执行任务。', code: 'SEMANTIC_TASK_EVIDENCE_PENDING' }; }
+  }
+  const reservation = await reserveExecution({ id, identityScope, accessContext, confirmationToken, expectedTraceId: existing?.traceProvisioning === 'ready' ? existing.traceId : undefined,
+    expectedTaskFingerprint, beforeReserve: executionAdmission ? () => executionAdmission('reserve') : undefined });
   if (reservation.error) return reservation;
   const task = reservation.task;
   await traceEvent(task.traceId, 'semantic_execution_started', 'execution', 'started', '一次性确认凭证已消费，受控语义命令开始执行。', { command: task.command, attempt: task.execution?.attempt });
   await setAgentEvidenceTraceStatus(task.traceId, 'executing');
   let result;
   try {
+    const current = (await getIndex())[id];
+    if (!semanticModelReferenceMatches(current) || !canConfirmTask(current, identityScope, accessContext)
+      || current.status !== 'executing' || current.execution?.leaseToken !== task.execution.leaseToken
+      || current.command !== task.command || current.proposal?.id !== task.proposal?.id || current.proposal?.revision !== task.proposal?.revision
+      || !Number.isFinite(Date.parse(current.execution.leaseExpiresAt)) || Date.parse(current.execution.leaseExpiresAt) <= Date.now()) throw new Error('SEMANTIC_TASK_EXECUTION_LEASE_CHANGED');
+    await assertCurrentSemanticModelAdmission();
+    if (executionAdmission && await executionAdmission('command') !== true) throw new Error('SEMANTIC_TASK_EXECUTION_ADMISSION_CHANGED');
+    if (task.systemMaterialBinding) {
+      const consumed = await modelSystemMaterials.consume({ identityScope, modelId: currentSemanticModel(), body: { systemCodes: task.systemMaterialBinding.systemCodes } });
+      if (consumed.error || consumed.revision !== task.systemMaterialBinding.revision || consumed.sourceFingerprint !== task.systemMaterialBinding.sourceFingerprint) throw new Error('MODEL_SOURCE_TASK_BINDING_CHANGED');
+    }
     if (task.command === 'apply_proposal') {
       result = await applySemanticOperationsProposal({ proposalId: task.proposal.id, role, identityScope, accessContext });
     } else if (task.command === 'validate_model') {
@@ -978,11 +1079,23 @@ export async function executeSemanticOperationsTask({ taskId: id, role, identity
     } else if (task.command === 'publish_model') {
       result = await publishGovernedOntology({ role, identityScope });
     } else result = { error: '该任务没有可执行的受控命令。' };
+    await assertCurrentSemanticModelAdmission();
+    if (executionAdmission && await executionAdmission('finalize') !== true) throw new Error('SEMANTIC_TASK_EXECUTION_ADMISSION_CHANGED');
+    if (task.systemMaterialBinding) {
+      const consumed = await modelSystemMaterials.consume({ identityScope, modelId: currentSemanticModel(), body: { systemCodes: task.systemMaterialBinding.systemCodes } });
+      if (consumed.error || consumed.revision !== task.systemMaterialBinding.revision || consumed.sourceFingerprint !== task.systemMaterialBinding.sourceFingerprint) throw new Error('MODEL_SOURCE_TASK_BINDING_CHANGED');
+    }
   } catch (error) {
-    result = { error: `执行失败：${error.message}`, retryable: true };
+    result = { error: `执行失败：${error.message}`, retryable: true, ...(error.message === 'MODEL_SOURCE_TASK_BINDING_CHANGED' && result?.draft ? { workspaceWriteMayHaveCommitted: true } : {}) };
   }
-  const finalized = await finalizeExecution({ id, identityScope, accessContext, result });
-  await traceEvent(task.traceId, result.error ? 'semantic_execution_blocked' : 'semantic_execution_completed', 'execution', result.error ? 'blocked' : 'completed', result.error || '元域智语命令已完成并归档结果。', { command: task.command, retryable: result.retryable === true });
-  await setAgentEvidenceTraceStatus(task.traceId, result.error ? (result.retryable ? 'retryable' : 'blocked') : 'completed', { completed: !result.error });
+  const finalized = await finalizeExecution({ id, identityScope, accessContext, result, leaseToken: task.execution.leaseToken });
+  const failed = Boolean(result.error || finalized.error);
+  try {
+    await traceEvent(task.traceId, failed ? 'semantic_execution_blocked' : 'semantic_execution_completed', 'execution', failed ? 'blocked' : 'completed', finalized.error || result.error || '元域智语命令已完成并归档结果。', { command: task.command, retryable: result.retryable === true });
+    await setAgentEvidenceTraceStatus(task.traceId, failed ? (result.retryable ? 'retryable' : 'blocked') : 'completed', { completed: !failed });
+  } catch (error) {
+    if (error.code !== 'SEMANTIC_MODEL_WORKSPACE_REVOKED') throw error;
+    return { ...finalized, evidenceUpdateBlocked: true };
+  }
   return finalized;
 }

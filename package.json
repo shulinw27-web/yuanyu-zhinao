@@ -11,12 +11,13 @@
   "scripts": {
     "dev:docs": "node scripts/local-docs.mjs",
     "test:docs-reader": "node --test backend/test/local-docs-reader.test.js",
+    "test:electron-toolchain": "node --test backend/test/electron-toolchain.test.js",
     "dev:portal": "npm run dev -w @healthcare-ai/product-portal",
     "start:portal-api": "node scripts/product-portal-runtime.mjs --sandbox-payments",
     "portal:admin": "node scripts/product-portal-runtime.mjs --admin-email",
     "build:portal": "npm run build -w @healthcare-ai/product-portal",
     "test:portal": "node --test backend/test/product-portal.test.js backend/test/portal-provisioning.test.js",
-    "test:multitenant": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/multitenant-validation.test.js backend/test/semantic-tenant-isolation.test.js backend/test/semantic-instance-transport.test.js backend/test/iam-tenant-isolation.test.js backend/test/iam-tenant-http.test.js backend/test/tenant-runtime-control.test.js backend/test/tenant-runtime-sqlite.test.js",
+    "test:multitenant": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/multitenant-validation.test.js backend/test/semantic-tenant-isolation.test.js backend/test/model-workspaces.test.js backend/test/semantic-instance-transport.test.js backend/test/iam-tenant-isolation.test.js backend/test/iam-tenant-http.test.js backend/test/tenant-runtime-control.test.js backend/test/tenant-runtime-sqlite.test.js",
     "test:semantic-instances": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/semantic-instance-process.test.js",
     "test:semantic-review": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/semantic-review-assignment.test.js",
     "test:material-review": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/knowledge-material-reviews.test.js",
@@ -56,7 +57,8 @@
     "security:source-scan": "node scripts/security-source-scan.mjs",
     "security:licenses": "node scripts/generate-license-inventory.mjs",
     "security:sbom": "npm sbom --sbom-format cyclonedx > output/sbom.cdx.json",
-    "security:gate": "npm run security:source-scan && npm audit --omit=dev --audit-level=high && npm run security:licenses",
+    "security:dev-audit": "npm audit --audit-level=moderate",
+    "security:gate": "npm run security:source-scan && npm audit --omit=dev --audit-level=high && npm run security:dev-audit && npm run test:electron-toolchain && npm run security:licenses",
     "nonfunctional:load": "node scripts/nonfunctional/run-load-smoke.mjs",
     "nonfunctional:soak": "node scripts/nonfunctional/run-soak.mjs",
     "dev:api": "npm run dev -w backend",
@@ -88,7 +90,7 @@
     "build:semantic-ops": "npm run build -w @healthcare-ai/semantic-operations-console",
     "test:contracts": "npm run test -w @healthcare-ai/api-contracts",
     "test:clients": "npm run test -w @healthcare-ai/client-runtime && node --test backend/test/client-version-policy.test.js backend/test/client-compatibility-matrix.test.js",
-    "test:nonfunctional": "node --test backend/test/nonfunctional-baseline.test.js backend/test/e2e-flow-safety.test.js backend/test/weknora-repeat-runner.test.js backend/test/http-fixture-port.test.js backend/test/sqlite-startup-retry.test.js backend/test/semantic-model-edit-command.test.js backend/test/license-registry.test.js",
+    "test:nonfunctional": "node --test backend/test/nonfunctional-baseline.test.js backend/test/e2e-flow-safety.test.js backend/test/weknora-repeat-runner.test.js backend/test/http-fixture-port.test.js backend/test/sqlite-startup-retry.test.js backend/test/semantic-model-edit-command.test.js backend/test/license-registry.test.js backend/test/electron-toolchain.test.js backend/test/local-docs-reader.test.js",
     "test:architecture": "node --test backend/test/architecture-boundaries.test.js",
     "test:registry": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/system-registry.test.js",
     "test:access": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/system-access.test.js backend/test/system-access-heartbeat.test.js backend/test/system-access-document-discovery.test.js backend/test/heartbeat-probe-worker.test.js backend/test/system-monitoring.test.js backend/test/system-material-understanding.test.js",
@@ -98,7 +100,7 @@
     "test:attribution": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/semantic-source-attribution.test.js",
     "test:declaration": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/semantic-declaration-ruling.test.js",
     "test:mention": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/semantic-object-mention.test.js",
-    "test:ontology": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/ontology-modeling.test.js backend/test/ontology-runtime.test.js backend/test/temporal-relation.test.js backend/test/ontology-identity.test.js backend/test/ontology-read-runtime.test.js backend/test/ontology-industry-closed-loop.test.js backend/test/ontology-analysis-claims.test.js backend/test/semantic-workbench-fixture.test.js backend/test/supply-chain-incident-fixture.test.js backend/test/supply-chain-repair.test.js packages/agent-ui/test/ontology-graph.test.js packages/agent-ui/test/ontology-edit-session.test.js packages/agent-ui/test/ontology-tools.test.js packages/agent-ui/test/ontology-upgrade.test.js backend/test/ontology-upgrade-runtime.test.js backend/test/ontology-private-views.test.js backend/test/ontology-playground.test.js",
+    "test:ontology": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/ontology-modeling.test.js backend/test/ontology-runtime.test.js backend/test/semantic-model-publication.test.js backend/test/temporal-relation.test.js backend/test/ontology-identity.test.js backend/test/ontology-read-runtime.test.js backend/test/ontology-industry-closed-loop.test.js backend/test/ontology-analysis-claims.test.js backend/test/semantic-workbench-fixture.test.js backend/test/supply-chain-incident-fixture.test.js backend/test/supply-chain-repair.test.js packages/agent-ui/test/ontology-graph.test.js packages/agent-ui/test/ontology-edit-session.test.js packages/agent-ui/test/ontology-tools.test.js packages/agent-ui/test/ontology-upgrade.test.js backend/test/ontology-upgrade-runtime.test.js backend/test/ontology-private-views.test.js backend/test/ontology-playground.test.js",
     "test:ark": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/ark-model-gateway.test.js backend/test/ark-file-config.test.js backend/test/workbuddy-cloud-gateway.test.js",
     "test:multimodal": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/multimodal-security-gateway.test.js backend/test/multimodal-understanding.test.js",
     "test:events": "node --import ./backend/test/runtime-test-bootstrap.js --test backend/test/domain-event-outbox.test.js",
@@ -124,6 +126,9 @@
     "pack:semantic-ops-electron": "npm run pack:electron -w @healthcare-ai/semantic-operations-console",
     "dist:semantic-ops-electron": "npm run dist:electron -w @healthcare-ai/semantic-operations-console",
     "build:mobile": "npm run build -w @healthcare-ai/mobile-app"
+  },
+  "overrides": {
+    "@electron/get": "5.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

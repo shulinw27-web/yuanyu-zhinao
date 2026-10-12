@@ -14,6 +14,30 @@ import { turnUnderstandingTimeout, hasConflictingMaterialTotals } from '../src/s
 import { buildKnowledgeBusinessBrief } from '../src/services/knowledge-business-brief-service.js';
 import { saveLibraryDocument } from '../src/services/knowledge-library-service.js';
 import { createLocalKnowledgeProvider } from '../src/services/knowledge-evidence-service.js';
+import { selectPublishedReadPlan } from '../src/services/ontology-plan-selection.js';
+import { runPrivateAgent } from '../src/services/private-agent-service.js';
+
+test('natural plan selection is bounded, declaration-based and never guesses ambiguous or excluded plans', () => {
+  const plans = [
+    { id: 'stock', label: '库存核验', outputs: [{ id: 'qty', label: '可用库存' }, { id: 'risk', label: '风险等级' }] },
+    { id: 'credit', label: '授信核验', outputs: [{ id: 'gap', label: '授信缺口' }, { id: 'risk', label: '风险等级' }] }
+  ];
+  assert.equal(selectPublishedReadPlan(plans, { input: '请核对可用库存' }).planId, 'stock');
+  assert.equal(selectPublishedReadPlan(plans, { input: '按授信核验查订单' }).basis, 'declared_name');
+  assert.equal(selectPublishedReadPlan(plans, { input: '用 stock 查询' }).planId, 'stock');
+  for (const input of ['你好', '风险等级', '可用库存和授信缺口', '库存核验及授信核验', '不要库存核验，用授信核验', 'not stock', 'stockpile', '按库存核验查询授信缺口']) {
+    assert.equal(selectPublishedReadPlan(plans, { input }).status, 'needs_input', input);
+  }
+  assert.equal(selectPublishedReadPlan(plans, { planId: 'missing', input: '库存核验' }).reason, 'unknown_plan');
+  assert.equal(selectPublishedReadPlan(plans, { planId: 'credit', input: '可用库存' }).reason, 'conflicting_request');
+  assert.equal(selectPublishedReadPlan(plans, { planId: 'stock', input: '授信核验' }).status, 'needs_input');
+  assert.equal(selectPublishedReadPlan(plans, { input: '按旧方案查询可用库存' }).reason, 'unknown_named_plan');
+  assert.equal(selectPublishedReadPlan(plans, { input: '核对可用库存，不要生成文件，也不要发起审批' }).planId, 'stock');
+  assert.equal(selectPublishedReadPlan([plans[0]], {}).basis, 'only_published_plan');
+  assert.equal(selectPublishedReadPlan([plans[0]], { input: '不读取业务数据' }).status, 'needs_input');
+  assert.equal(selectPublishedReadPlan([plans[0], plans[0]], {}).reason, 'invalid_catalogue');
+  assert.equal(selectPublishedReadPlan([...plans, { ...plans[0], id: 'all', outputs: [...plans[0].outputs, ...plans[1].outputs] }], { input: '可用库存和授信缺口' }).planId, 'all');
+});
 
 test('material headings cannot contradict final metric totals; different versions remain distinct', () => {
   assert.equal(hasConflictingMaterialTotals('2)南仓自有可用件数:60 piece\n更正为40\n- 南仓自有可用件数:40 piece'), true);
@@ -170,6 +194,45 @@ test('multiple published plans require explicit selection and per-plan replay; m
     assert.ok(alternateResult.graph.relationships.every(item => graphIds.has(item.from) && graphIds.has(item.to)));
     assert.equal(alternateResult.results.find(item => item.id === 'credit').value, creditV2);
     assert.equal(alternateResult.metadata.selectedReadPlan.id, alternative.id);
+    const natural = await read({ input: `按${alternative.id}核验 ORD-X900` });
+    assert.equal(natural.results.find(item => item.id === 'credit').value, creditV2);
+    assert.equal(natural.metadata.selectedReadPlan.basis, 'declared_name');
+    const previousProvider = process.env.MODEL_PROVIDER;
+    try {
+      process.env.MODEL_PROVIDER = 'mock';
+      const agentRead = await runPrivateAgent({ text: `按${alternative.id}核验 ORD-X900` }, role, scope);
+      assert.equal(agentRead.semanticContext.selectedReadPlan.id, alternative.id);
+      assert.equal(agentRead.semanticContext.calculations.find(item => item.id === 'credit').value, creditV2);
+      assert.equal(agentRead.command, null);
+      const clarify = await runPrivateAgent({ text: '查询 ORD-X900' }, role, scope);
+      assert.equal(clarify.semanticContext.planSelection.reason, 'no_declared_match');
+      assert.equal(clarify.semanticContext.querySteps.length, 0);
+      assert.equal(clarify.command, null);
+    } finally {
+      if (previousProvider === undefined) delete process.env.MODEL_PROVIDER;
+      else process.env.MODEL_PROVIDER = previousProvider;
+    }
+    const forged = structuredClone(ontology);
+    forged.published.draft.scenario.readPlans[1].outputs = [];
+    assert.equal((await read({ ontology: forged, planId: alternative.id })).results.find(item => item.id === 'credit').value, creditV2);
+    const fetchForRead = globalThis.fetch;
+    let blockedCalls = 0;
+    globalThis.fetch = async () => { blockedCalls++; throw new Error('unexpected read'); };
+    try {
+      const ambiguous = await read({ input: '帮我分析一下' });
+      assert.equal(ambiguous.selection.reason, 'no_declared_match');
+      assert.ok(ambiguous.text.includes(alternative.id));
+      assert.equal((await read({ input: `不要使用${alternative.id}` })).selection.reason, 'negated_request');
+      assert.equal((await read({ ontology: { ...ontology, published: { ...ontology.published, fingerprint: 'stale' } }, planId: alternative.id })).code, 'ONTOLOGY_VERSION_CHANGED');
+      assert.equal((await read({ scope: { ...scope, tenantId: 'other' }, planId: alternative.id })).code, 'ONTOLOGY_VERSION_CHANGED');
+      assert.equal((await read({ ontology: { ...ontology, published: { ...ontology.published, modelId: 'finance', runtimeReadEnabled: false } }, planId: alternative.id })).code, 'ONTOLOGY_VERSION_CHANGED');
+      const savedGrants = process.env.ONTOLOGY_RUNTIME_GRANTS_JSON;
+      try {
+        delete process.env.ONTOLOGY_RUNTIME_GRANTS_JSON;
+        assert.equal((await read({ planId: alternative.id })).code, 'ONTOLOGY_VERSION_CHANGED');
+      } finally { process.env.ONTOLOGY_RUNTIME_GRANTS_JSON = savedGrants; }
+      assert.equal(blockedCalls, 0);
+    } finally { globalThis.fetch = fetchForRead; }
     const partial = await read({ planId: positive.planId, input: '完整影响范围' });
     assert.equal(partial.results.find(item => item.id === 'credit').value, creditV1);
     assert.equal(partial.status, 'partial', partial.text);

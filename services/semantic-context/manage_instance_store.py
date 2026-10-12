@@ -17,10 +17,11 @@ def main():
         parser.error("verify takes no target; backup and restore require a new target")
     try:
         identity = read_instance_configuration({"SEMANTIC_INSTANCE_CONFIG_FILE": args.config})
+        validate_snapshot = lambda snapshot: restore_state(snapshot, identity)
         if args.operation == "verify":
-            result = verify_database(args.source, identity, restore_state)
+            result = verify_database(args.source, identity, validate_snapshot)
         else:
-            result = copy_verified_database(args.source, args.target, identity, restore_state)
+            result = copy_verified_database(args.source, args.target, identity, validate_snapshot)
         print(json.dumps({"operation": args.operation, **result}, ensure_ascii=False))
         return 0
     except Exception:

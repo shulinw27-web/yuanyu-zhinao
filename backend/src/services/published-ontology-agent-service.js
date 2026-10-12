@@ -7,6 +7,7 @@ import { modelFailureDiagnostics, prohibitsAction } from './agent-turn-understan
 import { encodeOntologyAnalysisEvidence, buildOntologyAnalysisPrompt, ontologyAnalysisComparisons } from './ontology-analysis-evidence.js';
 import { createOntologyClaimContext, validateOntologyClaims, renderOntologyClaims } from './ontology-analysis-claims.js';
 import { buildOntologyResultGraph } from './ontology-result-graph.js';
+import { selectPublishedReadPlan } from './ontology-plan-selection.js';
 
 // Current explicit factual follow-ups can require a fresh read even when the
 // model proposes dialogue. Never promote failed understanding or write intent.
@@ -24,7 +25,7 @@ export async function getPublishedAgentOntology(roleId, scope) {
   const grant = getOntologyRuntimeGrant(scope, roleId);
   if (!grant?.metadata) return null;
   const published = await getPublishedOntologyModel();
-  if (!published || published.tenantId !== scope.tenantId || !getOntologyRuntimeGrant(scope, roleId)?.metadata) return null;
+  if (!published || published.runtimeReadEnabled === false || published.tenantId !== scope.tenantId || !getOntologyRuntimeGrant(scope, roleId)?.metadata) return null;
   const draft = published.draft;
   const metadata = {
     modelVersion: published.version, modelFingerprint: published.fingerprint,
@@ -48,10 +49,20 @@ export async function validatePublishedReadEvidence({ ontology, roleId, scope, r
 }
 
 export async function runPublishedOntologyRead({ ontology, roleId, scope, target, input = '', allowModelAnalysis = true, planId }) {
+  // Validate the tenant, current publication and metadata grant BEFORE source
+  // access, not merely after retrieval/model latency.
+  const current = await getPublishedAgentOntology(roleId, scope);
+  if (!current || ontology.published.runtimeReadEnabled === false || current.published.modelId !== ontology.published.modelId
+    || current.published.version !== ontology.published.version || current.published.fingerprint !== ontology.published.fingerprint) {
+    return { status: 'incomplete', code: 'ONTOLOGY_VERSION_CHANGED', text: '模型版本或访问权限已变化，请重新载入后选择方案；本次未读取数据。' };
+  }
+  ontology = current;
   const publishedPlans = ontology.published.draft.scenario?.readPlans || [];
-  const plans = planId === undefined ? publishedPlans : publishedPlans.filter(plan => plan.id === planId);
+  const selection = selectPublishedReadPlan(publishedPlans, { input, planId });
+  const plans = selection.status === 'ready' ? publishedPlans.filter(plan => plan.id === selection.planId) : [];
   const targets = [...new Set(Array.isArray(target) ? target : [target])];
-  if (plans.length !== 1 || !targets.length || targets.length > 3 || targets.some(t => typeof t !== 'string' || !t || t.length > 100)) return { status: 'needs_input', code: 'ONTOLOGY_PLAN_SELECTION_REQUIRED', text: '请选择一个明确的只读方案和最多三个根对象编号；本次未读取数据。' };
+  if (plans.length !== 1 || !targets.length || targets.length > 3 || targets.some(t => typeof t !== 'string' || !t || t.length > 100)) return { status: 'needs_input', code: 'ONTOLOGY_PLAN_SELECTION_REQUIRED', selection,
+    text: `请选择一个明确的只读方案和最多三个根对象编号；本次未读取数据。${selection.candidates?.length ? `\n可选方案：\n${selection.candidates.map(p => `- ${p.label}（${p.id}）：${p.outputs.map(o => o.label).join('、')}`).join('\n')}\n可以回复“按‘方案名称’查询对象编号”。` : ''}` };
   const readStartedAt = Date.now();
   try {
     const comparisons = [];
@@ -113,7 +124,7 @@ export async function runPublishedOntologyRead({ ontology, roleId, scope, target
     const graph = buildOntologyResultGraph(ontology.published.draft, records, ontology.published.version, ontology.published.fingerprint, comparisons.map(comparison => comparison.mappingEvidence));
     return { status, code: status === 'partial' ? 'ONTOLOGY_READ_PARTIAL' : 'ONTOLOGY_READ_COMPLETED', results, queries, records, coverage, analysis, timing, graph,
       comparisons: comparisons.map(c => ({ target: c.target, results: c.results, coverage: c.coverage })),
-      metadata: { ...ontology.metadata, selectedReadPlan: { id: plans[0].id, label: plans[0].label } },
+      metadata: { ...ontology.metadata, selectedReadPlan: { id: plans[0].id, label: plans[0].label, basis: selection.basis } },
       text: `${partial ? '当前只完成声明计划的局部读取，不能代表完整影响范围。\n' : ''}${analysis.status === 'incomplete' ? '计算已完成，但解释未通过校验或预算限制，尚未完成分析。\n' : ''}${answer}\n\n依据：已发布模型 ${ontology.published.version}（${ontology.published.fingerprint}）；${records.length} 条授权来源记录、${queries.length} 个关联查询步骤。\n记录时间：${dates.join('、')}。这是来源快照计算，不作实时履约承诺；本次未执行任何业务写入。` };
   } catch (error) {
     const code = /^[A-Z_]+$/.test(error.message) ? error.message : 'ONTOLOGY_SOURCE_UNAVAILABLE';

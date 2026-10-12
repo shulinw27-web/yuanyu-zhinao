@@ -15,6 +15,19 @@ def fixture():
 
 
 class ModelDefinitionTests(unittest.TestCase):
+    def test_field_references_and_mapping_are_preserved_not_executed(self):
+        value = fixture()
+        value["objectTypes"][0]["fieldDefinitions"] = [{"name": "id", "reference": "QualityEvent", "referenceField": "id"}]
+        value["relationshipTypes"] = [{"from": "QualityEvent", "to": "QualityEvent", "predicate": "correlates", "keyMapping": {"fromField": "id", "toField": "id", "strategy": "lookup"}}]
+        normalized, validation = app.validate_model_definition(value)
+        self.assertEqual(validation["status"], "passed")
+        self.assertEqual(normalized["objectTypes"][0]["fieldDefinitions"], value["objectTypes"][0]["fieldDefinitions"])
+        self.assertEqual(normalized["relationshipTypes"][0]["keyMapping"], value["relationshipTypes"][0]["keyMapping"])
+        self.assertFalse(validation["businessSemanticsVerified"])
+        for patch in [{"fieldDefinitions": [{"name": "unknown"}]}, {"fieldDefinitions": "not a list"}]:
+            invalid = fixture(); invalid["objectTypes"][0].update(patch)
+            self.assertEqual(app.validate_model_definition(invalid)[1]["status"], "failed")
+
     def test_object_limit_matches_api(self):
         for count in [20, 21, 40, 41]:
             value = fixture()

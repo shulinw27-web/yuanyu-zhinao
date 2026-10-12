@@ -18,6 +18,7 @@ export { getCoreMetaObjectLayer } from '../../services/core-meta-object-service.
 export { applySemanticOperationsProposal, createSemanticOperationsProposal, createSemanticOperationsProposalFromRequest, listSemanticOperationsSnapshots, rollbackSemanticOperationsSnapshot, saveSemanticOperationsDraft, updateSemanticOperationsProposal } from '../../services/semantic-operations-agent-service.js';
 export { archiveSemanticOperationsTask, createSemanticOperationsTask, executeSemanticOperationsTask, getSemanticOperationsTaskTrace, issueSemanticOperationsTaskConfirmation, recordSemanticOperationsReportExport, reviseSemanticOperationsTaskProposal } from '../../services/semantic-operations-task-service.js';
 export { semanticTaskWorkspace } from './semantic-task-workspace.js';
+export { modelWorkspaces } from './model-workspaces.js';
 export { discoverSemanticSources } from '../../services/semantic-source-discovery-service.js';
 export { semanticFingerprint } from '../../services/semantic-model-fingerprint.js';
 export { createSemanticInspectionSchedule, listSemanticInspectionSchedules, controlSemanticInspectionSchedule } from '../../services/semantic-inspection-schedule-service.js';
@@ -46,4 +47,7 @@ export {
 } from '../../services/world-model-template-service.js';
 export { listAnomalyReports, changeAnomalyReport, extractAnomalyReport } from '../../services/anomaly-assistant-service.js';
 export { runWithSemanticTenant } from '../../services/semantic-tenant-context.js';
+export { semanticModelEvidence } from './model-evidence.js';
+export { modelSystemMaterials } from './model-system-materials.js';
+export { semanticModelAdmission } from './model-admission.js';
 export { listMockOnboarding, createMockOnboardingProject, getMockOnboardingProject, saveMockOnboardingMaterial, testMockOnboardingConnection, getMockOnboardingPreview, getMockOnboardingAlignment, saveMockOnboardingAlignment, handoffMockOnboardingModel, getMockOnboardingCalculations, previewMockOnboardingCalculation } from '../../services/mock-onboarding-service.js';

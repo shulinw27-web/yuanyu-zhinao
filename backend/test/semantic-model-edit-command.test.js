@@ -6,6 +6,32 @@ import { inspectCandidateObjectRemoval } from '../src/services/semantic-object-r
 import { collectSemanticObjectDependencies, collectSemanticFieldDependencies, isSemanticDependencyCommand, parseSemanticDependencyCommand } from '../src/services/semantic-object-dependencies.js';
 import { inspectCandidateRelationshipRemoval } from '../src/services/semantic-relationship-removal.js';
 
+test('reviewed removal supports existing mapped fields and standalone objects without source writes or mutation', () => {
+  const proposal = fixture(); const baseline = structuredClone(proposal); const before = structuredClone(proposal);
+  const removed = parseSemanticModelEdit('移除模型字段“Stock.status”', proposal, baseline);
+  assert.ok(!removed.error, removed.error); assert.equal(isSemanticModelEditCommand('移除模型字段“Stock.status”'), true);
+  assert.deepEqual(removed.modelRemoval, { kind: 'field', objectId: 'Stock', fieldName: 'status' });
+  assert.deepEqual(removed.body.objectTypes[0].fields, ['id', 'qty']); assert.deepEqual(proposal, before); assert.deepEqual(baseline, before);
+  proposal.relationshipTypes = []; proposal.objectTypes.push({ ...structuredClone(proposal.objectTypes[0]), id: 'Standalone', label: '独立类型' });
+  assert.ok(!parseSemanticModelEdit('移除模型对象“Standalone”', proposal, { objectTypes: [], relationshipTypes: [] }).error);
+  proposal.relationshipTypes.push({ from: 'Stock', predicate: 'related', to: 'Standalone', label: '关联', provenanceType: 'declared' });
+  assert.equal(parseSemanticModelEdit('移除模型对象“Standalone”', proposal, { objectTypes: [] }).code, 'SEMANTIC_REVIEWED_REMOVAL_DEPENDENCIES');
+  assert.ok(!parseSemanticModelEdit('移除模型关系“Stock/related/Standalone”', proposal, { objectTypes: [] }).error);
+});
+
+test('reviewed removal rejects keys, hidden dependencies, mappings, extra commands and malformed targets', () => {
+  const proposal = fixture(); const baseline = structuredClone(proposal);
+  assert.equal(parseSemanticModelEdit('移除模型字段“Stock.id”', proposal, baseline).code, 'SEMANTIC_REVIEWED_REMOVAL_KEY');
+  const changedKey = structuredClone(proposal); changedKey.objectTypes[0].key = 'qty'; changedKey.objectTypes[0].fieldDefinitions[0].primaryKey = false;
+  assert.equal(parseSemanticModelEdit('移除模型字段“Stock.id”', changedKey, baseline).code, 'SEMANTIC_REVIEWED_REMOVAL_KEY');
+  baseline.policies = ['status字段参与放行'];
+  assert.equal(parseSemanticModelEdit('移除模型字段“Stock.status”', proposal, baseline).code, 'SEMANTIC_REVIEWED_REMOVAL_DEPENDENCIES');
+  assert.ok(parseSemanticModelEdit('移除模型对象“Stock”', proposal, baseline).error);
+  proposal.relationshipTypes[0].provenanceType = 'declared'; proposal.relationshipTypes[0].keyMapping = { basis: 'master_data_lookup' };
+  assert.equal(parseSemanticModelEdit('移除模型关系“Stock/storedAt/Stock”', proposal, baseline).code, 'SEMANTIC_REVIEWED_REMOVAL_GOVERNED');
+  for (const text of ['移除模型字段“Stock.status”；发布模型', '移除模型字段“Stock.status”，删除源数据', '移除模型字段“Stock.status"', '移除模型字段“Stock.__proto__”']) assert.ok(parseSemanticModelEdit(text, proposal, baseline).error);
+});
+
 const fixture = () => ({ objectTypes: [{ id: 'Stock', label: '库存', key: 'id', fields: ['id', 'qty', 'status'], sourceSystems: ['WMS'], fieldDefinitions: [
   { name: 'id', type: 'string', required: true, primaryKey: true, sourceField: 'stock_id', mappingStatus: 'mapped' },
   { name: 'qty', type: 'number', required: false, sourceField: 'quantity', mappingStatus: 'mapped', unit: 'kg' },

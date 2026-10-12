@@ -4,6 +4,7 @@ import { getEffectiveAccess } from '../../services/access-control-service.js';
 import { mutateSemanticGovernanceStates } from '../../services/semantic-governance-store.js';
 import { semanticOperationsOwnerMatches } from '../../services/semantic-operations-identity.js';
 import { buildSemanticOperationsNotification, insertSemanticOperationsNotification, SEMANTIC_NOTIFICATION_NAMESPACE } from '../../services/semantic-operations-notification-service.js';
+import { semanticModelReferenceMatches } from '../../services/semantic-model-reference.js';
 
 const permissions = ['meta_model.draft.review', 'meta_model.draft.save'];
 const allowed = access => access?.principalResolved && permissions.every(id => access.buttonPermissionIds.includes(id)) && access.pagePermissionIds.includes('page.semantic-operations.view');
@@ -31,7 +32,7 @@ async function assign({ taskId, identityScope, body }) {
     if (!currentActor(identityScope) || target && !candidates(identityScope).some(user => user.subjectId === target.subjectId)) return { commit: false, result: failure('SEMANTIC_REVIEW_ASSIGNMENT_FORBIDDEN', 403) };
     const task = values.tasks[taskId];
     let tenant; try { tenant = JSON.parse(task?.owner)[0]; } catch { /* invalid owner fails closed */ }
-    if (!task || tenant !== identityScope.tenantId || !task.proposal || task.command !== 'apply_proposal') return { commit: false, result: failure('SEMANTIC_TASK_NOT_FOUND', 404) };
+    if (!semanticModelReferenceMatches(task) || tenant !== identityScope.tenantId || !task.proposal || task.command !== 'apply_proposal') return { commit: false, result: failure('SEMANTIC_TASK_NOT_FOUND', 404) };
     if (task.archivedAt || task.status !== 'waiting_confirmation') return { commit: false, result: failure('SEMANTIC_REVIEW_ASSIGNMENT_STATE_CONFLICT') };
     const previous = task.reviewAssignment || { revision: 0, subjectId: null };
     if (previous.revision !== body.expectedRevision) return { commit: false, result: failure('SEMANTIC_REVIEW_ASSIGNMENT_REVISION_CONFLICT') };

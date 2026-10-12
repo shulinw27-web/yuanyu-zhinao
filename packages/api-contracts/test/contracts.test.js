@@ -51,4 +51,32 @@ test('OpenAPI 契约可解析、operationId 唯一并覆盖核心模块', async 
   assert.equal(document.paths['/domain-events/outbox'].get['x-button-permission'], 'event.outbox.view');
   assert.equal(document.paths['/domain-events/contracts'].get['x-button-permission'], 'event.outbox.view');
   assert.equal(document.paths['/domain-events/outbox/{id}/replay'].post['x-button-permission'], 'event.outbox.replay');
+  assert.ok(document.paths['/semantic-operations/models'].get);
+  assert.equal(document.paths['/semantic-operations/models/{modelId}/tasks/{taskId}/preview-evidence-recover'].post['x-button-permission'], 'meta_model.draft.save');
+  assert.equal(document.paths['/semantic-operations/models/{modelId}/preview-requests/{requestId}'].get.operationId, 'getPreviewRequestStatus');
+  assert.equal(document.paths['/semantic-operations/models'].post['x-button-permission'], 'meta_model.draft.save');
+  assert.equal(document.paths['/semantic-operations/models'].post.requestBody.content['application/json'].schema.additionalProperties, false);
+  assert.ok(document.paths['/semantic-operations/models/{modelId}/workspace'].get);
+  const scopedDraft = document.paths['/semantic-operations/models/{modelId}/draft'];
+  assert.ok(scopedDraft.get);
+  assert.equal(scopedDraft.post['x-button-permission'], 'meta_model.draft.save');
+  const draftSchema = scopedDraft.post.requestBody.content['application/json'].schema;
+  assert.equal(draftSchema.properties.confirmed.const, true);
+  assert.equal(draftSchema.properties.input.additionalProperties, false);
+  assert.deepEqual(draftSchema.required, ['confirmed', 'expectedFingerprint', 'input']);
+  assert.equal(document.paths['/semantic-operations/models/{modelId}/validate'].post['x-button-permission'], 'meta_model.draft.validate');
+  assert.equal(document.paths['/semantic-operations/models/{modelId}/simulate'].post['x-button-permission'], 'meta_model.simulate');
+  assert.ok(document.paths['/semantic-operations/models/{modelId}/simulation'].get);
+  assert.equal(document.components.schemas.ScopedModelAnalysisRequest.additionalProperties, false);
+  const taskMetadata = document.paths['/semantic-operations/models/{modelId}/tasks'];
+  assert.ok(taskMetadata.get); assert.equal(taskMetadata.post, undefined);
+  assert.ok(document.paths['/semantic-operations/models/{modelId}/tasks/{taskId}'].get);
+  const dialogue = document.paths['/semantic-operations/models/{modelId}/tasks/{taskId}/dialogue'];
+  assert.ok(dialogue.get); assert.equal(dialogue.post, undefined); assert.ok(dialogue.get.responses['413']);
+  assert.ok(document.paths['/semantic-operations/models/{modelId}/local-validation-tasks'].post);
+  for (const action of ['local-confirm', 'local-execute', 'confirmation-evidence-recover']) {
+    const path = document.paths[`/semantic-operations/models/{modelId}/tasks/{taskId}/${action}`]; assert.ok(path.post); assert.equal(path.get, undefined);
+  }
+  for (const name of ['LocalValidationTaskRequest', 'LocalTaskConfirmationRequest', 'LocalTaskExecutionRequest']) assert.equal(document.components.schemas[name].additionalProperties, false);
+  assert.equal(taskMetadata.get.parameters.find(parameter => parameter.name === 'limit').schema.maximum, 100);
 });

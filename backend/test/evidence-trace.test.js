@@ -4,6 +4,8 @@ import { getRole } from '../src/services/authorization-service.js';
 import { executePrivateAgentCommand, runPrivateAgent } from '../src/services/private-agent-service.js';
 import { createAgentRun } from '../src/services/agent-runtime-store.js';
 import {
+  createAgentEvidenceTrace,
+  appendAgentEvidenceEvent,
   createDeniedAgentExecutionTrace,
   ensureAgentEvidenceTraceForRun,
   getAgentEvidenceTrace,
@@ -19,6 +21,21 @@ const identity = {
   source: 'test',
   platform: 'test'
 };
+
+test('reserved semantic trace initialization and event recovery are idempotent but conflicting identities and content fail', async () => {
+  const options = { roleId: 'executive', identityScope: identity, input: 'isolated handoff', requestId: 'synthetic-task', kind: 'semantic_operations_task', modelId: 'reserved-model', reservedTraceId: 'trace-reserved-mock' };
+  const first = await createAgentEvidenceTrace(options); const again = await createAgentEvidenceTrace(options);
+  assert.equal(first.id, again.id); assert.equal(again.eventCount, 1);
+  await assert.rejects(createAgentEvidenceTrace({ ...options, identityScope: { ...identity, subjectId: 'foreign' } }), /EVIDENCE_TRACE_ID_CONFLICT/u);
+  const event = { type: 'onboarding_handoff', idempotencyKey: 'handoff-proof', summary: 'synthetic handoff', details: { revision: 1 } };
+  const scope = { expectedModelId: 'reserved-model', expectedTenantId: identity.tenantId };
+  const saved = await appendAgentEvidenceEvent(first.id, event, scope);
+  assert.equal((await appendAgentEvidenceEvent(first.id, event, scope)).id, saved.id);
+  await assert.rejects(appendAgentEvidenceEvent(first.id, { ...event, details: { revision: 2 } }, scope), /EVIDENCE_EVENT_ID_CONFLICT/u);
+  // The rejected memory-store mutation must not alter the stored event.
+  const trace = await getAgentEvidenceTrace(first.id, ['executive'], identity, scope);
+  assert.equal(trace.eventCount, 2); assert.equal(trace.integrity.valid, true);
+});
 
 test('a read-only Agent task persists a complete and verifiable evidence timeline', async () => {
   const response = await runPrivateAgent({ text: '请查询当前生产质量状态。' }, getRole('quality_manager'), identity, { requestId: 'trace-read-request', platform: 'test' });

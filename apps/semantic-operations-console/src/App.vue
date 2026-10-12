@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onMounted, ref } from 'vue';
 import { createSemanticOperationsClient } from '@healthcare-ai/semantic-operations-sdk';
 import SemanticAgentWorkspace from './components/SemanticAgentWorkspace.vue';
 import SemanticOperationsCenter from './components/SemanticOperationsCenter.vue';
@@ -9,6 +9,8 @@ import WorkflowSemanticCenter from './components/WorkflowSemanticCenter.vue';
 import { OAMetaModelStudio, OntologyWorkspaceTools, OntologySavedViewsPanel, OntologyGraph, semanticSimulationMessage } from '@healthcare-ai/agent-ui/meta-model';
 import { KnowledgeLibraryPanel } from '@healthcare-ai/agent-ui/knowledge';
 import { restoreSemanticSession, semanticConnectionMessage } from './session-bootstrap.js';
+
+const SemanticModelTaskBrowser = defineAsyncComponent(() => import('./components/SemanticModelTaskBrowser.vue'));
 
 const runtimePlatform = globalThis.semanticOperationsDesktop?.runtime === 'electron' ? 'semantic-electron' : 'semantic-web';
 const client = createSemanticOperationsClient({ platform: runtimePlatform, appVersion: '0.2.0' });
@@ -231,6 +233,7 @@ onMounted(restoreSession);
         <button :class="{ active: activeView === 'system-access' }" @click="activeView = 'system-access'"><span>＋</span><div><b>系统接入</b><small>系统清单、连接配置与接入准备</small></div></button>
         <button :class="{ active: activeView === 'workflows' }" @click="activeView = 'workflows'"><span>↗</span><div><b>流程语义</b><small>钉钉与 OA 流程读取、版本同步</small></div></button>
         <button :class="{ active: activeView === 'agent' }" @click="activeView = 'agent'"><span>01</span><div><b>Agent 工作台</b><small>自然语言与多模态建模</small></div></button>
+        <button v-if="role === 'executive'" :class="{ active: activeView === 'model-tasks' }" @click="activeView = 'model-tasks'"><span>◇</span><div><b>独立模型任务</b><small>模型隔离 · 分步本地校验</small></div></button>
         <button :class="{ active: activeView === 'model' }" @click="activeView = 'model'"><span>02</span><div><b>模型关系图</b><small>查看顶层对象与系统关联</small></div></button>
         <button :class="{ active: activeView === 'versions' }" @click="activeView = 'versions'"><span>03</span><div><b>版本与回滚</b><small>Diff、快照和恢复</small></div></button>
         <button :class="{ active: activeView === 'knowledge' }" @click="activeView = 'knowledge'"><span>04</span><div><b>知识资料</b><small>来源地图与原文依据</small></div></button>
@@ -240,13 +243,14 @@ onMounted(restoreSession);
     </aside>
 
     <main>
-      <header class="ops-topbar"><div><span>SEMANTIC CONTROL PLANE</span><h1>{{ activeView === 'system-access' ? (accessTab === 'systems' ? '系统接入与生命周期' : '接入材料与场景准备') : activeView === 'workflows' ? '流程语义接入中心' : activeView === 'knowledge' ? '知识资料地图' : activeView === 'agent' ? '元域智语 Agent 工作台' : activeView === 'model' ? '语义模型关系图' : '模型版本与恢复' }}</h1></div><div class="ops-top-actions"><div v-if="!['system-access','workflows'].includes(activeView)" :class="['ops-live', deploymentDrift]"><i/>Semantica · {{ semanticaStatus }} · {{ deploymentDriftLabel }}</div><button v-if="!['system-access','workflows'].includes(activeView)" class="ops-logout" :disabled="refreshingStatus" @click="refreshSemanticStatus">{{ refreshingStatus ? '刷新中…' : '刷新服务状态' }}</button><label>已认证运营身份<strong>{{ currentUser?.name || currentUser?.account }}</strong><small>{{ roles.find(item => item.id === role)?.name || role }} · {{ client.deviceId.slice(-8) }}</small></label><button class="ops-logout" @click="logout">退出</button></div></header>
+      <header class="ops-topbar"><div><span>SEMANTIC CONTROL PLANE</span><h1>{{ activeView === 'model-tasks' ? '独立模型任务 · 本地校验' : activeView === 'system-access' ? (accessTab === 'systems' ? '系统接入与生命周期' : '接入材料与场景准备') : activeView === 'workflows' ? '流程语义接入中心' : activeView === 'knowledge' ? '知识资料地图' : activeView === 'agent' ? '元域智语 Agent 工作台' : activeView === 'model' ? '语义模型关系图' : '模型版本与恢复' }}</h1></div><div class="ops-top-actions"><div v-if="!['system-access','workflows','model-tasks'].includes(activeView)" :class="['ops-live', deploymentDrift]"><i/>Semantica · {{ semanticaStatus }} · {{ deploymentDriftLabel }}</div><button v-if="!['system-access','workflows','model-tasks'].includes(activeView)" class="ops-logout" :disabled="refreshingStatus" @click="refreshSemanticStatus">{{ refreshingStatus ? '刷新中…' : '刷新服务状态' }}</button><label>已认证运营身份<strong>{{ currentUser?.name || currentUser?.account }}</strong><small>{{ roles.find(item => item.id === role)?.name || role }} · {{ client.deviceId.slice(-8) }}</small></label><button class="ops-logout" @click="logout">退出</button></div></header>
 
       <div v-if="error && activeView !== 'system-access'" class="ops-error">{{ error }}<button @click="loadWorkspace">重新加载</button></div>
       <div v-if="message && activeView !== 'system-access'" class="ops-message">{{ message }}</div>
       <div v-if="loading && activeView !== 'system-access'" class="ops-loading">正在校验身份、装载语义模型与Semantica状态…</div>
 
-      <div v-if="activeView === 'system-access'" class="ops-onboarding-pane">
+      <SemanticModelTaskBrowser v-if="activeView === 'model-tasks' && role === 'executive'" :key="`${access?.tenantId || currentUser?.tenantId || ''}:${currentUser?.id || currentUser?.account}:${role}`" :client="client" :can-validate="canValidate" :can-confirm="canModel && canValidate" :can-build="canModel" />
+      <div v-else-if="activeView === 'system-access'" class="ops-onboarding-pane">
         <div class="ops-subtabs" role="tablist" aria-label="接入视图">
           <button type="button" role="tab" :aria-selected="accessTab === 'systems'" :class="{ active: accessTab === 'systems' }" @click="accessTab = 'systems'">系统接入</button>
           <button type="button" role="tab" :aria-selected="accessTab === 'materials'" :class="{ active: accessTab === 'materials' }" @click="accessTab = 'materials'; onboardingMounted = true">材料与场景准备</button>
