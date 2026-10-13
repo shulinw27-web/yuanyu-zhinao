@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { discoverSchemasFromAttachments } from '../src/services/semantic-schema-discovery-service.js';
-import { executeOntologyReadPlan, validateOntologyReadPlans, ontologyQueryFingerprint } from '../src/services/ontology-read-plan-service.js';
+import { executeOntologyReadPlan, validateOntologyReadPlans, ontologyQueryFingerprint, getOntologyRuntimeGrant } from '../src/services/ontology-read-plan-service.js';
+import { runWithSemanticTenant, runWithSemanticModelWorkspace } from '../src/services/semantic-tenant-context.js';
 import { crossChannelReadPlan } from '../../examples/semantic-schemas/cross-channel-fulfillment/read-plan.mjs';
 import { buildAgentQueryPlan } from '../src/services/agent-query-plan-service.js';
 import { createAgentConversation, recordAgentConversationExchange, getAgentConversationContext } from '../src/services/agent-conversation-service.js';
-import { getPublishedAgentOntology, runPublishedOntologyRead } from '../src/services/published-ontology-agent-service.js';
+import { getPublishedAgentOntology, runPublishedOntologyRead, validatePublishedReadEvidence } from '../src/services/published-ontology-agent-service.js';
 import { getOAMetaModelDraft, saveOAMetaModelDraft, validateOAMetaModelDraft, simulateBuildOAMetaModel } from '../src/services/meta-model-service.js';
 import { runOntologyReadReplay, publishGovernedOntology } from '../src/services/ontology-runtime-service.js';
 import { getRole } from '../src/services/authorization-service.js';
@@ -16,6 +17,28 @@ import { saveLibraryDocument } from '../src/services/knowledge-library-service.j
 import { createLocalKnowledgeProvider } from '../src/services/knowledge-evidence-service.js';
 import { selectPublishedReadPlan } from '../src/services/ontology-plan-selection.js';
 import { runPrivateAgent } from '../src/services/private-agent-service.js';
+
+test('independent models require explicit server model grants and never inherit default role access', async () => {
+  const scope = { tenantId: 'grant-synthetic', subjectId: 'synthetic-reader' };
+  const oldGrant = { metadata: true, objects: { InventoryLot: { system: 'WMS', fields: ['id'], classifications: ['内部'] } } };
+  const settings = { ONTOLOGY_RUNTIME_GRANTS_JSON: JSON.stringify({ [scope.tenantId]: { quality: oldGrant } }) };
+  await runWithSemanticTenant(scope, async () => {
+    assert.deepEqual(getOntologyRuntimeGrant(scope, 'quality', settings), oldGrant);
+    assert.equal(getOntologyRuntimeGrant({ ...scope, tenantId: 'other' }, 'quality', settings), null);
+    await runWithSemanticModelWorkspace(scope, 'quality-model', async () => {
+      assert.equal(getOntologyRuntimeGrant(scope, 'quality', settings), null);
+      const explicit = { schemaVersion: 'ontology-model-grant.v1', modelId: 'quality-model', metadata: true, objects: {} };
+      settings.ONTOLOGY_RUNTIME_GRANTS_JSON = JSON.stringify({ [scope.tenantId]: { quality: { ...oldGrant, models: { 'quality-model': explicit, 'other-model': { ...explicit, modelId: 'other-model' } } } } });
+      assert.deepEqual(getOntologyRuntimeGrant(scope, 'quality', settings), explicit);
+      for (const invalid of [{ ...explicit, modelId: 'other-model' }, { ...explicit, metadata: false }, { ...explicit, schemaVersion: 'legacy' }, { ...explicit, objects: [] }, { ...explicit, provider: 'foreign' }]) {
+        settings.ONTOLOGY_RUNTIME_GRANTS_JSON = JSON.stringify({ [scope.tenantId]: { quality: { ...oldGrant, models: { 'quality-model': invalid } } } });
+        assert.equal(getOntologyRuntimeGrant(scope, 'quality', settings), null);
+      }
+    }, { registered: true });
+    settings.ONTOLOGY_RUNTIME_GRANTS_JSON = JSON.stringify({ [scope.tenantId]: { quality: { ...oldGrant, models: { 'unregistered-model': { schemaVersion: 'ontology-model-grant.v1', modelId: 'unregistered-model', metadata: true, objects: {} } } } } });
+    await runWithSemanticModelWorkspace(scope, 'unregistered-model', () => assert.equal(getOntologyRuntimeGrant(scope, 'quality', settings), null));
+  });
+});
 
 test('natural plan selection is bounded, declaration-based and never guesses ambiguous or excluded plans', () => {
   const plans = [
@@ -64,6 +87,18 @@ const draft = coefficient => ({ objectTypes: discovered.objectTypes, relationshi
 const grants = () => { process.env.ONTOLOGY_RUNTIME_GRANTS_JSON = JSON.stringify({ 'demo-enterprise': { executive: { metadata: true, objects: Object.fromEntries(discovered.objectTypes.map(o => [o.id, { system: o.sourceSystems[0], fields: o.fields, classifications: ['internal'] }])) } } }); };
 const run = (d, records = source, identity = scope) => executeOntologyReadPlan({ draft: d, plan: d.scenario.readPlans[0], target: 'ORD-X900', roleId: 'executive', scope: identity,
   retrieve: async (type, q) => records.filter(r => r.objectType === type.id && q.filter.values.includes(r.payload[q.filter.field])) });
+
+test('default grants cannot trigger any connector read in another admitted model workspace', async () => {
+  const previous = process.env.ONTOLOGY_RUNTIME_GRANTS_JSON; let reads = 0;
+  try {
+    grants(); const definition = draft(0);
+    await runWithSemanticModelWorkspace(scope, 'other-admitted-model', async () => {
+      await assert.rejects(executeOntologyReadPlan({ draft: definition, plan: definition.scenario.readPlans[0], target: 'ORD-X900', roleId: 'executive', scope,
+        retrieve: async () => { reads++; return []; } }), /READ_OBJECT_FORBIDDEN/u);
+      assert.equal(reads, 0);
+    }, { registered: true });
+  } finally { if (previous === undefined) delete process.env.ONTOLOGY_RUNTIME_GRANTS_JSON; else process.env.ONTOLOGY_RUNTIME_GRANTS_JSON = previous; }
+});
 
 test('read algebra retains declared joins and computes A/B from source records, not a fixture answer lookup', async () => {
   grants(); assert.equal(discovered.objectTypes.length, 18);
@@ -194,6 +229,43 @@ test('multiple published plans require explicit selection and per-plan replay; m
     assert.ok(alternateResult.graph.relationships.every(item => graphIds.has(item.from) && graphIds.has(item.to)));
     assert.equal(alternateResult.results.find(item => item.id === 'credit').value, creditV2);
     assert.equal(alternateResult.metadata.selectedReadPlan.id, alternative.id);
+    // Revocation while publication is being reread must invalidate already
+    // calculated evidence, even when metadata access remains enabled.
+    const evidenceGrants = process.env.ONTOLOGY_RUNTIME_GRANTS_JSON;
+    try {
+      const narrowed = JSON.parse(evidenceGrants);
+      narrowed['demo-enterprise'].executive.objects[alternateResult.records[0].objectType].fields = [];
+      queueMicrotask(() => { process.env.ONTOLOGY_RUNTIME_GRANTS_JSON = JSON.stringify(narrowed); });
+      await assert.rejects(validatePublishedReadEvidence({ ontology, roleId: 'executive', scope, records: alternateResult.records }), /READ_OBJECT_FORBIDDEN/u);
+    } finally { process.env.ONTOLOGY_RUNTIME_GRANTS_JSON = evidenceGrants; }
+    try {
+      const narrowed = JSON.parse(evidenceGrants);
+      narrowed['demo-enterprise'].executive.objects[alternative.datasets[0].objectType].fields = [];
+      queueMicrotask(() => { process.env.ONTOLOGY_RUNTIME_GRANTS_JSON = JSON.stringify(narrowed); });
+      await assert.rejects(validatePublishedReadEvidence({ ontology, roleId: 'executive', scope, records: [], readPlanId: alternative.id }), /READ_OBJECT_FORBIDDEN/u);
+    } finally { process.env.ONTOLOGY_RUNTIME_GRANTS_JSON = evidenceGrants; }
+    for (const changed of [{ modelId: 'another-model' }, { tenantId: 'another-tenant' }, { runtimeReadEnabled: false }]) {
+      await assert.rejects(validatePublishedReadEvidence({ ontology: { ...ontology, published: { ...ontology.published, ...changed } }, roleId: 'executive', scope, records: alternateResult.records }), /ONTOLOGY_VERSION_CHANGED/u);
+    }
+    try {
+      const narrowed = JSON.parse(evidenceGrants);
+      narrowed['demo-enterprise'].executive.objects[alternateResult.records[0].objectType].classifications = [];
+      queueMicrotask(() => { process.env.ONTOLOGY_RUNTIME_GRANTS_JSON = JSON.stringify(narrowed); });
+      await assert.rejects(validatePublishedReadEvidence({ ontology, roleId: 'executive', scope, records: alternateResult.records }), /READ_RECORD_SCOPE/u);
+    } finally { process.env.ONTOLOGY_RUNTIME_GRANTS_JSON = evidenceGrants; }
+    const authorizedFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = async (...args) => {
+        const response = await authorizedFetch(...args);
+        const revoked = JSON.parse(evidenceGrants);
+        revoked['demo-enterprise'].executive.metadata = false;
+        process.env.ONTOLOGY_RUNTIME_GRANTS_JSON = JSON.stringify(revoked);
+        return response;
+      };
+      const revokedResult = await read({ planId: alternative.id });
+      assert.equal(revokedResult.status, 'incomplete');
+      for (const key of ['records', 'results', 'graph', 'metadata', 'comparisons', 'analysis']) assert.equal(revokedResult[key], undefined, key);
+    } finally { globalThis.fetch = authorizedFetch; process.env.ONTOLOGY_RUNTIME_GRANTS_JSON = evidenceGrants; }
     const natural = await read({ input: `按${alternative.id}核验 ORD-X900` });
     assert.equal(natural.results.find(item => item.id === 'credit').value, creditV2);
     assert.equal(natural.metadata.selectedReadPlan.basis, 'declared_name');

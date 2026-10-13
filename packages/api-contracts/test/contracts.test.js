@@ -78,5 +78,10 @@ test('OpenAPI 契约可解析、operationId 唯一并覆盖核心模块', async 
     const path = document.paths[`/semantic-operations/models/{modelId}/tasks/{taskId}/${action}`]; assert.ok(path.post); assert.equal(path.get, undefined);
   }
   for (const name of ['LocalValidationTaskRequest', 'LocalTaskConfirmationRequest', 'LocalTaskExecutionRequest']) assert.equal(document.components.schemas[name].additionalProperties, false);
+  for (const action of ['adoption-confirm', 'adoption-execute', 'adoption-confirmation-evidence-recover']) {
+    const operation = document.paths[`/semantic-operations/models/{modelId}/tasks/{taskId}/${action}`].post;
+    assert.equal(operation['x-button-permission'], 'meta_model.draft.save'); assert.equal(operation['x-review-permission'], 'meta_model.draft.review');
+    assert.equal(operation.requestBody.required, true);
+  }
   assert.equal(taskMetadata.get.parameters.find(parameter => parameter.name === 'limit').schema.maximum, 100);
 });

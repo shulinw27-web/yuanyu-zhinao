@@ -1,7 +1,8 @@
 <script setup>
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
+import ModelAdoptionReviewPanel from './ModelAdoptionReviewPanel.vue';
 
-const props = defineProps({ client: { type: Object, required: true }, canValidate: { type: Boolean, default: false }, canConfirm: { type: Boolean, default: false }, canBuild: { type: Boolean, default: false } });
+const props = defineProps({ client: { type: Object, required: true }, canValidate: { type: Boolean, default: false }, canConfirm: { type: Boolean, default: false }, canBuild: { type: Boolean, default: false }, canReview: { type: Boolean, default: false }, canSimulate: { type: Boolean, default: false } });
 const models = ref([]); const modelId = ref(''); const tasks = ref([]); const selectedId = ref(''); const dialogue = ref(null);
 const loading = ref(false); const reading = ref(false); const hasMore = ref(false); const error = ref('');
 const nextOffset = ref(0);
@@ -9,12 +10,123 @@ const taskFingerprint = ref(''); const actionBusy = ref(false); const notice = r
 const createAcknowledged = ref(false); const confirmAcknowledged = ref(false); const executeAcknowledged = ref(false); const recoverAcknowledged = ref(false);
 const creationAttempt = ref(null); const localToken = ref(null);
 const sourceCodesText = ref(''); const sourceInspection = ref(null); const sourceAcknowledged = ref(false);
+const previewRequestId = ref(''); const previewRequestStatus = ref(null);
+const previewText = ref(''); const previewAcknowledged = ref(false); const previewAttempt = ref(null);
+const recoveryAcknowledged = ref(false); const preparedProof = ref(null); const previewReceipt = ref(null); const statusBinding = ref(null);
+async function recoverPreview(kind) {
+  if (!props.canBuild || !modelId.value || actionBusy.value || loading.value || reading.value || !recoveryAcknowledged.value || !['probe', 'resume', 'commit', 'evidence'].includes(kind)) return;
+  const binding = statusBinding.value; const receipt = previewReceipt.value;
+  if (kind === 'evidence') { if (!receipt || receipt.evidenceState !== 'pending' || receipt.task.modelId !== modelId.value) return; }
+  else if (!binding || binding.modelId !== modelId.value || binding.requestId !== previewRequestId.value || !binding.checkpointFingerprint
+    || previewRequestStatus.value?.state !== (kind === 'commit' ? 'committed' : 'prepared')) return;
+  if (kind === 'resume' && !preparedProof.value) return;
+  const request = generation; const statusRequest = statusGeneration; const selectedModel = modelId.value;
+  const current = () => request === generation && statusRequest === statusGeneration && props.canBuild && modelId.value === selectedModel;
+  actionBusy.value = true; recoveryAcknowledged.value = false; error.value = ''; notice.value = ''; localToken.value = null;
+  try {
+    let result;
+    if (kind === 'evidence') {
+      result = await props.client.recoverPreviewEvidence(selectedModel, receipt.task.id, { confirmed: true, expectedTaskFingerprint: receipt.taskFingerprint });
+      if (!current()) return;
+      if (result.modelId !== selectedModel || result.taskId !== receipt.task.id || result.evidenceState !== 'ready' || result.executionEnabled !== false || result.confirmationTokenReturned !== false) throw new Error('PREVIEW_RESPONSE_MISMATCH');
+      previewReceipt.value = null; notice.value = '既有任务证据已核验就绪，没有签发或执行。请刷新任务列表后主动查看原任务。';
+    } else {
+      const draft = await props.client.modelDraft(selectedModel);
+      if (!current()) return;
+      if (draft.modelId !== selectedModel || !/^[a-f0-9]{24}$/u.test(draft.draft?.fingerprint || '')) throw new Error('MODEL_RESPONSE_MISMATCH');
+      const body = { confirmed: true, inputFingerprint: binding.inputFingerprint, expectedCheckpointFingerprint: binding.checkpointFingerprint, expectedDraftFingerprint: draft.draft.fingerprint };
+      if (kind === 'resume' && JSON.stringify(body) !== JSON.stringify(preparedProof.value.body)) throw new Error('PREPARED_PROOF_STALE');
+      const method = kind === 'probe' ? 'inspectPreparedPreview' : kind === 'resume' ? 'resumePreparedPreview' : 'recoverPreviewCommit';
+      result = await props.client[method](selectedModel, binding.requestId, body);
+      if (!current()) return;
+      if (result.modelId !== selectedModel || result.executionEnabled !== false) throw new Error('PREVIEW_RESPONSE_MISMATCH');
+      if (kind === 'probe') {
+        if (result.referenceState !== 'valid' || result.contentReturned !== false || result.checkpointFingerprint !== binding.checkpointFingerprint || typeof result.taskId !== 'string' || !result.taskId) throw new Error('PREVIEW_RESPONSE_MISMATCH');
+        preparedProof.value = { body, taskId: result.taskId }; notice.value = '原准备快照引用检查通过，尚未续交；继续前需再次勾选确认。';
+      } else {
+        if (result.task?.modelId !== selectedModel || typeof result.task.id !== 'string' || !result.task.id || !/^[a-f0-9]{24}$/u.test(result.taskFingerprint || '')
+          || result.confirmationEnabled !== false || result.runtimeReadEnabled !== false || !['pending', 'ready'].includes(result.evidenceState)
+          || kind === 'resume' && (result.resumedFromCheckpoint !== true || result.task.id !== preparedProof.value.taskId || result.evidenceState !== 'pending')
+          || kind === 'commit' && (result.recoveredCommit !== true || result.task.id !== previewRequestStatus.value.taskId)) throw new Error('PREVIEW_RESPONSE_MISMATCH');
+        previewReceipt.value = { task: { id: result.task.id, modelId: selectedModel }, taskFingerprint: result.taskFingerprint, evidenceState: result.evidenceState };
+        preparedProof.value = null; previewAttempt.value = null;
+        previewRequestStatus.value = { state: 'committed', taskId: result.task.id };
+        notice.value = `已核对原任务 ${result.task.id}，证据${result.evidenceState === 'pending' ? '待恢复' : '就绪'}；未重新抽取、签发或执行。`;
+      }
+    }
+  } catch {
+    if (current()) { preparedProof.value = null; previewReceipt.value = null; statusBinding.value = null; previewRequestStatus.value = null;
+      error.value = '恢复未取得可验证结果，可能已有任务或证据写入。请只读核对原请求状态；不自动重发、签发或执行。'; }
+  } finally { if (request === generation) actionBusy.value = false; }
+}
+async function createPreview() {
+  if (!props.canBuild || !modelId.value || modelId.value === 'oa-governance' || actionBusy.value || loading.value || reading.value || !previewAcknowledged.value || previewAttempt.value) return;
+  const codes = sourceCodesText.value.split(/[,，\s]+/u).filter(Boolean).sort(); const text = previewText.value;
+  if (!text.trim() || text.length > 4000 || !codes.length || codes.length > 16 || new Set(codes).size !== codes.length || codes.some(code => !/^[A-Z][A-Z0-9_]{1,15}$/u.test(code))) {
+    error.value = '请输入最多4000字的诉求和明确的已绑定来源码（例如WMS、ERP）。当前入口仅解析结构化Schema，不调用大模型。'; return;
+  }
+  const selectedModel = modelId.value; const request = generation; const stamp = sourceCodesText.value;
+  const current = () => request === generation && props.canBuild && modelId.value === selectedModel && text === previewText.value && stamp === sourceCodesText.value;
+  actionBusy.value = true; previewAcknowledged.value = false; error.value = ''; notice.value = ''; localToken.value = null;
+  try {
+    const draft = await props.client.modelDraft(selectedModel);
+    if (!current()) return;
+    if (draft.modelId !== selectedModel || !/^[a-f0-9]{24}$/u.test(draft.draft?.fingerprint || '')) throw new Error('MODEL_RESPONSE_MISMATCH');
+    const body = { confirmed: true, requestId: globalThis.crypto.randomUUID(), text, systemCodes: codes, expectedDraftFingerprint: draft.draft.fingerprint };
+    previewAttempt.value = { modelId: selectedModel, requestId: body.requestId }; previewRequestId.value = body.requestId;
+    const result = await props.client.createStructuredPreview(selectedModel, body);
+    if (!current()) return;
+    if (result.modelId !== selectedModel || result.task?.modelId !== selectedModel || typeof result.task.id !== 'string' || !result.task.id || result.task.id.length > 200
+      || result.creationMode !== 'structured_preview' || result.evidenceState !== 'ready' || result.executionEnabled !== false || result.runtimeReadEnabled !== false
+      || result.task.status !== 'waiting_confirmation' || !/^[a-f0-9]{24}$/u.test(result.taskFingerprint || '')) throw new Error('PREVIEW_RESPONSE_MISMATCH');
+    previewAttempt.value = null;
+    tasks.value = [result.task, ...tasks.value.filter(task => task.id !== result.task.id)];
+    notice.value = `结构化候选任务已创建：${result.task.id}。请求号：${body.requestId}。尚未采纳、确认、模拟或发布；请主动选择任务查看自己的对话。`;
+  } catch {
+    if (current()) { error.value = previewAttempt.value
+      ? '创建没有获得可验证回执，可能已有准备记录或任务。保留原请求号，只读核对状态，不自动重发或创建第二条任务。'
+      : '草稿预检未通过，没有发送创建请求；请检查权限和当前模型。'; }
+  } finally { if (request === generation) actionBusy.value = false; }
+}
+let statusGeneration = 0;
+const previewStateLabel = state => ({ reserved: '准备占位，尚无可恢复快照', prepared: '准备快照已保存，尚未提交任务', committed: '原任务已提交，仍需核对任务证据' }[state] || '未知状态');
+async function inspectPreviewRequest() {
+  if (!props.canBuild || !modelId.value || modelId.value === 'oa-governance' || actionBusy.value || loading.value || reading.value) return;
+  previewRequestStatus.value = null;
+  statusBinding.value = null; preparedProof.value = null; previewReceipt.value = null; recoveryAcknowledged.value = false;
+  const id = previewRequestId.value;
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(id)) { error.value = '请输入原创建请求的完整小写 UUID v4，不自动猜测或新建请求。'; return; }
+  const selectedModel = modelId.value; const request = generation; const statusRequest = ++statusGeneration;
+  const current = () => request === generation && statusRequest === statusGeneration && modelId.value === selectedModel && props.canBuild && previewRequestId.value === id;
+  actionBusy.value = true; error.value = ''; notice.value = '';
+  try {
+    const result = await props.client.getPreviewRequestStatus(selectedModel, id);
+    if (!current()) return;
+    if (result.modelId !== selectedModel || !['reserved', 'prepared', 'committed'].includes(result.state)
+      || result.preparationAllowed !== false || result.automaticRetryAllowed !== false || result.automaticTakeoverAllowed !== false || result.executionEnabled !== false
+      || !/^[a-f0-9]{64}$/u.test(result.inputFingerprint || '')
+      || result.state !== 'reserved' && !/^[a-f0-9]{64}$/u.test(result.checkpointFingerprint || '')
+      || result.state === 'reserved' && result.blocker !== 'preparation_checkpoint_absent'
+      || result.state === 'committed' && (typeof result.taskId !== 'string' || !result.taskId || result.taskId.length > 200)) throw new Error('PREVIEW_STATUS_RESPONSE_MISMATCH');
+    previewRequestStatus.value = { state: result.state, taskId: result.state === 'committed' ? result.taskId : null };
+    statusBinding.value = { modelId: selectedModel, requestId: id, inputFingerprint: result.inputFingerprint, checkpointFingerprint: result.checkpointFingerprint };
+  } catch (failure) {
+    if (current()) { previewRequestStatus.value = null; error.value = failure.status === 404 || failure.payload?.code === 'MODEL_PREVIEW_REQUEST_NOT_FOUND'
+      ? '当前模型与身份下没有此请求；查询不会创建占位或自动重试。'
+      : '无法核对请求状态，请检查当前权限、模型及请求号；旧摘要已清除，不自动恢复或执行。'; }
+  } finally { if (request === generation) actionBusy.value = false; }
+}
 const localTask = computed(() => dialogue.value?.localValidationTask === true && !dialogue.value?.reviewerAccess);
+function recordAdoption(result) {
+  if (!props.canReview || reading.value || !dialogue.value || result?.modelId !== modelId.value || result.task?.id !== selectedId.value || result.task.modelId !== modelId.value || result.task.status !== 'completed' || result.task.structuredAdoptionTask !== true) return;
+  clearAuthorization(); dialogue.value = { ...dialogue.value, ...result.task };
+  tasks.value = tasks.value.map(task => task.id === result.task.id ? { ...task, ...result.task } : task);
+}
 let generation = 0; let detailGeneration = 0;
 const pageSize = 20;
 const statusLabel = status => ({ waiting_confirmation: '待确认', completed: '已完成', failed: '失败', running: '执行中', cancelled: '已取消' }[status] || status || '未标记');
 function clearAuthorization() { taskFingerprint.value = ''; localToken.value = null; createAcknowledged.value = false; confirmAcknowledged.value = false; executeAcknowledged.value = false; recoverAcknowledged.value = false; }
-function clear() { tasks.value = []; nextOffset.value = 0; selectedId.value = ''; dialogue.value = null; hasMore.value = false; reading.value = false; loading.value = false; actionBusy.value = false; notice.value = ''; sourceCodesText.value = ''; sourceInspection.value = null; sourceAcknowledged.value = false; clearAuthorization(); detailGeneration++; }
+function clear() { tasks.value = []; nextOffset.value = 0; selectedId.value = ''; dialogue.value = null; hasMore.value = false; reading.value = false; loading.value = false; actionBusy.value = false; notice.value = ''; sourceCodesText.value = ''; sourceInspection.value = null; sourceAcknowledged.value = false; previewRequestId.value = ''; previewRequestStatus.value = null; previewText.value = ''; previewAcknowledged.value = false; previewAttempt.value = null; recoveryAcknowledged.value = false; preparedProof.value = null; previewReceipt.value = null; statusBinding.value = null; statusGeneration++; clearAuthorization(); detailGeneration++; }
 async function sourceAction(bind = false) {
   if (!props.canBuild || !modelId.value || modelId.value === 'oa-governance' || actionBusy.value || loading.value || reading.value || bind && (!sourceInspection.value || !sourceAcknowledged.value)) return;
   const selectedModel = modelId.value; const request = generation; const codes = sourceCodesText.value.split(/[,，\s]+/u).filter(Boolean).sort();
@@ -142,14 +254,16 @@ async function localAction(kind) {
 }
 onMounted(loadModels);
 watch(() => props.client, () => { creationAttempt.value = null; loadModels(); });
-watch(sourceCodesText, () => { sourceInspection.value = null; sourceAcknowledged.value = false; });
-watch(() => [props.canValidate, props.canConfirm, props.canBuild], () => { generation++; creationAttempt.value = null; models.value = []; modelId.value = ''; clear(); });
+watch(sourceCodesText, () => { sourceInspection.value = null; sourceAcknowledged.value = false; previewAcknowledged.value = false; });
+watch(previewText, () => { previewAcknowledged.value = false; });
+watch(previewRequestId, () => { statusGeneration++; previewRequestStatus.value = null; statusBinding.value = null; preparedProof.value = null; previewReceipt.value = null; recoveryAcknowledged.value = false; });
+watch(() => [props.canValidate, props.canConfirm, props.canBuild, props.canReview, props.canSimulate], () => { generation++; creationAttempt.value = null; models.value = []; modelId.value = ''; clear(); });
 onBeforeUnmount(() => { generation++; detailGeneration++; clear(); });
 </script>
 
 <template>
   <section class="model-task-browser" aria-label="独立模型任务与本地校验">
-    <header><div><h2>模型任务 · 本地校验</h2><p>明确选择模型查看自己的任务。本地校验需要分别创建、确认、执行；不调用大模型，不采纳、模拟、发布或写入源系统，也不切换其他页面工作区。</p></div><button type="button" :disabled="actionBusy" @click="loadModels">刷新模型列表</button></header>
+    <header><div><h2>独立模型任务工作区</h2><p>明确选择模型查看自己的任务。结构化候选先审阅图和差异，再分别确认、采纳、本地合成模拟；校验任务另行操作。不调用大模型，不自动发布或写入源系统，不切换其他页面工作区。</p></div><button type="button" :disabled="actionBusy" @click="loadModels">刷新模型列表</button></header>
     <label class="model-picker">选择模型<select :value="modelId" :disabled="loading || actionBusy" @change="selectModel($event.target.value)"><option value="">请选择模型</option><option v-for="model in models" :key="model.id" :value="model.id">{{ model.label }} · {{ model.id }}</option></select></label>
     <section v-if="canBuild && modelId && modelId !== 'oa-governance'" class="local-actions" aria-label="明确来源资料绑定">
       <h3>先检查来源，再明确绑定</h3><p>只使用已有权限内的接口文档/字典资料，不读取业务明细或写入源系统。</p>
@@ -158,6 +272,27 @@ onBeforeUnmount(() => { generation++; detailGeneration++; clear(); });
       <template v-if="sourceInspection"><p>来源：{{ sourceInspection.systemCodes.join('、') }} · {{ sourceInspection.documentCount }}份资料 · 绑定修订{{ sourceInspection.revision }}</p>
         <label><input v-model="sourceAcknowledged" type="checkbox" :disabled="actionBusy">我确认以上范围，只绑定资料，不生成模型或执行任务</label>
         <button type="button" :disabled="!sourceAcknowledged || actionBusy || loading || reading" @click="sourceAction(true)">确认绑定资料</button></template>
+    </section>
+    <section v-if="canBuild && modelId && modelId !== 'oa-governance'" class="local-actions" aria-label="结构化候选预览创建">
+      <h3>生成结构化候选预览</h3><p>先绑定上方来源资料，再描述建模诉求。仅解析接口文档/数据字典里的Schema，不调用大模型，不承诺自然语言或图片理解，也不自动采纳或执行。</p>
+      <label class="preview-input">建模诉求<textarea v-model="previewText" maxlength="4000" :disabled="actionBusy || !!previewAttempt" rows="3" placeholder="例如：从已绑定WMS接口文档建立库存对象候选"></textarea></label>
+      <label><input v-model="previewAcknowledged" type="checkbox" :disabled="actionBusy || !!previewAttempt">我确认只生成候选，使用上方明确来源，不自动执行</label>
+      <button type="button" :disabled="!previewAcknowledged || !!previewAttempt || actionBusy || loading || reading" @click="createPreview">创建候选预览</button>
+      <p v-if="previewAttempt">创建回执尚未核实，请保留请求号：{{ previewAttempt.requestId }}。当前不允许重发；换页/刷新不会证明原请求失败，请先记录此编号。</p>
+    </section>
+    <section v-if="canBuild && modelId && modelId !== 'oa-governance'" class="local-actions" aria-label="结构化预览请求状态">
+      <h3>核对原预览请求</h3><p>输入原请求号，只查当前模型与身份下的元数据；不重新准备、恢复、采纳或执行。请求号不保存到浏览器存储。</p>
+      <label>原请求号<input v-model="previewRequestId" maxlength="36" autocomplete="off" spellcheck="false" :disabled="actionBusy || loading || reading" placeholder="小写 UUID v4"></label>
+      <button type="button" :disabled="actionBusy || loading || reading || !previewRequestId" @click="inspectPreviewRequest">只读核对状态</button>
+      <template v-if="previewRequestStatus"><p role="status">{{ previewStateLabel(previewRequestStatus.state) }}<span v-if="previewRequestStatus.taskId"> · 原任务：{{ previewRequestStatus.taskId }}</span></p>
+        <p v-if="previewRequestStatus.state === 'reserved'">没有快照，不能自动重试、接管或删除占位；不代表建模成功。</p>
+        <p v-else>状态查询不授予确认或执行权限。每个恢复步骤都需单独勾选，服务器会重新复验权限及原引用。</p></template>
+      <template v-if="statusBinding && previewRequestStatus && previewRequestStatus.state !== 'reserved'">
+        <label><input v-model="recoveryAcknowledged" type="checkbox" :disabled="actionBusy">我确认只执行本次选择的检查/恢复，不采纳、签发或执行模型任务</label>
+        <template v-if="previewRequestStatus.state === 'prepared'"><button type="button" :disabled="!recoveryAcknowledged || actionBusy" @click="recoverPreview('probe')">检查原准备快照</button><button type="button" :disabled="!preparedProof || !recoveryAcknowledged || actionBusy" @click="recoverPreview('resume')">仅续交原任务</button></template>
+        <button v-if="previewRequestStatus.state === 'committed'" type="button" :disabled="!recoveryAcknowledged || actionBusy" @click="recoverPreview('commit')">读取原提交回执</button>
+        <button v-if="previewReceipt?.evidenceState === 'pending'" type="button" :disabled="!recoveryAcknowledged || actionBusy" @click="recoverPreview('evidence')">核验并恢复原任务证据</button>
+      </template>
     </section>
     <div v-if="modelId && canValidate" class="local-actions"><label><input v-model="createAcknowledged" type="checkbox" :disabled="actionBusy">我确认只创建本地结构校验任务，不自动执行</label><button type="button" :disabled="!createAcknowledged || actionBusy || loading || reading" @click="localAction('create')">{{ creationAttempt ? '明确恢复原创建请求' : '1. 创建本地校验任务' }}</button></div>
     <p v-if="notice" role="status" class="dialogue-status">{{ notice }}</p>
@@ -171,6 +306,7 @@ onBeforeUnmount(() => { generation++; detailGeneration++; clear(); });
         <button v-if="hasMore" type="button" :disabled="loading" @click="loadPage()">{{ loading ? '加载中…' : '加载更多' }}</button>
       </aside>
       <article aria-label="任务对话" :aria-busy="reading">
+        <ModelAdoptionReviewPanel v-if="dialogue?.structuredAdoptionTask && !dialogue.reviewerAccess && canReview && !reading" :key="`${modelId}:${selectedId}`" :client="client" :model-id="modelId" :task-id="selectedId" :can-review="canReview" :can-simulate="canSimulate" @applied="recordAdoption" />
         <div v-if="localTask && ['waiting_confirmation','retryable'].includes(dialogue.status)" class="local-actions">
           <button type="button" :disabled="actionBusy" @click="openTask({ id: selectedId })">刷新当前任务（清除旧凭证）</button>
           <template v-if="canConfirm && dialogue.confirmationEvidenceState !== 'pending'"><label><input v-model="confirmAcknowledged" type="checkbox" :disabled="actionBusy">我确认当前任务版本，只签发凭证，不执行</label><button type="button" :disabled="!confirmAcknowledged || !taskFingerprint || dialogue.evidenceState !== 'ready' || actionBusy || reading" @click="localAction('confirm')">2. 确认当前任务</button></template>
@@ -194,6 +330,7 @@ button { cursor: pointer; } button:disabled { opacity: .6; cursor: wait; } butto
 .local-actions h3, .local-actions p { flex-basis: 100%; margin: 4px 0; }
 .local-actions input:not([type="checkbox"]) { color: #d6edf6; background: #102f40; border: 1px solid #3c687b; border-radius: 8px; padding: 10px; width: min(260px, 100%); box-sizing: border-box; }
 .local-actions input:focus-visible { outline: 2px solid #57d5c5; outline-offset: 2px; }
+.preview-input { flex-basis: 100%; flex-direction: column; } .preview-input textarea { width: 100%; box-sizing: border-box; resize: vertical; color: #d6edf6; background: #102f40; border: 1px solid #3c687b; border-radius: 8px; padding: 10px; font: inherit; } .preview-input textarea:focus-visible { outline: 2px solid #57d5c5; outline-offset: 2px; }
 .model-task-columns { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 20px; }
 aside, article { min-width: 0; max-height: 65vh; overflow-y: auto; scrollbar-gutter: stable; padding: 12px; border: 1px solid #2b5263; border-radius: 8px; background: #081a25; }
 aside button { display: block; width: 100%; margin: 8px 0; text-align: left; overflow-wrap: anywhere; } aside span, aside small { display: block; margin-top: 6px; }

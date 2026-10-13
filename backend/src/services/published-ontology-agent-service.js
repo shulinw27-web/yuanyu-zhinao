@@ -38,13 +38,25 @@ export async function getPublishedAgentOntology(roleId, scope) {
   return { published, metadata, prompt };
 }
 
-export async function validatePublishedReadEvidence({ ontology, roleId, scope, records }) {
+export async function validatePublishedReadEvidence({ ontology, roleId, scope, records, readPlanId }) {
+  const current = await getPublishedAgentOntology(roleId, scope);
+  if (!current || ontology.published.runtimeReadEnabled === false || ontology.published.tenantId !== scope.tenantId
+    || current.published.modelId !== ontology.published.modelId
+    || current.published.version !== ontology.published.version || current.published.fingerprint !== ontology.published.fingerprint) throw new Error('ONTOLOGY_VERSION_CHANGED');
+  // No awaited work may follow the final permission checks: field or record
+  // grants can be withdrawn while the publication store is being reread.
+  if (readPlanId !== undefined) {
+    const plan = current.published.draft.scenario?.readPlans?.find(item => item.id === readPlanId);
+    if (!plan) throw new Error('ONTOLOGY_VERSION_CHANGED');
+    // Empty datasets still contribute to aggregates. Their authorization must
+    // survive the final reread too, not just types represented by evidence rows.
+    const types = new Set(plan.datasets.flatMap(dataset => [dataset.objectType, ...(dataset.expand ? [dataset.expand.edgeObjectType] : [])]));
+    for (const typeId of types) requireOntologyObjectAccess(current.published.draft, typeId, roleId, scope);
+  }
   for (const r of records) {
-    const { grant } = requireOntologyObjectAccess(ontology.published.draft, r.objectType, roleId, scope);
+    const { grant } = requireOntologyObjectAccess(current.published.draft, r.objectType, roleId, scope);
     if (!grant.classifications.includes(r.classification) || !admitSemanticRecord(r, roleId, scope, true)) throw new Error('READ_RECORD_SCOPE');
   }
-  const current = await getPublishedAgentOntology(roleId, scope);
-  if (current?.published.version !== ontology.published.version || current?.published.fingerprint !== ontology.published.fingerprint) throw new Error('ONTOLOGY_VERSION_CHANGED');
   return true;
 }
 
@@ -119,7 +131,7 @@ export async function runPublishedOntologyRead({ ontology, roleId, scope, target
       }
     }
     // Recheck AFTER model latency too: no revoked data or stale model answers.
-    await validatePublishedReadEvidence({ ontology, roleId, scope, records });
+    await validatePublishedReadEvidence({ ontology, roleId, scope, records, readPlanId: plans[0].id });
     const status = partial || analysis.status === 'incomplete' ? 'partial' : 'completed';
     const graph = buildOntologyResultGraph(ontology.published.draft, records, ontology.published.version, ontology.published.fingerprint, comparisons.map(comparison => comparison.mappingEvidence));
     return { status, code: status === 'partial' ? 'ONTOLOGY_READ_PARTIAL' : 'ONTOLOGY_READ_COMPLETED', results, queries, records, coverage, analysis, timing, graph,
@@ -128,7 +140,9 @@ export async function runPublishedOntologyRead({ ontology, roleId, scope, target
       text: `${partial ? '当前只完成声明计划的局部读取，不能代表完整影响范围。\n' : ''}${analysis.status === 'incomplete' ? '计算已完成，但解释未通过校验或预算限制，尚未完成分析。\n' : ''}${answer}\n\n依据：已发布模型 ${ontology.published.version}（${ontology.published.fingerprint}）；${records.length} 条授权来源记录、${queries.length} 个关联查询步骤。\n记录时间：${dates.join('、')}。这是来源快照计算，不作实时履约承诺；本次未执行任何业务写入。` };
   } catch (error) {
     const code = /^[A-Z_]+$/.test(error.message) ? error.message : 'ONTOLOGY_SOURCE_UNAVAILABLE';
-    return { status: 'incomplete', code, metadata: ontology.metadata,
+    // A failed final authorization/version check must not disclose even the
+    // previously authorized schema catalogue in an error response.
+    return { status: 'incomplete', code,
       text: `本轮模型关联核验未完成（${code}）。请检查发布模型的对象授权、关联字段和连接器完整性；没有用缺失记录当作零，也没有执行业务操作。` };
   }
 }

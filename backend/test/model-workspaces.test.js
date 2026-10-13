@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { modelWorkspaces } from '../src/domains/governance/model-workspaces.js';
+import { projectAdoptionReview } from '../src/domains/governance/model-adoption-review.js';
 import { semanticPreviewRequests } from '../src/domains/governance/model-preview-requests.js';
 import { runWithSemanticTenant, semanticTenantStateKey } from '../src/services/semantic-tenant-context.js';
 import { configureIAMRepository, runWithIAMStoreContext } from '../src/services/iam-store.js';
@@ -23,6 +24,27 @@ import { getAgentEvidenceTrace, getAgentEvidenceTraceInternal, appendAgentEviden
 
 const identity = { tenantId: 'workspace-tests', subjectId: 'admin@demo.local' };
 const within = work => runWithSemanticTenant(identity, work);
+
+test('adoption structure projection preserves explicit relation mappings and reports merge versus replace removals', () => {
+  const node = id => ({ id, label: id, key: 'id', fields: ['id'], sourceSystems: ['ERP'], fieldDefinitions: [{ name: 'id', type: 'string', primaryKey: true, sourceField: 'id', mappingStatus: 'mapped' }] });
+  const old = { from: 'A', to: 'B', predicate: 'links', sourceField: 'legacy', targetField: 'id', cardinality: 'n:1' };
+  const input = { task: { modelId: 'quality', id: 'task-1' }, proposal: { id: 'p-1', revision: 1, adoptionMode: 'merge', draft: { objectTypes: [node('A')], relationshipTypes: [{ ...old, sourceField: 'new' }] } },
+    draft: { fingerprint: 'a'.repeat(24), objectTypes: [node('A'), node('B'), node('C')], relationshipTypes: [old] }, taskFingerprint: 'b'.repeat(24) };
+  const merged = projectAdoptionReview(input); assert.equal(merged.error, undefined); assert.equal(merged.graph.nodes.find(item => item.id === 'B').kind, 'existing_reference');
+  assert.equal(merged.graph.edges[0].sourceField, 'new'); assert.equal(merged.diff.relationshipChanges[0].change, 'updated'); assert.equal(merged.diff.objectChanges.some(item => item.change === 'removed'), false);
+  input.proposal.adoptionMode = 'replace'; assert.equal(projectAdoptionReview(input).status, 413, 'replace cannot silently keep removed endpoint references');
+  input.proposal.draft.objectTypes.push(node('B')); input.proposal.draft.relationshipTypes = [];
+  const replaced = projectAdoptionReview(input); assert.deepEqual(replaced.diff.objectChanges.filter(item => item.change === 'removed').map(item => item.id), ['C']); assert.equal(replaced.diff.relationshipChanges[0].change, 'removed');
+});
+
+test('adoption review projection rejects duplicates, malformed fields and budget overflow without truncation or raw samples', () => {
+  const node = { id: 'A', label: 'A', key: 'id', fields: ['id'], sourceSystems: ['WMS'], fieldDefinitions: [{ name: 'id', type: 'string', sourceField: 'id', mappingStatus: 'mapped', rawCredential: 'DO_NOT_RETURN' }] };
+  const input = { task: { modelId: 'quality', id: 'task-1', confirmation: { tokenHash: 'DO_NOT_RETURN' } }, proposal: { id: 'p-1', revision: 1, adoptionMode: 'merge', draft: { objectTypes: [node], relationshipTypes: [] }, mappingValidation: { status: 'passed', blocked: false, transformedSamples: ['DO_NOT_RETURN'] } }, draft: { fingerprint: 'a'.repeat(24), objectTypes: [], relationshipTypes: [] }, taskFingerprint: 'b'.repeat(24) };
+  assert.doesNotMatch(JSON.stringify(projectAdoptionReview(input)), /DO_NOT_RETURN|transformedSamples|tokenHash|rawCredential/u);
+  input.proposal.draft.objectTypes = [node, node]; assert.equal(projectAdoptionReview(input).status, 413);
+  input.proposal.draft.objectTypes = [{ ...node, fieldDefinitions: [{ name: 'id' }] }]; assert.equal(projectAdoptionReview(input).status, 413);
+  input.proposal.draft.objectTypes = Array.from({ length: 41 }, (_, i) => ({ ...node, id: `A${i}` })); assert.equal(projectAdoptionReview(input).status, 413);
+});
 
 test('preview request status SDK validates selectors before IO and only sends an explicit model GET', async () => {
   const original = globalThis.fetch; const calls = [];
@@ -554,6 +576,112 @@ test('model facade denies unresolved, non-admin and foreign principals without r
       assert.equal((await modelWorkspaces.register({ identityScope, body: { id: 'denied-model', label: '禁止注册', expectedRevision: 0 } })).code, 'MODEL_WORKSPACE_FORBIDDEN');
     }
     assert.equal((await modelWorkspaces.list({ identityScope: identity })).revision, 0);
+  });
+});
+
+test('internal adoption is limited to structured owned previews, pins original draft and never widens local execution', async () => {
+  await within(async () => {
+    const options = { identityScope: identity, modelId: 'adoption-preview' };
+    await modelWorkspaces.register({ identityScope: identity, body: { id: options.modelId, label: '合成采纳预览', expectedRevision: 0 } });
+    writeState('system_access_runtime', semanticTenantStateKey('system_documents'), { WMS: { warnings: [], documents: [{ name: 'WMS.openapi.json', mimeType: 'application/json', text: JSON.stringify({ openapi: '3.0.0', 'x-source-system': 'WMS', components: { schemas: { InventoryLot: { type: 'object', 'x-primary-key': 'inventoryLotId', properties: { inventoryLotId: { type: 'string' }, quantity: { type: 'number' } } } } } }) }] } });
+    const source = await modelSystemMaterials.inspect({ ...options, body: { systemCodes: ['WMS'] } });
+    await modelSystemMaterials.bind({ ...options, body: { systemCodes: ['WMS'], confirmed: true, expectedRevision: 0, expectedSourceFingerprint: source.sourceFingerprint } });
+    const draft = (await modelWorkspaces.draft(options)).draft;
+    const preview = await modelWorkspaces.previewModelTask({ ...options, body: { confirmed: true, requestId: '62345678-1234-4123-8123-123456789abc', text: '根据WMS接口建立库存语义模型', systemCodes: ['WMS'], expectedDraftFingerprint: draft.fingerprint } });
+    assert.equal(preview.error, undefined, JSON.stringify(preview));
+    const taskId = preview.task.id;
+    const review = await modelWorkspaces.reviewAdoptionTask({ ...options, taskId });
+    assert.equal(review.error, undefined, JSON.stringify(review)); assert.equal(review.contentScope, 'owned_candidate_structure_only');
+    assert.equal(review.graph.nodes[0].id, 'InventoryLot'); assert.equal(review.graph.nodes[0].fields[0].name, 'inventoryLotId');
+    assert.equal(review.diff.objectChanges[0].change, 'added'); assert.equal(review.taskFingerprint, preview.taskFingerprint);
+    assert.doesNotMatch(JSON.stringify(review), /transformedSamples|materialRefs|sourceFingerprint|tokenHash|traceId/);
+    assert.equal((await modelWorkspaces.reviewAdoptionTask({ ...options, taskId, identityScope: { ...identity, subjectId: 'quality@demo.local' } })).code, 'MODEL_WORKSPACE_FORBIDDEN');
+    let changedReview = false; let taskReads = 0;
+    configureSemanticGovernanceRepository({ ...asyncRuntimeStateRepository, async readState(...args) {
+      const value = await asyncRuntimeStateRepository.readState(...args);
+      if (args[0] === 'semantic_operations_agent_tasks' && ++taskReads === 2) {
+        changedReview = true;
+        await mutateSemanticGovernanceState('semantic_operations_agent_tasks', 'index', {}, index => { index[taskId].title = '合成并发修订'; return { value: index }; });
+      }
+      return value;
+    } });
+    try { const raced = await modelWorkspaces.reviewAdoptionTask({ ...options, taskId }); assert.ok(raced.error); assert.equal(raced.graph, undefined); assert.equal(changedReview, true); }
+    finally { configureSemanticGovernanceRepository(null); }
+    await semanticModelRegistry.withWorkspace({ role: { id: 'executive' }, ...options, work: () => mutateSemanticGovernanceState('semantic_operations_agent_tasks', 'index', {}, index => { delete index[taskId].title; return { value: index }; }) });
+    const currentReview = await modelWorkspaces.reviewAdoptionTask({ ...options, taskId });
+    const exposed = await semanticModelRegistry.withWorkspace({ role: { id: 'executive' }, ...options, work: async () => (await readSemanticGovernanceState('semantic_operations_agent_tasks', 'index', {}))[taskId] });
+    assert.equal(exposed.proposal.critic.status, 'passed', JSON.stringify(exposed.proposal.critic));
+    assert.equal(exposed.proposal.mappingValidation.blocked, false, JSON.stringify(exposed.proposal.mappingValidation));
+    const confirmation = await modelWorkspaces.confirmTask({ ...options, taskId, body: { confirmed: true, expectedTaskFingerprint: currentReview.taskFingerprint } });
+    assert.equal(confirmation.error, undefined, JSON.stringify(confirmation));
+    const body = { confirmed: true, expectedTaskFingerprint: confirmation.taskFingerprint, confirmationToken: confirmation.confirmationToken };
+    assert.equal((await modelWorkspaces.executeAdoptionTask({ ...options, taskId, body: { ...body, confirmed: false } })).status, 400);
+    assert.ok((await modelWorkspaces.executeAdoptionTask({ ...options, taskId, body: { ...body, expectedTaskFingerprint: '0'.repeat(24) } })).error);
+    assert.equal((await modelWorkspaces.executeTask({ ...options, taskId, body })).code, 'MODEL_TASK_EXECUTION_COMMAND_UNSUPPORTED');
+    assert.equal((await modelWorkspaces.executeAdoptionTask({ ...options, taskId, body: { ...body, command: 'publish_model' } })).status, 400);
+    assert.equal((await modelWorkspaces.executeAdoptionTask({ ...options, identityScope: { ...identity, subjectId: 'quality@demo.local' }, taskId, body })).code, 'MODEL_WORKSPACE_FORBIDDEN');
+    const iam = seedTenantIAM(identity.tenantId, ['admin@demo.local', 'quality@demo.local']); const originalIAM = structuredClone(iam);
+    iam.rolePolicies.executive.buttonPermissionIds = iam.rolePolicies.executive.buttonPermissionIds.filter(id => id !== 'meta_model.draft.review');
+    writeState('iam', iamWorkspaceKey(identity.tenantId), iam);
+    assert.equal((await modelWorkspaces.executeAdoptionTask({ ...options, taskId, body })).code, 'MODEL_WORKSPACE_FORBIDDEN');
+    writeState('iam', iamWorkspaceKey(identity.tenantId), originalIAM);
+    let revoked = false;
+    configureSemanticGovernanceRepository({ ...asyncRuntimeStateRepository, async readState(...args) {
+      const value = await asyncRuntimeStateRepository.readState(...args);
+      if (!revoked && args[0] === 'semantic_operations_agent_tasks') {
+        revoked = true; const denied = structuredClone(originalIAM);
+        denied.rolePolicies.executive.buttonPermissionIds = denied.rolePolicies.executive.buttonPermissionIds.filter(id => id !== 'meta_model.draft.save');
+        writeState('iam', iamWorkspaceKey(identity.tenantId), denied);
+      }
+      return value;
+    } });
+    try { assert.ok((await modelWorkspaces.executeAdoptionTask({ ...options, taskId, body })).error); assert.equal(revoked, true); }
+    finally { configureSemanticGovernanceRepository(null); writeState('iam', iamWorkspaceKey(identity.tenantId), originalIAM); }
+    const unconsumed = await semanticModelRegistry.withWorkspace({ role: { id: 'executive' }, ...options, work: async () => (await readSemanticGovernanceState('semantic_operations_agent_tasks', 'index', {}))[taskId] });
+    assert.equal(unconsumed.confirmation.state, 'issued'); assert.equal(unconsumed.execution, undefined);
+    const defaultDraft = (await modelWorkspaces.draft({ identityScope: identity, modelId: 'oa-governance' })).draft.fingerprint;
+    const entry = await semanticModelRegistry.withWorkspace({ role: { id: 'executive' }, ...options, work: async () => {
+      const { getOAMetaModelRuntimeTransactionEntry } = await import('../src/services/meta-model-service.js');
+      const selection = getOAMetaModelRuntimeTransactionEntry(); return { selection, value: await readSemanticGovernanceState(selection.namespace, selection.key, selection.initialValue) };
+    } });
+    const changed = await modelWorkspaces.saveDraft({ ...options, body: { confirmed: true, expectedFingerprint: draft.fingerprint, input: { policies: ['合成并发变更，旧采纳不得覆盖'] } } });
+    assert.equal(changed.error, undefined, JSON.stringify(changed));
+    assert.equal((await modelWorkspaces.executeAdoptionTask({ ...options, taskId, body })).code, 'MODEL_ADOPTION_PREVIEW_OR_DRAFT_CHANGED');
+    assert.equal((await modelWorkspaces.reviewAdoptionTask({ ...options, taskId })).code, 'MODEL_ADOPTION_REVIEW_CHANGED');
+    // Restore only the isolated fixture snapshot to independently exercise the
+    // successful branch; this is not a production rollback implementation.
+    await semanticModelRegistry.withWorkspace({ role: { id: 'executive' }, ...options, work: () => mutateSemanticGovernanceState(entry.selection.namespace, entry.selection.key, entry.selection.initialValue, () => ({ value: entry.value })) });
+    assert.equal((await modelWorkspaces.draft(options)).draft.fingerprint, draft.fingerprint);
+    const applied = await modelWorkspaces.executeAdoptionTask({ ...options, taskId, body });
+    assert.equal(applied.error, undefined, JSON.stringify(applied)); assert.equal(applied.executedCommand, 'apply_proposal'); assert.equal(applied.runtimeReadEnabled, false);
+    assert.notEqual((await modelWorkspaces.draft(options)).draft.fingerprint, draft.fingerprint);
+    assert.equal((await modelWorkspaces.draft({ identityScope: identity, modelId: 'oa-governance' })).draft.fingerprint, defaultDraft);
+    assert.ok((await modelWorkspaces.executeAdoptionTask({ ...options, taskId, body })).error, 'same consumed token cannot adopt twice');
+    assert.doesNotMatch(JSON.stringify(applied), /confirmationToken|objectTypes|materialRefs/);
+    const adoptedDraft = (await modelWorkspaces.draft(options)).draft;
+    const simulated = await modelWorkspaces.simulate({ ...options, body: { confirmed: true, expectedFingerprint: adoptedDraft.fingerprint } });
+    assert.equal(simulated.error, undefined, JSON.stringify(simulated)); assert.equal(simulated.runtimeReadEnabled, false);
+    assert.equal(simulated.simulation.verifiesLiveSystems, false); assert.equal(simulated.simulation.sourceFingerprint, adoptedDraft.fingerprint);
+    assert.equal((await modelWorkspaces.simulate({ ...options, body: { confirmed: true, expectedFingerprint: draft.fingerprint } })).code, 'MODEL_DRAFT_FINGERPRINT_CONFLICT');
+  });
+});
+
+test('a structurally valid preview without mapping samples cannot obtain adoption confirmation', async () => {
+  await within(async () => {
+    const options = { identityScope: identity, modelId: 'unverified-adoption' };
+    await modelWorkspaces.register({ identityScope: identity, body: { id: options.modelId, label: '无样本候选', expectedRevision: 0 } });
+    writeState('system_access_runtime', semanticTenantStateKey('system_documents'), { WMS: { warnings: [], documents: [{ name: 'WMS.openapi.json', mimeType: 'application/json', text: JSON.stringify({ openapi: '3.0.0', 'x-source-system': 'WMS', components: { schemas: { UnverifiedStock: { type: 'object', 'x-primary-key': 'id', properties: { id: { type: 'string' }, quantity: { type: 'number' } } } } } }) }] } });
+    const source = await modelSystemMaterials.inspect({ ...options, body: { systemCodes: ['WMS'] } });
+    await modelSystemMaterials.bind({ ...options, body: { confirmed: true, systemCodes: ['WMS'], expectedRevision: 0, expectedSourceFingerprint: source.sourceFingerprint } });
+    const draft = (await modelWorkspaces.draft(options)).draft;
+    const preview = await modelWorkspaces.previewModelTask({ ...options, body: { confirmed: true, requestId: '72345678-1234-4123-8123-123456789abc', text: '根据WMS接口建立库存语义模型', systemCodes: ['WMS'], expectedDraftFingerprint: draft.fingerprint } });
+    assert.equal(preview.error, undefined, JSON.stringify(preview));
+    const confirmation = await modelWorkspaces.confirmTask({ ...options, taskId: preview.task.id, body: { confirmed: true, expectedTaskFingerprint: preview.taskFingerprint } });
+    assert.equal(confirmation.code, 'SEMANTIC_TASK_PROPOSAL_BLOCKED'); assert.equal(confirmation.confirmationToken, undefined);
+    assert.equal((await modelWorkspaces.draft(options)).draft.fingerprint, draft.fingerprint);
+    const record = await semanticModelRegistry.withWorkspace({ role: { id: 'executive' }, ...options, work: async () => (await readSemanticGovernanceState('semantic_operations_agent_tasks', 'index', {}))[preview.task.id] });
+    assert.equal(record.confirmation.state, 'not_issued');
+    assert.equal(record.proposal.critic.status, 'passed'); assert.equal(record.proposal.mappingValidation.blocked, true);
   });
 });
 
@@ -1201,6 +1329,26 @@ test('local task SDK validates strict bodies before IO and never retries uncerta
       () => client.executeLocalValidationTask('model-a', 'task-a', { confirmed: true, expectedTaskFingerprint: fp, confirmationToken: 'a'.repeat(43) }), () => client.recoverLocalConfirmationEvidence('model-a', 'task-a', { confirmed: true })];
     for (const method of methods) await assert.rejects(method(), error => error.payload.taskMayHaveCommitted && error.payload.evidencePending);
     assert.equal(calls.length, 4); assert.ok(calls.every(call => call.options.method === 'POST' && !call.options.headers['x-semantic-model']));
+  } finally { globalThis.fetch = original; }
+});
+
+test('adoption SDK rejects command/identity/coercible selectors before IO and never retries POST', async () => {
+  const original = globalThis.fetch; const calls = [];
+  globalThis.fetch = async (url, options) => { calls.push({ url, options }); return new Response(JSON.stringify({ code: 'UNKNOWN_COMMIT', taskMayHaveCommitted: true }), { status: 503 }); };
+  try {
+    const client = createSemanticOperationsClient({ baseUrl: 'http://127.0.0.1:9999/api', platform: 'synthetic-adoption' });
+    const body = { confirmed: true, expectedTaskFingerprint: 'a'.repeat(24) };
+    assert.throws(() => client.confirmAdoptionTask('model-a', 'task-a', { ...body, expectedTaskFingerprint: { toString: () => 'a'.repeat(24) } }), TypeError);
+    assert.throws(() => client.confirmAdoptionTask('model-a', 'task-a', { ...body, tenantId: 'foreign' }), TypeError);
+    assert.throws(() => client.executeAdoptionTask('../foreign', 'task-a', body), TypeError);
+    assert.throws(() => client.executeAdoptionTask('model-a', 'task-a', { ...body, confirmationToken: 'x'.repeat(43), command: 'publish_model' }), TypeError);
+    assert.throws(() => client.recoverAdoptionConfirmationEvidence('model-a', 'task-a', { confirmed: false }), TypeError);
+    assert.throws(() => client.reviewAdoptionTask('../foreign', 'task-a'), TypeError);
+    assert.equal(calls.length, 0);
+    for (const invoke of [() => client.confirmAdoptionTask('model-a', 'task-a', body), () => client.executeAdoptionTask('model-a', 'task-a', { ...body, confirmationToken: 'x'.repeat(43) }), () => client.recoverAdoptionConfirmationEvidence('model-a', 'task-a', { confirmed: true })]) {
+      await assert.rejects(invoke(), error => error.payload.taskMayHaveCommitted === true);
+    }
+    assert.equal(calls.length, 3); assert.ok(calls.every(call => call.options.method === 'POST' && !call.options.headers['x-semantic-model']));
   } finally { globalThis.fetch = original; }
 });
 

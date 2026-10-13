@@ -53,7 +53,7 @@ process.on('message', async message => {
     }, tenantId);
     process.send({ prepared }); return;
   }
-  if (message === 'seed-scoped-tasks' || message === 'seed-preview-tasks') {
+  if (message === 'seed-scoped-tasks' || message === 'seed-preview-tasks' || message === 'seed-adoption-tasks') {
     const previews = {};
     for (const tenantId of ['http-a', 'http-b']) await runWithIAMStoreContext(async () => {
       const identityScope = { tenantId, subjectId: findIAMUserByAccount('admin@demo.local').account };
@@ -67,12 +67,15 @@ process.on('message', async message => {
           createdAt: '2026-10-11T00:00:00Z', updatedAt: '2026-10-11T00:00:00Z', request: 'PRIVATE-SYNTHETIC-TEXT', response: 'PRIVATE-SYNTHETIC-REPLY', events: []
         } }, result: true }));
           } else {
-          writeState('system_access_runtime', semanticTenantStateKey('system_documents'), { WMS: { warnings: [], documents: [{ name: 'synthetic-wms.json', mimeType: 'application/json', text: JSON.stringify({ openapi: '3.0.0', 'x-source-system': 'WMS', components: { schemas: { StockRecord: { type: 'object', 'x-primary-key': 'id', properties: { id: { type: 'string' }, quantity: { type: 'number' } } } } } }) }] } });
+          const adoption = message === 'seed-adoption-tasks';
+          const schemas = adoption ? { InventoryLot: { type: 'object', 'x-primary-key': 'inventoryLotId', properties: { inventoryLotId: { type: 'string' }, quantity: { type: 'number' } } } }
+            : { StockRecord: { type: 'object', 'x-primary-key': 'id', properties: { id: { type: 'string' }, quantity: { type: 'number' } } } };
+          writeState('system_access_runtime', semanticTenantStateKey('system_documents'), { WMS: { warnings: [], documents: [{ name: 'synthetic-wms.json', mimeType: 'application/json', text: JSON.stringify({ openapi: '3.0.0', 'x-source-system': 'WMS', components: { schemas } }) }] } });
           const options = { identityScope, modelId: 'supply-chain' };
           const sources = await modelSystemMaterials.inspect({ ...options, body: { systemCodes: ['WMS'] } });
-          await modelSystemMaterials.bind({ ...options, body: { systemCodes: ['WMS'], confirmed: true, expectedRevision: 0, expectedSourceFingerprint: sources.sourceFingerprint } });
+          await modelSystemMaterials.bind({ ...options, body: { systemCodes: ['WMS'], confirmed: true, expectedRevision: sources.revision, expectedSourceFingerprint: sources.sourceFingerprint } });
           const draft = await modelWorkspaces.draft(options);
-          const preview = await modelWorkspaces.previewModelTask({ ...options, body: { confirmed: true, requestId: '22345678-1234-4123-8123-123456789abc', text: '根据WMS接口建立库存语义模型', systemCodes: ['WMS'], expectedDraftFingerprint: draft.draft.fingerprint } });
+          const preview = await modelWorkspaces.previewModelTask({ ...options, body: { confirmed: true, requestId: adoption ? '52345678-1234-4123-8123-123456789abc' : '22345678-1234-4123-8123-123456789abc', text: '根据WMS接口建立库存语义模型', systemCodes: ['WMS'], expectedDraftFingerprint: draft.draft.fingerprint } });
           if (preview.error) throw new Error(preview.code);
           previews[tenantId] = { taskId: preview.task.id, fingerprint: preview.taskFingerprint };
           }

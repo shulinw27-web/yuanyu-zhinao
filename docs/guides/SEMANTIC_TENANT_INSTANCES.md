@@ -2,6 +2,26 @@
 
 ## 内部结构化候选预览基础（2026-10-12）
 
+2026-10-13读取授权隔离基础：服务端ONTOLOGY_RUNTIME_GRANTS_JSON的旧`tenant→role`授权只兼容默认模型。独立模型需要该角色下的`models[modelId]`显式配置，包含schemaVersion=ontology-model-grant.v1、同modelId、metadata=true和独立objects对象；未知参数、跨租户、未登记上下文或错模型拒绝，不继承旧objects。这里仅说明开发契约，项目没有代用户添加真实授权；即使具备该配置，当前非默认发布定义仍禁用业务读取，不能仅改JSON绕过运行绑定或数据门禁。
+
+运营端非当前功能页现在按需加载，构建读取实际Vite入口manifest，超过500000字节即失败，不提高原500kB阈值。2026-10-13入口386.40kB；这是入口包大小验证，不代表全部页面冷加载或真实大图性能已验收。
+
+2026-10-13模型审阅/采纳界面：在独立模型任务页主动选择自己的结构化候选，拥有保存与审核权限时显示“先看模型，再确认采纳”。点击“读取当前模型图与差异”，图内选择对象查看来源、主键和字段；下方完整关联列表包含源字段→目标字段、基数和差异。窄屏在图内横向滚动，详情自动单列。结构/样本映射未通过时不能确认，替换模式会明确显示移除项。
+
+核对后单独勾选“只签发确认凭证”并确认，再次勾选“仅采纳到草稿”后复验版本并采纳。采纳后拥有模拟权限者可单独勾选并模拟当前草稿；这是本地合成模拟，不发布、不写上游，也不是智脑业务读取已启用。凭证仅本页内存，刷新/换任务会清除；未知执行结果不重试，应核对原任务和草稿。pending既有确认证据可单独恢复，不重签；恢复后必须重新审阅。
+
+审阅接口为GET `/api/semantic-operations/models/{modelId}/tasks/{taskId}/adoption-review`，SDK reviewAdoptionTask。只返回当前所有者、原版本的有限结构及差异，不返回原样本、材料或凭证；不接受查询/写方法，超限返回413而非截断。关系图目前是有界网格浏览，不承诺复杂大图无交叉或全局最优布局。
+
+2026-10-13受控采纳接口：POST `/api/semantic-operations/models/{modelId}/tasks/{taskId}/adoption-confirm`，body仅confirmed=true和expectedTaskFingerprint；证据ready后返回一次性凭证及新任务指纹。明确再次确认后POST同任务`/adoption-execute`，body增加confirmationToken，只采纳到本系统模型草稿，不模拟/发布/写上游。未知执行回执不得自动重发。既有确认证据可单独POST`/adoption-confirmation-evidence-recover`，body仅confirmed=true，不重签或返回遗失凭证。SDK对应confirmAdoptionTask、executeAdoptionTask、recoverAdoptionConfirmationEvidence；每步重查实际保存/审核双权限及原模型/任务引用，不授予新权限。仅provider=none的结构化预览适用，local-execute仍只校验。采纳用户界面尚未开放，需先接当前版本对象关系图和差异审阅，不把接口成功当完整用户闭环。
+
+2026-10-13服务端内部增加executeAdoptionTask：只接受当前所有者的结构化预览与已就绪证据/一次性确认凭证，核对原任务及草稿版本、实际保存和审核权限，保留Critic/样本验证；只采纳到当前独立模型草稿。合成库存采纳后可用既有modelWorkspaces.simulate显式确认当前草稿版本进行本地模拟，不能视为生产读取。HTTP/SDK/UI采纳尚未开放；local-execute仍只允许validate_model，不能通过请求体指定采纳或发布。
+
+原请求状态可在独立模型页“核对原预览请求”手动查询：选非默认模型，输入原创建时使用的完整小写UUID v4，点击“只读核对状态”。只返回当前身份范围的阶段，不创建新请求、不自动选择任务或续交。占位无快照不能自动重试、接管或删除；已提交也不等于证据已就绪或获得执行授权。改变请求号、模型、身份/权限会清除旧摘要；仅保存在当前页面内存。
+
+来源绑定后填写“生成结构化候选预览”的诉求，单独勾选并创建；该入口只解析来源Schema，不调用大模型或识别图片/语音。创建前核对当前草稿指纹，请求号自动填入状态核对区；未知回执阻止本页第二次发送，请记下编号，不能把刷新页面当失败后重试。
+
+恢复流程按状态分开：prepared先勾选并“检查原准备快照”，再次勾选后“仅续交原任务”；committed勾选“读取原提交回执”；得到pending证据时再次勾选“核验并恢复原任务证据”。每次只执行选定一步，不自动重试、不重新抽取、不签发或执行模型任务。草稿版本或引用变化必须重新检查，未知续交结果先只读核对原编号。受控采纳/模拟/智脑独立模型读取仍未接齐。
+
 运营端“独立模型任务”选择非默认模型后，拥有草稿权限可见“先检查来源，再明确绑定”：输入已有系统码（如WMS, ERP），点击检查，核对资料数量及绑定修订后单独勾选确认绑定。绑定不自动生成候选或执行。改动输入、模型、身份或权限会清除旧摘要和同意；写回执不明时重新检查，不自动重试。候选预览/恢复UI仍待接入。
 
 原请求恢复使用POST `/api/semantic-operations/models/{modelId}/preview-requests/{requestId}/inspect-prepared`、`/resume`、`/recover-commit`，SDK分别为inspectPreparedPreview、resumePreparedPreview、recoverPreviewCommit。body仅含confirmed=true、inputFingerprint、expectedCheckpointFingerprint、expectedDraftFingerprint，不能覆盖路径身份。探针不提交，resume只续交原任务且证据pending，recover-commit只读取原提交摘要；证据仍须单独明确恢复，不签发或执行。POST不自动重试，重复续交拒绝，UI尚待接入，受管门禁未扩大。

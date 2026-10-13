@@ -17,15 +17,16 @@ import { semanticOperationsOwnerMatches, semanticOperationsPrincipalKey } from '
 import { semanticFingerprint } from '../../services/semantic-model-fingerprint.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { semanticModelAdmission } from './model-admission.js';
+import { projectAdoptionReview } from './model-adoption-review.js';
 
 const editableKeys = ['modelingProfile', 'scenario', 'stateMachines', 'events', 'objectTypes', 'relationshipTypes', 'policies', 'metrics', 'glossaryTerms', 'dataContracts', 'qualityRules', 'accessPolicies', 'lineageEdges'];
 const assetLimits = { metrics: 50, glossaryTerms: 100, dataContracts: 50, qualityRules: 100, accessPolicies: 100, lineageEdges: 100 };
 const editableDraft = draft => Object.fromEntries(['fingerprint', ...editableKeys].filter(key => Object.hasOwn(draft, key)).map(key => [key, draft[key]]));
 const validPatch = input => Object.entries(assetLimits).every(([key, limit]) => input[key] === undefined || Array.isArray(input[key]) && input[key].length <= limit && input[key].every(item => item && typeof item === 'object' && !Array.isArray(item)))
   && (input.policies === undefined || Array.isArray(input.policies) && input.policies.length <= 12 && input.policies.every(item => typeof item === 'string' && item.trim().length > 0 && item.length <= 2000));
-const writePermissions = { draft: 'meta_model.draft.save', validate: 'meta_model.draft.validate', createValidation: 'meta_model.draft.validate', execute: 'meta_model.draft.validate', simulate: 'meta_model.simulate' };
+const writePermissions = { draft: 'meta_model.draft.save', adopt: 'meta_model.draft.save', validate: 'meta_model.draft.validate', createValidation: 'meta_model.draft.validate', execute: 'meta_model.draft.validate', simulate: 'meta_model.simulate' };
 const permissionFor = write => writePermissions[write] || 'meta_model.draft.save';
-const uncertainWrite = write => write === 'preview' ? { taskMayHaveCommitted: true, preparationMayHaveCommitted: true } : write === 'execute' ? { taskMayHaveCommitted: true, workspaceWriteMayHaveCommitted: true } : ['confirm', 'createValidation'].includes(write) ? { taskMayHaveCommitted: true } : write ? (typeof write === 'string' ? { workspaceWriteMayHaveCommitted: true } : { registrationMayHaveCommitted: true }) : {};
+const uncertainWrite = write => write === 'preview' ? { taskMayHaveCommitted: true, preparationMayHaveCommitted: true } : ['execute', 'adopt'].includes(write) ? { taskMayHaveCommitted: true, workspaceWriteMayHaveCommitted: true } : ['confirm', 'createValidation'].includes(write) ? { taskMayHaveCommitted: true } : write ? (typeof write === 'string' ? { workspaceWriteMayHaveCommitted: true } : { registrationMayHaveCommitted: true }) : {};
 const validationSummary = validation => validation ? { status: validation.status, checks: (validation.checks || []).map(({ name, status }) => ({ name, status })) } : null;
 const simulationSummary = simulation => simulation ? { status: simulation.status, sourceFingerprint: simulation.sourceFingerprint || null,
   sourceMode: simulation.sourceMode, verifiesLiveSystems: false, validation: validationSummary(simulation.validation),
@@ -37,6 +38,7 @@ const check = (identity, write) => runWithIAMStoreContext(() => {
   return identity?.tenantId === currentSemanticTenant() && access.principalResolved && access.roleIds.includes('executive')
     && access.pagePermissionIds.includes('page.semantic-operations.view')
     && (!write || access.buttonPermissionIds.includes(permissionFor(write)))
+    && (write !== 'adopt' || access.buttonPermissionIds.includes('meta_model.draft.review'))
     ? { version: getIAMVersion(), access: JSON.stringify(access), accessContext: access, role: getRole('executive') } : null;
 }, identity?.tenantId);
 const guarded = async (identity, write, work) => {
@@ -58,6 +60,7 @@ const guarded = async (identity, write, work) => {
 
 const taskSummary = task => ({ id: task.id, modelId: task.modelId, status: task.status,
   localValidationTask: task.command === 'validate_model' && task.routing?.reason === 'explicit_local_validation_task',
+  structuredAdoptionTask: task.command === 'apply_proposal' && task.creationMode === 'structured_preview' && task.planning?.provider === 'none',
   confirmationEvidenceState: task.confirmation?.evidenceState || 'not_required_or_legacy',
   createdAt: task.createdAt, updatedAt: task.updatedAt, confirmationRequired: Boolean(task.confirmationRequired),
   reviewerAccess: Boolean(task.reviewerAccess), requiredPermission: task.requiredPermission || null,
@@ -381,41 +384,72 @@ export const modelWorkspaces = {
       return { modelId, task: taskSummary(record), taskFingerprint: semanticTaskStateFingerprint(record), ...created, ...receipt, executionEnabled: false, runtimeReadEnabled: false };
     } }));
   },
-  // The first execution surface is local draft validation only. No provider,
-  // Python process, publication, proposal adoption or source-system writes.
-  executeTask: ({ identityScope, modelId, taskId, body }) => {
+  // Public local execution remains validation only. Adoption is a separate
+  // internal composition; neither branch calls providers or source systems.
+  // Trusted internal selector only; HTTP local execution cannot supply it.
+  executeAdoptionTask: options => modelWorkspaces.executeTask({ ...options, executionKind: 'adopt' }),
+  executeTask: ({ identityScope, modelId, taskId, body, executionKind = 'validate' }) => {
     const payload = structuredClone(body);
-    return guarded(identityScope, 'execute', (identity, role, accessContext) => semanticModelRegistry.withWorkspace({ role, identityScope: identity, modelId, work: async () => {
+    if (!['validate', 'adopt'].includes(executionKind)) return Promise.resolve(failure('MODEL_TASK_EXECUTION_COMMAND_UNSUPPORTED', 409));
+    const operation = executionKind === 'adopt' ? 'adopt' : 'execute'; const command = executionKind === 'adopt' ? 'apply_proposal' : 'validate_model';
+    return guarded(identityScope, operation, (identity, role, accessContext) => semanticModelRegistry.withWorkspace({ role, identityScope: identity, modelId, work: async () => {
       if (!validTaskId(taskId) || !payload || Array.isArray(payload) || Object.keys(payload).some(key => !['confirmed', 'expectedTaskFingerprint', 'confirmationToken'].includes(key))
         || payload.confirmed !== true || typeof payload.expectedTaskFingerprint !== 'string' || !/^[a-f0-9]{24}$/u.test(payload.expectedTaskFingerprint)
         || typeof payload.confirmationToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/u.test(payload.confirmationToken)) return failure('MODEL_TASK_EXECUTION_INPUT_INVALID', 400);
       const task = await getSemanticOperationsTask({ taskId, identityScope: identity, accessContext });
       if (!task || task.reviewerAccess) return failure('MODEL_TASK_EXECUTION_FORBIDDEN');
-      if (task.command !== 'validate_model') return failure('MODEL_TASK_EXECUTION_COMMAND_UNSUPPORTED', 409);
+      if (task.command !== command) return failure('MODEL_TASK_EXECUTION_COMMAND_UNSUPPORTED', 409);
+      if (executionKind === 'adopt' && (task.creationMode !== 'structured_preview' || task.planning?.provider !== 'none' || !task.proposal
+        || !/^[a-f0-9]{24}$/u.test(task.reviewContext?.draftFingerprint || '') || (await getOAMetaModelDraft()).fingerprint !== task.reviewContext.draftFingerprint)) return failure('MODEL_ADOPTION_PREVIEW_OR_DRAFT_CHANGED', 409);
       if (task.evidenceState !== 'ready' || task.confirmation?.evidenceState !== 'ready') return failure('MODEL_TASK_EVIDENCE_NOT_READY', 409);
       const proof = await inspectTaskReferences(taskId, identity, accessContext);
       if (proof.error) return proof;
-      const baseline = await check(identity, 'execute');
+      const baseline = await check(identity, operation);
       if (!baseline) return failure('MODEL_WORKSPACE_FORBIDDEN');
       const result = await runWithIAMStoreContext(() => executeSemanticOperationsTask({ taskId, identityScope: identity, role, accessContext: getEffectiveAccess(null, identity),
         confirmationToken: payload.confirmationToken, expectedTaskFingerprint: payload.expectedTaskFingerprint,
-        executionAdmission: async () => {
+        executionAdmission: async phase => {
           await assertCurrentSemanticModelAdmission();
           const references = await inspectTaskReferences(taskId, identity, accessContext);
-          const authority = await check(identity, 'execute');
-          return !references.error && authority && JSON.stringify(authority) === JSON.stringify(baseline);
+          const authority = await check(identity, operation);
+          const draftCurrent = executionKind !== 'adopt' || phase === 'finalize' || (await getOAMetaModelDraft()).fingerprint === task.reviewContext.draftFingerprint;
+          return !references.error && draftCurrent && authority && JSON.stringify(authority) === JSON.stringify(baseline);
         } }), identity.tenantId);
       await assertCurrentSemanticModelAdmission();
-      return result.error ? { error: '本地校验任务未完成，请核对权限、引用和执行状态。', code: result.code || 'MODEL_TASK_EXECUTION_REJECTED', status: 409,
+      return result.error ? { error: '受控本地任务未完成，请核对权限、引用和执行状态。', code: result.code || 'MODEL_TASK_EXECUTION_REJECTED', status: 409,
         ...(result.task?.confirmation?.state === 'consumed' ? { taskMayHaveCommitted: true, workspaceWriteMayHaveCommitted: true } : {}) }
-        : { modelId, task: taskSummary(result.task), validation: validationSummary(result.result?.draft?.validation), runtimeReadEnabled: false, executedCommand: 'validate_model' };
+        : { modelId, task: taskSummary(result.task), validation: validationSummary(result.result?.draft?.validation), runtimeReadEnabled: false, executedCommand: command };
     } }));
   },
-  recoverConfirmationEvidence: ({ identityScope, modelId, taskId, localValidationOnly = false }) => guarded(identityScope, 'confirm', (identity, role, accessContext) => semanticModelRegistry.withWorkspace({ role, identityScope: identity, modelId, work: async () => {
+  confirmAdoptionTask: options => modelWorkspaces.confirmTask({ ...options, structuredAdoptionOnly: true }),
+  reviewAdoptionTask: ({ identityScope, modelId, taskId }) => guarded(identityScope, false, (identity, role, accessContext) => semanticModelRegistry.withWorkspace({ role, identityScope: identity, modelId, work: async () => {
+    if (!validTaskId(taskId) || !await check(identity, 'adopt')) return failure('MODEL_ADOPTION_REVIEW_FORBIDDEN');
+    const record = (await readSemanticGovernanceState('semantic_operations_agent_tasks', 'index', {}))[taskId];
+    if (!semanticModelReferenceMatches(record) || !semanticOperationsOwnerMatches(record.owner, identity) || record.originRoleId !== role.id || record.status !== 'waiting_confirmation'
+      || record.command !== 'apply_proposal' || record.creationMode !== 'structured_preview' || record.planning?.provider !== 'none' || !record.proposal || record.traceProvisioning !== 'ready') return failure('MODEL_ADOPTION_REVIEW_FORBIDDEN');
+    const proof = await inspectTaskReferences(taskId, identity, accessContext);
+    if (proof.error) return proof;
+    const proposal = await readSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${record.proposal.id}`, null);
+    const draft = await getOAMetaModelDraft();
+    if (!semanticModelReferenceMatches(proposal) || proposal.owner !== record.owner || proposal.revision !== record.proposal.revision || proposal.status !== 'pending_review'
+      || draft.fingerprint !== record.reviewContext?.draftFingerprint) return failure('MODEL_ADOPTION_REVIEW_CHANGED', 409);
+    const result = projectAdoptionReview({ task: record, proposal, draft, taskFingerprint: semanticTaskStateFingerprint(record) });
+    if (result.error) return result;
+    const latestProof = await inspectTaskReferences(taskId, identity, accessContext);
+    if (latestProof.error) return latestProof;
+    const latest = (await readSemanticGovernanceState('semantic_operations_agent_tasks', 'index', {}))[taskId];
+    const latestProposal = await readSemanticGovernanceState('semantic_operations_agent_proposals', `proposal-${proposal.id}`, null);
+    if (JSON.stringify(latest) !== JSON.stringify(record) || JSON.stringify(latestProposal) !== JSON.stringify(proposal) || (await getOAMetaModelDraft()).fingerprint !== draft.fingerprint
+      || !await check(identity, 'adopt')) return failure('MODEL_ADOPTION_REVIEW_CHANGED', 409);
+    return result;
+  } })),
+  recoverAdoptionConfirmationEvidence: options => modelWorkspaces.recoverConfirmationEvidence({ ...options, structuredAdoptionOnly: true }),
+  recoverConfirmationEvidence: ({ identityScope, modelId, taskId, localValidationOnly = false, structuredAdoptionOnly = false }) => guarded(identityScope, structuredAdoptionOnly ? 'adopt' : 'confirm', (identity, role, accessContext) => semanticModelRegistry.withWorkspace({ role, identityScope: identity, modelId, work: async () => {
     if (!validTaskId(taskId)) return failure('MODEL_TASK_REQUEST_INVALID', 400);
     const task = await getSemanticOperationsTask({ taskId, identityScope: identity, accessContext });
     if (!task || task.reviewerAccess) return failure('MODEL_TASK_CONFIRMATION_FORBIDDEN');
     if (localValidationOnly && task.command !== 'validate_model') return failure('MODEL_TASK_EXECUTION_COMMAND_UNSUPPORTED', 409);
+    if (structuredAdoptionOnly && (task.command !== 'apply_proposal' || task.creationMode !== 'structured_preview' || task.planning?.provider !== 'none')) return failure('MODEL_TASK_EXECUTION_COMMAND_UNSUPPORTED', 409);
     // Only the owned trace is allowed to acknowledge a previous queued write
     // failure before the reference proof. This does not recreate history.
     if (task.traceId) await semanticModelEvidence.get(task.traceId, [role.id], identity).catch(() => null);
@@ -425,27 +459,29 @@ export const modelWorkspaces = {
     return receipt.error ? receipt : { modelId, taskId, ...receipt, confirmationTokenReturned: false, executionEnabled: false };
   } })),
   // Internal only until creation/execution contracts and UI are complete.
-  confirmTask: ({ identityScope, modelId, taskId, body, localValidationOnly = false }) => {
+  confirmTask: ({ identityScope, modelId, taskId, body, localValidationOnly = false, structuredAdoptionOnly = false }) => {
     const payload = structuredClone(body);
-    return guarded(identityScope, 'confirm', (identity, role, accessContext) => semanticModelRegistry.withWorkspace({ role, identityScope: identity, modelId, work: async () => {
+    const operation = structuredAdoptionOnly ? 'adopt' : 'confirm';
+    return guarded(identityScope, operation, (identity, role, accessContext) => semanticModelRegistry.withWorkspace({ role, identityScope: identity, modelId, work: async () => {
       if (!validTaskId(taskId) || !payload || Array.isArray(payload) || Object.keys(payload).some(key => !['confirmed', 'expectedTaskFingerprint'].includes(key))
         || payload.confirmed !== true || typeof payload.expectedTaskFingerprint !== 'string' || !/^[a-f0-9]{24}$/u.test(payload.expectedTaskFingerprint)) return failure('MODEL_TASK_CONFIRMATION_INPUT_INVALID', 400);
       const task = await getSemanticOperationsTask({ taskId, identityScope: identity, accessContext });
       if (!task || task.reviewerAccess) return failure('MODEL_TASK_CONFIRMATION_FORBIDDEN');
       if (localValidationOnly && task.command !== 'validate_model') return failure('MODEL_TASK_EXECUTION_COMMAND_UNSUPPORTED', 409);
+      if (structuredAdoptionOnly && (task.command !== 'apply_proposal' || task.creationMode !== 'structured_preview' || task.planning?.provider !== 'none')) return failure('MODEL_TASK_EXECUTION_COMMAND_UNSUPPORTED', 409);
       const proof = await inspectTaskReferences(taskId, identity, accessContext);
       if (proof.error) return proof;
       // This new entry requires a verified trace, unlike legacy task callers.
       const record = (await readSemanticGovernanceState('semantic_operations_agent_tasks', 'index', {}))[taskId];
       if (!record || record.traceProvisioning !== 'ready' || !await semanticModelEvidence.verifyTaskTrace(record)) return failure('MODEL_TASK_EVIDENCE_NOT_READY', 409);
-      const baseline = await check(identity, 'confirm');
+      const baseline = await check(identity, operation);
       if (!baseline) return failure('MODEL_WORKSPACE_FORBIDDEN');
       const result = await runWithIAMStoreContext(() => issueSemanticOperationsTaskConfirmation({ taskId, identityScope: identity, accessContext: getEffectiveAccess(null, identity),
         expectedTaskFingerprint: payload.expectedTaskFingerprint, evidenceReceiptRequired: true,
         beforeCommit: async () => {
           await assertCurrentSemanticModelAdmission();
           const references = await inspectTaskReferences(taskId, identity, accessContext);
-          const authority = await check(identity, 'confirm');
+          const authority = await check(identity, operation);
           return !references.error && authority && JSON.stringify(authority) === JSON.stringify(baseline);
         } }), identity.tenantId);
       await assertCurrentSemanticModelAdmission();

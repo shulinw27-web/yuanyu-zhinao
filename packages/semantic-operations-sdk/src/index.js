@@ -156,6 +156,22 @@ export function createSemanticOperationsClient({ baseUrl, platform = 'semantic-w
       if (!localTaskBody(body, ['confirmed', 'expectedTaskFingerprint']) || typeof body.expectedTaskFingerprint !== 'string' || !/^[a-f0-9]{24}$/u.test(body.expectedTaskFingerprint)) throw new TypeError('Invalid local confirmation request.');
       return post(path, body);
     },
+    confirmAdoptionTask: (modelId, taskId, body) => {
+      const path = localTaskPath(modelId, taskId, 'adoption-confirm');
+      if (!localTaskBody(body, ['confirmed', 'expectedTaskFingerprint']) || typeof body.expectedTaskFingerprint !== 'string' || !/^[a-f0-9]{24}$/u.test(body.expectedTaskFingerprint)) throw new TypeError('Invalid adoption confirmation body.');
+      return post(path, body);
+    },
+    reviewAdoptionTask: (modelId, taskId) => request(localTaskPath(modelId, taskId, 'adoption-review')),
+    executeAdoptionTask: (modelId, taskId, body) => {
+      const path = localTaskPath(modelId, taskId, 'adoption-execute');
+      if (!localTaskBody(body, ['confirmed', 'expectedTaskFingerprint', 'confirmationToken']) || typeof body.expectedTaskFingerprint !== 'string' || !/^[a-f0-9]{24}$/u.test(body.expectedTaskFingerprint) || typeof body.confirmationToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/u.test(body.confirmationToken)) throw new TypeError('Invalid adoption execution body.');
+      return post(path, body);
+    },
+    recoverAdoptionConfirmationEvidence: (modelId, taskId, body) => {
+      const path = localTaskPath(modelId, taskId, 'adoption-confirmation-evidence-recover');
+      if (!localTaskBody(body, ['confirmed'])) throw new TypeError('Invalid adoption evidence recovery body.');
+      return post(path, body);
+    },
     executeLocalValidationTask: (modelId, taskId, body) => {
       const path = localTaskPath(modelId, taskId, 'local-execute');
       if (!localTaskBody(body, ['confirmed', 'expectedTaskFingerprint', 'confirmationToken']) || typeof body.expectedTaskFingerprint !== 'string' || !/^[a-f0-9]{24}$/u.test(body.expectedTaskFingerprint)

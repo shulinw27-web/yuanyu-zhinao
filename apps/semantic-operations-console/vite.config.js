@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [vue()],
   clearScreen: false,
   build: {
+    manifest: true,
     rollupOptions: {
       output: {
         manualChunks(id) {

@@ -3,6 +3,7 @@
 import { createHash } from 'node:crypto';
 import { admitSemanticRecord } from './semantic-record-contract-service.js';
 import { ontologyMappingBinding, resolveOntologyMappingRows, ontologyMappingEvidence } from './ontology-mapping-execution.js';
+import { currentSemanticModel, currentSemanticModelRegistered, currentSemanticTenant, semanticTenantContextIsBound, DEFAULT_SEMANTIC_MODEL_ID } from './semantic-tenant-context.js';
 
 const fail = code => { throw new Error(code); };
 const identifier = v => typeof v === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(v);
@@ -118,8 +119,23 @@ export function validateOntologyReadPlans(draft) {
 }
 
 export function getOntologyRuntimeGrant(scope, roleId, env = process.env) {
-  if (!scope?.tenantId || !scope.subjectId) return null;
-  try { return JSON.parse(env.ONTOLOGY_RUNTIME_GRANTS_JSON || '{}')[scope.tenantId]?.[roleId] || null; } catch { return null; }
+  if (!scope?.tenantId || !scope.subjectId || typeof roleId !== 'string' || !roleId || roleId.length > 64) return null;
+  try {
+    if (semanticTenantContextIsBound() && currentSemanticTenant() !== scope.tenantId) return null;
+    const tenants = JSON.parse(env.ONTOLOGY_RUNTIME_GRANTS_JSON || '{}');
+    if (!tenants || !Object.hasOwn(tenants, scope.tenantId)) return null;
+    const tenant = tenants[scope.tenantId];
+    if (!tenant || !Object.hasOwn(tenant, roleId)) return null;
+    const legacy = tenant[roleId]; const modelId = currentSemanticModel();
+    // Legacy grants stay compatible ONLY in the default model. A registered
+    // namespace is not authority to reuse the default role's source grants.
+    if (modelId === DEFAULT_SEMANTIC_MODEL_ID) return legacy || null;
+    if (!currentSemanticModelRegistered() || !legacy?.models || Array.isArray(legacy.models) || !Object.hasOwn(legacy.models, modelId)) return null;
+    const grant = legacy.models[modelId];
+    if (!grant || Array.isArray(grant) || grant.schemaVersion !== 'ontology-model-grant.v1' || grant.modelId !== modelId || grant.metadata !== true
+      || Object.keys(grant).some(key => !['schemaVersion', 'modelId', 'metadata', 'objects'].includes(key)) || !grant.objects || typeof grant.objects !== 'object' || Array.isArray(grant.objects)) return null;
+    return grant;
+  } catch { return null; }
 }
 export function requireOntologyObjectAccess(draft, typeId, roleId, scope) {
   const type = object(draft, typeId); const grant = getOntologyRuntimeGrant(scope, roleId)?.objects?.[typeId];

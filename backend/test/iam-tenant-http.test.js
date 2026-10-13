@@ -123,6 +123,8 @@ test('real HTTP auth → tenant IAM → permissions stays isolated; only changed
       assert.equal(reused.status, 200); assert.equal(reused.body.taskId, created.body.taskId);
       const path = `/supply-chain/tasks/${created.body.taskId}`;
       const confirmed = await models(tenant, `${path}/local-confirm`, { confirmed: true, expectedTaskFingerprint: created.body.taskFingerprint });
+      assert.equal((await models(tenant, `${path}/adoption-confirm`, { confirmed: true, expectedTaskFingerprint: created.body.taskFingerprint })).body.code, 'MODEL_TASK_EXECUTION_COMMAND_UNSUPPORTED');
+      assert.equal((await models(tenant, `${path}/adoption-confirmation-evidence-recover`, { confirmed: true })).body.code, 'MODEL_TASK_EXECUTION_COMMAND_UNSUPPORTED');
       assert.equal(confirmed.status, 200); assert.equal(confirmed.body.confirmationEvidenceState, 'ready');
       assert.equal((await models(tenant, `${path}/dialogue`)).body.taskFingerprint, confirmed.body.taskFingerprint);
       const execution = await models(tenant, `${path}/local-execute`, { confirmed: true, expectedTaskFingerprint: confirmed.body.taskFingerprint, confirmationToken: confirmed.body.confirmationToken });
@@ -190,6 +192,34 @@ test('real HTTP auth → tenant IAM → permissions stays isolated; only changed
       assert.equal(committed.status, 200); assert.equal(committed.body.task.id, resumed.body.task.id); assert.equal(committed.body.recoveredCommit, true);
       const evidence = await models(tenant, `/supply-chain/tasks/${resumed.body.task.id}/preview-evidence-recover`, { confirmed: true, expectedTaskFingerprint: committed.body.taskFingerprint });
       assert.equal(evidence.status, 200); assert.equal(evidence.body.evidenceState, 'ready'); assert.equal(evidence.body.confirmationTokenReturned, false);
+    }
+    const adoptionSeed = once(child, 'message'); child.send('seed-adoption-tasks'); const [adoptionResult] = await adoptionSeed;
+    for (const tenant of ['http-a', 'http-b']) {
+      const fixture = adoptionResult.previews[tenant]; const other = adoptionResult.previews[tenant === 'http-a' ? 'http-b' : 'http-a'];
+      const path = `/supply-chain/tasks/${fixture.taskId}`; const confirmBody = { confirmed: true, expectedTaskFingerprint: fixture.fingerprint };
+      const review = await models(tenant, `${path}/adoption-review`);
+      assert.equal(review.status, 200); assert.equal(review.body.graph.nodes[0].id, 'InventoryLot'); assert.equal(review.body.contentScope, 'owned_candidate_structure_only');
+      assert.equal(review.body.taskFingerprint, fixture.fingerprint); assert.equal(review.body.executionEnabled, false);
+      assert.doesNotMatch(JSON.stringify(review.body), /transformedSamples|materialRefs|traceId|tokenHash/);
+      assert.equal((await models(tenant, `${path}/adoption-review`, { confirmed: true })).status, 400);
+      assert.equal((await models(tenant, `${path}/adoption-review?tenantId=foreign`)).status, 400);
+      assert.equal((await models(tenant, `/supply-chain/tasks/${other.taskId}/adoption-review`)).status, 403);
+      assert.equal((await models(tenant, `${path}/adoption-confirm`)).status, 400);
+      assert.equal((await models(tenant, `${path}/adoption-confirm?tenantId=foreign`, confirmBody)).status, 400);
+      assert.equal((await models(tenant, `${path}/adoption-confirm`, { ...confirmBody, executionKind: 'adopt' })).status, 400);
+      assert.equal((await models(tenant, `/supply-chain/tasks/${other.taskId}/adoption-confirm`, { confirmed: true, expectedTaskFingerprint: other.fingerprint })).status, 403);
+      const confirmed = await models(tenant, `${path}/adoption-confirm`, confirmBody);
+      assert.equal(confirmed.status, 200); assert.equal(confirmed.body.confirmationEvidenceState, 'ready'); assert.equal(confirmed.body.executionEnabled, false);
+      const executionBody = { confirmed: true, expectedTaskFingerprint: confirmed.body.taskFingerprint, confirmationToken: confirmed.body.confirmationToken };
+      assert.equal((await models(tenant, `${path}/local-execute`, executionBody)).body.code, 'MODEL_TASK_EXECUTION_COMMAND_UNSUPPORTED');
+      assert.equal((await models(tenant, `${path}/adoption-execute`, { ...executionBody, command: 'publish_model' })).status, 400);
+      assert.equal((await models(tenant, `${path}/adoption-confirmation-evidence-recover`, { confirmed: false })).status, 400);
+      const recovered = await models(tenant, `${path}/adoption-confirmation-evidence-recover`, { confirmed: true });
+      assert.equal(recovered.status, 200); assert.equal(recovered.body.confirmationTokenReturned, false);
+      const applied = await models(tenant, `${path}/adoption-execute`, executionBody);
+      assert.equal(applied.status, 200); assert.equal(applied.body.executedCommand, 'apply_proposal'); assert.equal(applied.body.runtimeReadEnabled, false);
+      assert.doesNotMatch(JSON.stringify(applied.body), /confirmationToken|objectTypes|materialRefs/);
+      assert.equal((await models(tenant, `${path}/adoption-execute`, executionBody)).status, 409);
     }
     for (const tenant of ['http-a', 'http-b']) {
       const payload = { confirmed: true, expectedFingerprint: (await models(tenant, '/supply-chain/draft')).body.draft.fingerprint };

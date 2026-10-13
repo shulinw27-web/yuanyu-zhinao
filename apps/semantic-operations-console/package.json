@@ -11,7 +11,7 @@
     "dev:web": "vite --port 5174",
     "dev:electron": "node scripts/dev-electron.mjs",
     "build:icon": "node scripts/build-icon.mjs",
-    "build": "vite build",
+    "build": "vite build && node scripts/check-bundle.mjs",
     "preview": "vite preview",
     "start:electron": "electron .",
     "pack:electron": "npm run build:icon && npm run build && electron-builder --dir",

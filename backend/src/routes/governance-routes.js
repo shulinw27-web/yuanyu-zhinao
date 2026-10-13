@@ -117,6 +117,24 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
     send(res, result.error ? result.status || 400 : 200, result.error ? { message: result.error, code: result.code } : result); return true;
   }
   const localCreate = url.pathname.match(/^\/api\/semantic-operations\/models\/([a-z][a-z0-9-]{1,63})\/local-validation-tasks$/u);
+  const adoptionReview = url.pathname.match(/^\/api\/semantic-operations\/models\/([a-z][a-z0-9-]{1,63})\/tasks\/([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})\/adoption-review$/u);
+  if (adoptionReview) {
+    if (req.method !== 'GET' || url.search) { send(res, 400, { message: '模型审阅仅支持明确模型任务的只读请求。', code: 'MODEL_ADOPTION_REQUEST_INVALID' }); return true; }
+    const result = await modelWorkspaces.reviewAdoptionTask({ identityScope: agentIdentity, modelId: adoptionReview[1], taskId: adoptionReview[2] });
+    send(res, result.error ? result.status || 400 : 200, result.error ? { message: result.error, code: result.code } : result); return true;
+  }
+  const adoptionAction = url.pathname.match(/^\/api\/semantic-operations\/models\/([a-z][a-z0-9-]{1,63})\/tasks\/([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})\/(adoption-confirm|adoption-execute|adoption-confirmation-evidence-recover)$/u);
+  if (adoptionAction) {
+    if (req.method !== 'POST' || url.search) { send(res, 400, { message: '候选采纳需要明确POST，不接受查询覆盖。', code: 'MODEL_ADOPTION_REQUEST_INVALID' }); return true; }
+    const body = await readBody(req); const action = adoptionAction[3];
+    if (action === 'adoption-confirmation-evidence-recover' && (!body || Array.isArray(body) || Object.keys(body).some(key => key !== 'confirmed') || body.confirmed !== true)) {
+      send(res, 400, { message: '恢复需要明确确认，不接受其他参数。', code: 'MODEL_ADOPTION_REQUEST_INVALID' }); return true;
+    }
+    const options = { identityScope: agentIdentity, modelId: adoptionAction[1], taskId: adoptionAction[2], body };
+    const result = await (action === 'adoption-confirm' ? modelWorkspaces.confirmAdoptionTask(options) : action === 'adoption-execute' ? modelWorkspaces.executeAdoptionTask(options) : modelWorkspaces.recoverAdoptionConfirmationEvidence(options));
+    const uncertainty = Object.fromEntries(['taskMayHaveCommitted', 'workspaceWriteMayHaveCommitted', 'evidencePending'].filter(key => result[key] === true).map(key => [key, true]));
+    send(res, result.error ? result.status || 400 : 200, result.error ? { message: result.error, code: result.code, ...uncertainty } : result); return true;
+  }
   const localAction = url.pathname.match(/^\/api\/semantic-operations\/models\/([a-z][a-z0-9-]{1,63})\/tasks\/([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})\/(local-confirm|local-execute|confirmation-evidence-recover)$/u);
   if (localCreate || localAction) {
     if (req.method !== 'POST' || url.search) { send(res, 400, { message: '本地任务动作需要明确的POST请求，不接受查询覆盖参数。', code: 'MODEL_LOCAL_TASK_REQUEST_INVALID' }); return true; }

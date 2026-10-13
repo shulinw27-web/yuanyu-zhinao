@@ -208,6 +208,72 @@ paths:
         '400': { description: 方法、查询或请求载荷无效 }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { description: 草稿/任务/权限/证据变化；保留taskMayHaveCommitted与evidencePending，不自动重试 }
+  /semantic-operations/models/{modelId}/tasks/{taskId}/adoption-review:
+    get:
+      operationId: reviewAdoptionTask
+      x-button-permission: meta_model.draft.save
+      x-review-permission: meta_model.draft.review
+      description: 当前所有者的结构化候选、真实来源及任务证据/提案/草稿版本复验，返回限定对象字段关系图、结构差异与校验状态；无样本正文/凭证，不授予执行权限。拒绝POST或查询覆盖。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string } }
+        - { in: path, name: taskId, required: true, schema: { type: string } }
+      responses:
+        '200': { description: owned_candidate_structure_only图/差异及原任务和草稿指纹，executionEnabled/runtimeReadEnabled=false }
+        '400': { description: 非法方法或查询 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 当前权限/版本/引用不可用 }
+        '413': { description: 结构无效或超限，不静默截断 }
+  /semantic-operations/models/{modelId}/tasks/{taskId}/adoption-confirm:
+    post:
+      operationId: confirmAdoptionTask
+      x-button-permission: meta_model.draft.save
+      x-review-permission: meta_model.draft.review
+      description: 仅所有者provider=none结构化预览apply_proposal；复验实际保存及审核权限、任务版本、引用、Critic和样本后签发一次性凭证，不执行。禁止GET及查询覆盖。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string } }
+        - { in: path, name: taskId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LocalTaskConfirmationRequest' } } }
+      responses:
+        '200': { description: 确认证据ready、一次性凭证及taskFingerprint，不执行 }
+        '400': { description: 非法方法、查询或载荷 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 版本/证据/映射拒绝；失败可能已签发或有待恢复证据 }
+  /semantic-operations/models/{modelId}/tasks/{taskId}/adoption-execute:
+    post:
+      operationId: executeAdoptionTask
+      x-button-permission: meta_model.draft.save
+      x-review-permission: meta_model.draft.review
+      description: 明确执行当前所有者结构化候选采纳，任务CAS、原草稿版本及一次性凭证；重查权限/引用，只写本系统草稿并保存快照，不调用提供方、模拟、发布或写上游。POST不自动重试。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string } }
+        - { in: path, name: taskId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LocalTaskExecutionRequest' } } }
+      responses:
+        '200': { description: 原任务摘要及executedCommand=apply_proposal，不返回正文或凭证 }
+        '400': { description: 非法方法、查询或载荷 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 拒绝/失败，可能已消费凭证或写入草稿；不自动重试 }
+  /semantic-operations/models/{modelId}/tasks/{taskId}/adoption-confirmation-evidence-recover:
+    post:
+      operationId: recoverAdoptionConfirmationEvidence
+      x-button-permission: meta_model.draft.save
+      x-review-permission: meta_model.draft.review
+      description: 明确核验当前所有者结构化候选的既有确认证据；不重新签发，不返回遗失凭证，不执行。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string } }
+        - { in: path, name: taskId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [confirmed], properties: { confirmed: { type: boolean, const: true } } } } }
+      responses:
+        '200': { description: 证据状态摘要，confirmationTokenReturned=false、executionEnabled=false }
+        '400': { description: 非法方法、查询或载荷 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 证据/引用/类型拒绝，不重建历史 }
   /semantic-operations/models/{modelId}/tasks/{taskId}/local-confirm:
     post:
       operationId: confirmLocalValidationTask

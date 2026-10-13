@@ -2,15 +2,15 @@
 import { computed, defineAsyncComponent, nextTick, onMounted, ref } from 'vue';
 import { createSemanticOperationsClient } from '@healthcare-ai/semantic-operations-sdk';
 import SemanticAgentWorkspace from './components/SemanticAgentWorkspace.vue';
-import SemanticOperationsCenter from './components/SemanticOperationsCenter.vue';
-import SemanticOnboardingWorkspace from './components/SemanticOnboardingWorkspace.vue';
-import SystemAccessWorkspace from './components/SystemAccessWorkspace.vue';
-import WorkflowSemanticCenter from './components/WorkflowSemanticCenter.vue';
 import { OAMetaModelStudio, OntologyWorkspaceTools, OntologySavedViewsPanel, OntologyGraph, semanticSimulationMessage } from '@healthcare-ai/agent-ui/meta-model';
 import { KnowledgeLibraryPanel } from '@healthcare-ai/agent-ui/knowledge';
 import { restoreSemanticSession, semanticConnectionMessage } from './session-bootstrap.js';
 
 const SemanticModelTaskBrowser = defineAsyncComponent(() => import('./components/SemanticModelTaskBrowser.vue'));
+const SemanticOperationsCenter = defineAsyncComponent(() => import('./components/SemanticOperationsCenter.vue'));
+const SemanticOnboardingWorkspace = defineAsyncComponent(() => import('./components/SemanticOnboardingWorkspace.vue'));
+const SystemAccessWorkspace = defineAsyncComponent(() => import('./components/SystemAccessWorkspace.vue'));
+const WorkflowSemanticCenter = defineAsyncComponent(() => import('./components/WorkflowSemanticCenter.vue'));
 
 const runtimePlatform = globalThis.semanticOperationsDesktop?.runtime === 'electron' ? 'semantic-electron' : 'semantic-web';
 const client = createSemanticOperationsClient({ platform: runtimePlatform, appVersion: '0.2.0' });
@@ -249,7 +249,7 @@ onMounted(restoreSession);
       <div v-if="message && activeView !== 'system-access'" class="ops-message">{{ message }}</div>
       <div v-if="loading && activeView !== 'system-access'" class="ops-loading">正在校验身份、装载语义模型与Semantica状态…</div>
 
-      <SemanticModelTaskBrowser v-if="activeView === 'model-tasks' && role === 'executive'" :key="`${access?.tenantId || currentUser?.tenantId || ''}:${currentUser?.id || currentUser?.account}:${role}`" :client="client" :can-validate="canValidate" :can-confirm="canModel && canValidate" :can-build="canModel" />
+      <SemanticModelTaskBrowser v-if="activeView === 'model-tasks' && role === 'executive'" :key="`${access?.tenantId || currentUser?.tenantId || ''}:${currentUser?.id || currentUser?.account}:${role}`" :client="client" :can-validate="canValidate" :can-confirm="canModel && canValidate" :can-build="canModel" :can-review="canReviewSemanticModels" :can-simulate="canSimulate" />
       <div v-else-if="activeView === 'system-access'" class="ops-onboarding-pane">
         <div class="ops-subtabs" role="tablist" aria-label="接入视图">
           <button type="button" role="tab" :aria-selected="accessTab === 'systems'" :class="{ active: accessTab === 'systems' }" @click="accessTab = 'systems'">系统接入</button>
