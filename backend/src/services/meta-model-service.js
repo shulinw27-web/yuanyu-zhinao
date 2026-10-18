@@ -405,7 +405,7 @@ export const publishOAMetaModel = (role, { version, expectedFingerprint, tenantI
     runtime.oaSimulation.status = 'published';
     runtime.oaSimulation.version = version || `mm-oa-${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 17)}`;
     runtime.oaSimulation.publishedAt = now();
-    runtime.publishedModel = { tenantId: publishingTenant, version: runtime.oaSimulation.version, publishedAt: runtime.oaSimulation.publishedAt,
+    runtime.publishedModel = { tenantId: publishingTenant, ...(currentSemanticModel() !== DEFAULT_SEMANTIC_MODEL_ID ? { modelId: currentSemanticModel() } : {}), version: runtime.oaSimulation.version, publishedAt: runtime.oaSimulation.publishedAt,
       fingerprint: semanticFingerprint(runtime.oaDraft), draft: clone(runtime.oaDraft) };
     runtime.oaSimulation.audit.unshift({ time: now(), actor: role.name, action: '发布 OA 元模型', detail: `${runtime.oaSimulation.version} 已进入受控生效状态；Demo 未写入真实 OA。` });
     const result = { metaModel: summary(runtime), simulation: clone(runtime.oaSimulation) };

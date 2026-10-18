@@ -8,7 +8,7 @@
 // 领域公共入口（public-api.js）的导出数量上限。
 // 目标：≤15（真正的契约面）。当前为实测冻结值，只允许下降。
 export const DOMAIN_EXPORT_CEILING = {
-  agent: 61,
+  agent: 58,
   alerting: 8,
   governance: 91,
   // 2026-10-09 资料目录与模型依据关联独立成域；移走治理域6个目录接口。

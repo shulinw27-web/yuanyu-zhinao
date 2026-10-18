@@ -99,7 +99,7 @@ npm run portal:admin -- your-account@example.com
 
 独立接口契约：[产品门户OpenAPI](../../packages/api-contracts/product-portal.openapi.json)。它使用门户会话Cookie，不接受企业业务端的演示角色头；不要与原业务API契约混用。
 
-公开文档的受控来源是[产品公开内容](../public/product-docs.json)，由官网显式打包，不向浏览器暴露整个docs目录。内部运维文档、私有配置、简历、测试原始资料与密钥不进入门户文档包。
+公开文档的受控来源是[产品公开内容](../public/product-docs.json)，由官网显式打包，不向浏览器暴露整个docs目录。内部运维文档、私有配置、个人资料、测试原始资料与密钥不进入门户文档包。
 
 当前使用Vue/Vite与Hash路由；主站有独立标题、描述和图标，文档支持标题/正文筛选。正式搜索引擎运营还需SSR/预渲染、稳定内容URL、站点地图、发布审核和内容版本管理。首页/产品页共用同一产品叙事，未建设独立CMS。
 

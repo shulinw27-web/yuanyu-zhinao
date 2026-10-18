@@ -18,6 +18,10 @@ test('Agent 消息契约同时规范化旧版和新版请求体', () => {
 test('Agent 消息契约拒绝不稳定字段类型并返回稳定错误码', () => {
   const result = normalizeAgentMessageBody({ input: { text: 42 } });
   assert.equal(result.ok, false);
+  for (const field of ['modelId', 'modelBinding', 'modelVersion', 'modelFingerprint']) {
+    assert.equal(normalizeAgentMessageBody({ input: { text: '解释模型', [field]: 'foreign' } }).ok, false);
+    assert.equal(normalizeAgentMessageBody({ text: '解释模型', [field]: 'foreign' }).ok, false);
+  }
   assert.equal(result.error.code, API_ERROR_CODES.INVALID_REQUEST_BODY);
 });
 
@@ -41,6 +45,13 @@ test('OpenAPI 契约可解析、operationId 唯一并覆盖核心模块', async 
   assert.equal(operations.length >= 25, true);
   assert.deepEqual(document.paths['/health/live'].get.security, []);
   assert.deepEqual(document.paths['/health/ready'].get.security, []);
+  for (const path of ['/agent/published-models', '/agent/published-models/{modelId}']) assert.equal(document.paths[path].get['x-button-permission'], 'agent.prompt.run');
+  assert.equal(document.components.schemas.AgentPublishedModelSummary.properties.runtimeReadEnabled.const, false);
+  assert.equal(document.components.schemas.AgentPublishedModelSummary.properties.chatSelectionEnabled.const, false);
+  assert.equal(document.components.schemas.AgentPublishedModelNode.additionalProperties, false);
+  assert.equal(document.paths['/agent/published-models/{modelId}/conversations'].post['x-button-permission'], 'agent.prompt.run');
+  assert.equal(document.components.schemas.ModelSchemaConversationRequest.additionalProperties, false);
+  assert.equal(document.components.schemas.AgentModelBinding.properties.mode.const, 'published_schema_only');
   for (const path of ['/access/me', '/permission-management', '/agent/message', '/agent/traces', '/agent/learning-profile', '/agent/desktop-endpoint/heartbeat', '/risk-cases', '/alerting/workspace', '/procurement/launch', '/simulation/overview']) {
     assert.ok(document.paths[path], `缺少核心路径 ${path}`);
   }
@@ -74,6 +85,11 @@ test('OpenAPI 契约可解析、operationId 唯一并覆盖核心模块', async 
   const dialogue = document.paths['/semantic-operations/models/{modelId}/tasks/{taskId}/dialogue'];
   assert.ok(dialogue.get); assert.equal(dialogue.post, undefined); assert.ok(dialogue.get.responses['413']);
   assert.ok(document.paths['/semantic-operations/models/{modelId}/local-validation-tasks'].post);
+  for (const suffix of ['local-simulation-tasks', 'tasks/{taskId}/simulation-confirm', 'tasks/{taskId}/simulation-execute', 'tasks/{taskId}/simulation-evidence-recover']) {
+    assert.equal(document.paths[`/semantic-operations/models/{modelId}/${suffix}`].post['x-button-permission'], 'meta_model.simulate');
+  }
+  assert.equal(document.components.schemas.LocalSimulationTaskRequest.additionalProperties, false);
+  assert.equal(document.components.schemas.LocalSimulationTaskRequest.properties.kind.const, 'simulate_model');
   for (const action of ['local-confirm', 'local-execute', 'confirmation-evidence-recover']) {
     const path = document.paths[`/semantic-operations/models/{modelId}/tasks/{taskId}/${action}`]; assert.ok(path.post); assert.equal(path.get, undefined);
   }

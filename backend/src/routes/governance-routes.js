@@ -116,7 +116,7 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
     const result = await modelWorkspaces.previewRequestStatus({ identityScope: agentIdentity, modelId: previewStatus[1], requestId: previewStatus[2] });
     send(res, result.error ? result.status || 400 : 200, result.error ? { message: result.error, code: result.code } : result); return true;
   }
-  const localCreate = url.pathname.match(/^\/api\/semantic-operations\/models\/([a-z][a-z0-9-]{1,63})\/local-validation-tasks$/u);
+  const localCreate = url.pathname.match(/^\/api\/semantic-operations\/models\/([a-z][a-z0-9-]{1,63})\/local-(validation|simulation)-tasks$/u);
   const adoptionReview = url.pathname.match(/^\/api\/semantic-operations\/models\/([a-z][a-z0-9-]{1,63})\/tasks\/([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})\/adoption-review$/u);
   if (adoptionReview) {
     if (req.method !== 'GET' || url.search) { send(res, 400, { message: '模型审阅仅支持明确模型任务的只读请求。', code: 'MODEL_ADOPTION_REQUEST_INVALID' }); return true; }
@@ -135,16 +135,17 @@ async function handleTenantGovernanceRoutes({ req, res, url, role, agentIdentity
     const uncertainty = Object.fromEntries(['taskMayHaveCommitted', 'workspaceWriteMayHaveCommitted', 'evidencePending'].filter(key => result[key] === true).map(key => [key, true]));
     send(res, result.error ? result.status || 400 : 200, result.error ? { message: result.error, code: result.code, ...uncertainty } : result); return true;
   }
-  const localAction = url.pathname.match(/^\/api\/semantic-operations\/models\/([a-z][a-z0-9-]{1,63})\/tasks\/([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})\/(local-confirm|local-execute|confirmation-evidence-recover)$/u);
+  const localAction = url.pathname.match(/^\/api\/semantic-operations\/models\/([a-z][a-z0-9-]{1,63})\/tasks\/([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})\/(local-confirm|local-execute|confirmation-evidence-recover|simulation-confirm|simulation-execute|simulation-evidence-recover)$/u);
   if (localCreate || localAction) {
     if (req.method !== 'POST' || url.search) { send(res, 400, { message: '本地任务动作需要明确的POST请求，不接受查询覆盖参数。', code: 'MODEL_LOCAL_TASK_REQUEST_INVALID' }); return true; }
     const body = await readBody(req);
-    const options = { identityScope: agentIdentity, modelId: (localCreate || localAction)[1], ...(localAction ? { taskId: localAction[2], localValidationOnly: true } : {}), body };
-    if (localAction?.[3] === 'confirmation-evidence-recover' && (!body || Array.isArray(body) || Object.keys(body).some(key => key !== 'confirmed') || body.confirmed !== true)) {
+    const simulation = localCreate?.[2] === 'simulation' || localAction?.[3].startsWith('simulation-');
+    const options = { identityScope: agentIdentity, modelId: (localCreate || localAction)[1], ...(simulation ? { localSimulationOnly: true, executionKind: 'simulate' } : localAction ? { localValidationOnly: true } : {}), ...(localAction ? { taskId: localAction[2] } : {}), body };
+    if (localAction?.[3].endsWith('evidence-recover') && (!body || Array.isArray(body) || Object.keys(body).some(key => key !== 'confirmed') || body.confirmed !== true)) {
       send(res, 400, { message: '证据恢复需要明确确认，不接受其他覆盖参数。', code: 'MODEL_LOCAL_TASK_REQUEST_INVALID' }); return true;
     }
-    const result = await (localCreate ? modelWorkspaces.createLocalTask(options) : localAction[3] === 'local-confirm' ? modelWorkspaces.confirmTask(options)
-      : localAction[3] === 'local-execute' ? modelWorkspaces.executeTask(options) : modelWorkspaces.recoverConfirmationEvidence(options));
+    const result = await (localCreate ? modelWorkspaces.createLocalTask(options) : localAction[3].endsWith('-confirm') ? modelWorkspaces.confirmTask(options)
+      : localAction[3].endsWith('-execute') ? modelWorkspaces.executeTask(options) : modelWorkspaces.recoverConfirmationEvidence(options));
     const uncertainty = Object.fromEntries(['taskMayHaveCommitted', 'workspaceWriteMayHaveCommitted', 'evidencePending'].filter(key => result[key] === true).map(key => [key, true]));
     send(res, result.error ? result.status || 400 : localCreate && !result.reused ? 201 : 200, result.error ? { message: result.error, code: result.code, ...uncertainty,
       ...(result.evidencePending && result.taskId ? { taskId: result.taskId } : {}) } : result); return true;

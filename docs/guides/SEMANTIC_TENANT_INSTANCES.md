@@ -1,5 +1,69 @@
 # Semantica 独立租户实例接入
 
+## 新建固定版本的结构咨询（2026-10-18）
+
+在智脑“知识资料”读取授权模型目录并选择模型图，勾选“我确认新建固定此版本的结构咨询”，点击“新建结构咨询会话”。进入主聊天后会固定显示modelId和发布版本；已有普通业务任务不改变。它不是原业务主聊天的模型切换，所以目录`chatSelectionEnabled=false`及`runtimeReadEnabled=false`仍保留。
+
+可以问“解释批次对象的来源和关系”“它的主键和字段是什么”“不是批次，而是供应商对象”。当前仅按已发布对象名称/稳定编码匹配，最多三个对象；歧义或范围过大需明确编码，不保证任意口语、语义别名或复杂问题都能理解。关系按发布的声明方向展示，不推断因果、等价或业务记录。每对象通常展示前8条关系，明确问关系/系统时前20条并披露剩余数；完整结构可回到图查看。
+
+所有答案从发布结构确定性渲染，运行标识`deterministic_schema`、`provider=none`，不调用大模型、Python或业务连接器。实时数据、文件生成、修改、发布等请求会说明超出范围，不会回退默认业务模型。大答复同时按原文和历史Unicode规范化后的长度预算保留完整行，7200字符以内；未展示部分会明确提示回到结构图查看，不伪称全部解释完成，也不依赖存储端静默截断。上传材料入口在此模式隐藏，服务端也拒绝附件。语音转写仅作为同一条文字问题，不授予新能力。
+
+API：POST `/api/agent/published-models/{modelId}/conversations`，SDK：`createModelConversation(modelId,{confirmed:true,expectedVersion,expectedFingerprint})`；版本/指纹来自刚读取的定义。新会话返回不可变`agent-model-binding.v1`（mode=published_schema_only）。普通`/agent/conversations`不能夹带绑定；`/agent/message`仅提交此conversationId及文字，消息中的modelId/modelBinding/modelVersion/modelFingerprint拒绝，不支持临时换模。新模型或新版本需要另建会话。
+
+每轮复验当前授权与发布版本。旧版本会话仍保留历史，但不能继续用新版本解释旧问题；撤权或发布变化不返回新的旧成功。消息写入按已读会话修订CAS，防止并发请求覆盖对象焦点；不混入普通业务历史、全局个人记忆或其他模型。禁止将结构咨询固定为全局任务记忆、关联业务执行或撤销，即使已归档也不允许。
+
+若创建/保存回执不确定，可能已写入本地，会返回`conversationMayHaveCommitted=true`。不要自动重发，请刷新自己的任务列表/原会话核对；创建不是请求号幂等恢复，不能把手动再点视为不会重复创建。权限库、发布库及会话库仍非跨库原子事务，写后拒绝可能已有本地记录，界面不冒称回滚。
+
+## 智脑查看已发布独立模型（2026-10-18）
+
+进入智脑“知识资料”，点击“读取授权模型目录”，再点击某个模型查看已发布关系图。可以查看对象、主键、字段名及来源系统，使用现有图谱的搜索/定位；图内不能保存布局、直接提问、切换当前业务问答模型或执行。上方可以另建限定结构咨询，规则见本页首节。刷新、切换账号或读取失败会清除旧内容；目录与详情版本不一致需重新读取目录。此界面不会自动把整张模型图送给大模型。
+
+API为GET `/api/agent/published-models`和GET `/api/agent/published-models/{modelId}`，SDK为`publishedModels()`、`publishedModel(modelId)`。只接受路径选择，不接受查询参数、POST或身份/角色覆盖；当前默认工作区仍走既有主工作台，不在此独立目录重复展示。返回`runtimeReadEnabled=false`及`chatSelectionEnabled=false`，明确区别于未来的业务运行选择。
+
+平台人员需要在服务端显式模型授权中配置metadata（下面仅合成示意，不是项目已为真实企业配置）：
+
+```json
+{
+  "synthetic-enterprise": {
+    "quality_manager": {
+      "models": {
+        "quality-model": {
+          "schemaVersion": "ontology-model-grant.v1",
+          "modelId": "quality-model",
+          "metadata": true,
+          "objects": {}
+        }
+      }
+    }
+  }
+}
+```
+
+`ONTOLOGY_RUNTIME_GRANTS_JSON`中的metadata=true明确授予该模型已发布结构名称、字段名和来源码的查看权，不授予对象实例查询；objects为空时仍不能读业务事实。角色必须来自当前有效IAM主体，并具备`page.agent.view`与`agent.prompt.run`，不能靠请求头伪造。默认模型的metadata/objects授权不会继承。此入口不绕过受管租户运行准入门禁。
+
+模型还须已登记、发布原始记录明确绑定当前租户和modelId，指纹正确且与完成发布锁一致；发布完成锁只用于结构来源核对，不是实时服务健康/业务运行证明。最多31个独立模型、单图200对象/400关系、每对象100字段，原始发布定义512KiB与结构投影256KiB预算；超预算或坏引用拒绝整包，不截断冒充完整图。实例、规则表达式、连接配置、部署标识和凭据均不返回。
+
+新发布会在原始记录保存真实modelId。旧版本若缺少这个字段，读取器不根据所在文件/当前上下文补造归属：请运营人员先核对原模型、目标和版本，再经受控流程重新发布。该项不自动迁移历史，也不启用主聊天多模型业务查询。权限库和模型库仍为分离存储，本轮两轮记录复验与末尾新鲜IAM检查不是跨库原子事务。
+
+## 模型任务化合成模拟（2026-10-18）
+
+在“独立模型任务工作区”选择模型，将“本地任务类型”设为“合成模拟”，分别勾选并执行创建、确认、执行三个步骤。只创建不会运行；确认只签发凭证；执行才生成本地合成实例和回放。需要当前管理层、语义运营页面及模拟权限，任务仅当前所有者操作。既有校验任务和结构化候选采纳保留独立入口，不能混用命令或凭证。
+
+HTTP和SDK对应：
+
+| 动作 | 指定模型下的路径 | SDK |
+| --- | --- | --- |
+| 创建 | POST `/api/semantic-operations/models/{modelId}/local-simulation-tasks` | `createLocalSimulationTask(modelId,body)` |
+| 确认 | POST `/api/semantic-operations/models/{modelId}/tasks/{taskId}/simulation-confirm` | `confirmLocalSimulationTask(modelId,taskId,body)` |
+| 执行 | POST `/api/semantic-operations/models/{modelId}/tasks/{taskId}/simulation-execute` | `executeLocalSimulationTask(modelId,taskId,body)` |
+| 既有确认证据恢复 | POST `/api/semantic-operations/models/{modelId}/tasks/{taskId}/simulation-evidence-recover` | `recoverLocalSimulationEvidence(modelId,taskId,{confirmed:true})` |
+
+创建载荷为`confirmed=true`、`kind=simulate_model`、小写UUID v4 `requestId`及GET本模型draft得到的`expectedDraftFingerprint`。确认使用最新`taskFingerprint`，执行使用确认回执的`taskFingerprint`与`confirmationToken`。路径不接受查询覆盖，载荷不接受额外命令、身份或模型参数。旧草稿使凭证失效，执行写事务再次核对原指纹；必须重新核对并创建新任务，不能用旧凭证执行新草稿。
+
+凭证只保存在页面内存，换模型/任务/权限或失败后清除。未知创建结果可使用原请求号明确恢复，不自动创建第二条；确认证据pending时只恢复原证据，不重签或执行。已就绪证据丢失时阻断，不补造成功历史。执行回执不确定时先读取原任务，不自动再次执行。
+
+结果含`sourceFingerprint`、`sourceMode=synthetic`、`verifiesLiveSystems=false`、校验摘要及节点/关系数；完成任务的摘要和对话读取也带同一有界统计，不含实例记录。工作台刷新后可查看。此入口只运行Node本地合成模拟，不调用Python Semantica、收费模型、上游或真实企业数据；不是生产仿真、发布成功或智脑独立模型读取已启用。旧阶段下述“任务模拟待补”由此限定子项补齐，其他范围保持原门禁。
+
 ## 内部结构化候选预览基础（2026-10-12）
 
 2026-10-13读取授权隔离基础：服务端ONTOLOGY_RUNTIME_GRANTS_JSON的旧`tenant→role`授权只兼容默认模型。独立模型需要该角色下的`models[modelId]`显式配置，包含schemaVersion=ontology-model-grant.v1、同modelId、metadata=true和独立objects对象；未知参数、跨租户、未登记上下文或错模型拒绝，不继承旧objects。这里仅说明开发契约，项目没有代用户添加真实授权；即使具备该配置，当前非默认发布定义仍禁用业务读取，不能仅改JSON绕过运行绑定或数据门禁。

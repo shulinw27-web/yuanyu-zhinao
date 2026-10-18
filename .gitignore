@@ -29,6 +29,8 @@ tmp/
 
 # Local credentials, databases and model weights must never enter a commit
 ark.json
+glm.json
+models.json
 *.local.json
 *.pem
 *.key

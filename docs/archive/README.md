@@ -8,4 +8,4 @@
 - [阶段优化复审](milestones/OPTIMIZATION_REVIEW.md)
 - [Codex 能力对标与迭代验收](milestones/元域智脑-Codex能力对标与迭代验收-v1.0.md)
 
-过期 Word 多版本、个人简历制作脚本、未引用旧截图和渲染缓存已移出项目，不在这里重复保存。恢复位置和清理说明见 [整理记录](../overview/REPOSITORY_CLEANUP.md)。
+过期 Word 多版本、无关工具脚本、未引用旧截图和渲染缓存已移出项目，不在这里重复保存。恢复位置和清理说明见 [整理记录](../overview/REPOSITORY_CLEANUP.md)。

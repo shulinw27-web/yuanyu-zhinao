@@ -219,6 +219,26 @@ test('local UI requires three separate acknowledgements and never persists or re
   assert.doesNotMatch(source, /localStorage|sessionStorage/u);
 });
 
+test('simulation UI selects its own commands and three explicit consents; revocation clears tokens', async t => {
+  const calls = []; const fp = 'c'.repeat(24); const task = { id: 'sim-1', modelId: 'quality', localSimulationTask: true, evidenceState: 'ready', status: 'waiting_confirmation' };
+  const simulation = { status: 'simulated', sourceMode: 'synthetic', verifiesLiveSystems: false, nodeCount: 2, relationshipCount: 1, validation: { status: 'passed' } };
+  const { state, props } = mount(t, { modelWorkspaces: async () => registry(), modelTasks: async id => page(id, []), modelDraft: async id => ({ modelId: id, draft: { fingerprint: fp } }),
+    createLocalSimulationTask: async (id, body) => { calls.push(['create', body]); return { modelId: id, task, evidenceState: 'ready' }; },
+    modelTaskDialogue: async () => ({ ...dialogue('quality', task.id), taskFingerprint: fp, task: { ...task, messages: [] } }),
+    confirmLocalSimulationTask: async (id, taskId, body) => { calls.push(['confirm', body]); return { modelId: id, task: { ...task, confirmationEvidenceState: 'ready' }, taskFingerprint: fp, confirmationEvidenceState: 'ready', confirmationToken: 'x'.repeat(43), expiresAt: new Date(Date.now() + 600000).toISOString() }; },
+    executeLocalSimulationTask: async (id, taskId, body) => { calls.push(['execute', body]); return { modelId: id, task: { ...task, status: 'completed', simulation }, executedCommand: 'simulate_model', simulation }; }
+  }, { canSimulate: true, canConfirm: true });
+  await vue.nextTick(); await state.selectModel('quality'); assert.equal(state.localKind.value, 'simulate_model');
+  await state.localAction('create'); assert.equal(calls.length, 0);
+  state.createAcknowledged.value = true; await state.localAction('create'); assert.equal(calls[0][1].kind, 'simulate_model');
+  await state.localAction('confirm'); assert.equal(calls.length, 1);
+  state.confirmAcknowledged.value = true; await state.localAction('confirm'); assert.ok(state.localToken.value);
+  await state.localAction('execute'); assert.equal(calls.length, 2);
+  state.executeAcknowledged.value = true; await state.localAction('execute'); assert.equal(calls.length, 3); assert.equal(state.localToken.value, null);
+  assert.equal(state.tasks.value[0].status, 'completed'); assert.equal(state.dialogue.value.simulation.sourceMode, 'synthetic');
+  props.canSimulate = false; await vue.nextTick(); assert.equal(state.dialogue.value, null); assert.equal(state.localToken.value, null);
+});
+
 test('unknown create outcome is never retried automatically, and explicit recovery preserves original request ID', async t => {
   const requests = []; const client = { modelWorkspaces: async () => registry(), modelTasks: async id => page(id, []), modelDraft: async id => ({ modelId: id, draft: { fingerprint: 'a'.repeat(24) } }),
     createLocalValidationTask: async (id, body) => { requests.push(JSON.parse(JSON.stringify(body))); const error = new Error('uncertain'); error.payload = { taskMayHaveCommitted: true }; throw error; }

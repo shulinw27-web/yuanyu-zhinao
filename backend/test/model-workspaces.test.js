@@ -1286,6 +1286,88 @@ test('local validation creation is idempotent, model isolated and completes expl
   });
 });
 
+test('local simulation task is confirmed once, pinned to a draft and runs without any network IO', async () => {
+  const originalFetch = globalThis.fetch; let calls = 0;
+  globalThis.fetch = async () => { calls++; throw new Error('No network allowed'); };
+  try { await within(async () => {
+    const options = { identityScope: identity, modelId: 'local-simulation', localSimulationOnly: true };
+    await modelWorkspaces.register({ identityScope: identity, body: { id: options.modelId, label: '本地合成模拟', expectedRevision: 0 } });
+    const initial = await modelWorkspaces.draft(options);
+    const body = { confirmed: true, kind: 'simulate_model', requestId: 'a11ce000-0000-4000-8000-000000000004', expectedDraftFingerprint: initial.draft.fingerprint };
+    assert.equal((await modelWorkspaces.createLocalTask({ ...options, localSimulationOnly: false, body })).status, 400);
+    const created = await modelWorkspaces.createLocalTask({ ...options, body });
+    assert.equal(created.evidenceState, 'ready', JSON.stringify(created)); assert.equal(created.task.localSimulationTask, true);
+    assert.equal((await modelWorkspaces.createLocalTask({ ...options, body })).task.id, created.task.id);
+    assert.equal((await modelWorkspaces.simulation(options)).simulation, null, 'creation must not simulate');
+    const taskOptions = { ...options, taskId: created.task.id };
+    const confirmationBody = { confirmed: true, expectedTaskFingerprint: created.taskFingerprint };
+    assert.equal((await modelWorkspaces.confirmTask({ ...taskOptions, localValidationOnly: true, body: confirmationBody })).code, 'MODEL_TASK_EXECUTION_COMMAND_UNSUPPORTED');
+    const confirmed = await modelWorkspaces.confirmTask({ ...taskOptions, body: confirmationBody });
+    assert.ok(confirmed.confirmationToken, JSON.stringify(confirmed));
+    const executeBody = { confirmed: true, expectedTaskFingerprint: confirmed.taskFingerprint, confirmationToken: confirmed.confirmationToken };
+    assert.equal((await modelWorkspaces.executeTask({ ...taskOptions, body: executeBody })).code, 'MODEL_TASK_EXECUTION_COMMAND_UNSUPPORTED');
+    const execution = await modelWorkspaces.executeTask({ ...taskOptions, executionKind: 'simulate', body: executeBody });
+    assert.equal(execution.task.status, 'completed', JSON.stringify(execution));
+    assert.equal(execution.simulation.sourceFingerprint, initial.draft.fingerprint); assert.equal(execution.simulation.sourceMode, 'synthetic');
+    assert.equal(execution.simulation.verifiesLiveSystems, false); assert.ok(execution.simulation.nodeCount > 0);
+    assert.equal((await modelWorkspaces.task(taskOptions)).task.simulation.sourceFingerprint, initial.draft.fingerprint);
+    await semanticModelRegistry.withWorkspace({ role: { id: 'executive' }, ...options, work: async () => {
+      const record = (await readSemanticGovernanceState('semantic_operations_agent_tasks', 'index', {}))[created.task.id];
+      assert.match(record.response, /本地合成模拟/u); assert.doesNotMatch(record.response, /Semantica/u);
+    } });
+    assert.equal((await modelWorkspaces.executeTask({ ...taskOptions, executionKind: 'simulate', body: executeBody })).error !== undefined, true);
+    assert.equal((await modelWorkspaces.tasks({ identityScope: identity, modelId: 'oa-governance' })).tasks.length, 0);
+    assert.equal(calls, 0);
+  }); } finally { globalThis.fetch = originalFetch; }
+});
+
+test('simulation creation receipt recovery preserves one task and missing ready evidence fails closed', async () => {
+  await within(async () => {
+    const options = { identityScope: identity, modelId: 'simulation-recovery', localSimulationOnly: true };
+    await modelWorkspaces.register({ identityScope: identity, body: { id: options.modelId, label: '模拟证据恢复', expectedRevision: 0 } });
+    const body = { confirmed: true, kind: 'simulate_model', requestId: 'a11ce000-0000-4000-8000-000000000008', expectedDraftFingerprint: (await modelWorkspaces.draft(options)).draft.fingerprint };
+    let writes = 0; let pending;
+    configureAgentEvidenceTraceRepository({ ...asyncRuntimeStateRepository, async mutateState(...args) {
+      const result = await asyncRuntimeStateRepository.mutateState(...args); if (++writes === 2) throw new Error('Synthetic simulation receipt loss'); return result;
+    } });
+    try { pending = await modelWorkspaces.createLocalTask({ ...options, body }); } finally { configureAgentEvidenceTraceRepository(null); }
+    assert.equal(pending.code, 'SEMANTIC_LOCAL_TASK_EVIDENCE_PENDING'); assert.equal(pending.taskMayHaveCommitted, true);
+    const recovered = await modelWorkspaces.createLocalTask({ ...options, body });
+    assert.equal(recovered.reused, true); assert.equal(recovered.task.id, pending.taskId); assert.equal(recovered.evidenceState, 'ready');
+    assert.equal((await modelWorkspaces.tasks(options)).tasks.length, 1);
+    deleteState('agent_evidence_traces', recovered.traceId);
+    assert.equal((await modelWorkspaces.createLocalTask({ ...options, body })).code, 'SEMANTIC_LOCAL_TASK_EVIDENCE_PENDING');
+    assert.equal((await modelWorkspaces.confirmTask({ ...options, taskId: pending.taskId, body: { confirmed: true, expectedTaskFingerprint: recovered.taskFingerprint } })).error !== undefined, true);
+    assert.equal((await modelWorkspaces.tasks(options)).tasks.length, 1);
+  });
+});
+
+test('simulation confirmation and execution reject stale drafts and revoked simulation permission', async () => {
+  await within(async () => {
+    const options = { identityScope: identity, modelId: 'simulation-stale', localSimulationOnly: true };
+    await modelWorkspaces.register({ identityScope: identity, body: { id: options.modelId, label: '模拟撤权', expectedRevision: 0 } });
+    const initial = await modelWorkspaces.draft(options);
+    const body = { confirmed: true, kind: 'simulate_model', requestId: 'a11ce000-0000-4000-8000-000000000005', expectedDraftFingerprint: initial.draft.fingerprint };
+    const created = await modelWorkspaces.createLocalTask({ ...options, body });
+    const taskOptions = { ...options, taskId: created.task.id };
+    const confirmed = await modelWorkspaces.confirmTask({ ...taskOptions, body: { confirmed: true, expectedTaskFingerprint: created.taskFingerprint } });
+    const changed = await modelWorkspaces.saveDraft({ ...options, body: { confirmed: true, expectedFingerprint: initial.draft.fingerprint, input: { policies: ['本地合成变更'] } } });
+    assert.equal(changed.error, undefined, JSON.stringify(changed));
+    const result = await modelWorkspaces.executeTask({ ...taskOptions, executionKind: 'simulate', body: { confirmed: true, expectedTaskFingerprint: confirmed.taskFingerprint, confirmationToken: confirmed.confirmationToken } });
+    assert.equal(result.error !== undefined, true); assert.equal((await modelWorkspaces.simulation(options)).simulation, null);
+    await semanticModelRegistry.withWorkspace({ role: { id: 'executive' }, ...options, work: async () => {
+      assert.equal((await readSemanticGovernanceState('semantic_operations_agent_tasks', 'index', {}))[created.task.id].confirmation.state, 'invalidated', 'stale draft invalidates rather than executes with the token');
+    } });
+    const staleTask = await modelWorkspaces.dialogue(taskOptions);
+    assert.equal((await modelWorkspaces.confirmTask({ ...taskOptions, body: { confirmed: true, expectedTaskFingerprint: staleTask.taskFingerprint } })).code, 'SEMANTIC_TASK_REVIEW_STALE');
+    const state = seedTenantIAM(identity.tenantId, ['admin@demo.local']);
+    state.rolePolicies.executive.buttonPermissionIds = state.rolePolicies.executive.buttonPermissionIds.filter(value => value !== 'meta_model.simulate');
+    writeState('iam', iamWorkspaceKey(identity.tenantId), state);
+    assert.equal((await modelWorkspaces.createLocalTask({ ...options, body })).code, 'MODEL_WORKSPACE_FORBIDDEN');
+    assert.equal((await modelWorkspaces.confirmTask({ ...taskOptions, body: { confirmed: true, expectedTaskFingerprint: confirmed.taskFingerprint } })).code, 'MODEL_WORKSPACE_FORBIDDEN');
+  });
+});
+
 test('local creation evidence response loss retains one pending task and recovers without duplicate events', async () => {
   await within(async () => {
     const options = { identityScope: identity, modelId: 'local-loss' };
@@ -1329,6 +1411,25 @@ test('local task SDK validates strict bodies before IO and never retries uncerta
       () => client.executeLocalValidationTask('model-a', 'task-a', { confirmed: true, expectedTaskFingerprint: fp, confirmationToken: 'a'.repeat(43) }), () => client.recoverLocalConfirmationEvidence('model-a', 'task-a', { confirmed: true })];
     for (const method of methods) await assert.rejects(method(), error => error.payload.taskMayHaveCommitted && error.payload.evidencePending);
     assert.equal(calls.length, 4); assert.ok(calls.every(call => call.options.method === 'POST' && !call.options.headers['x-semantic-model']));
+  } finally { globalThis.fetch = original; }
+});
+
+test('simulation SDK has closed command bodies and never retries an uncertain POST', async () => {
+  const original = globalThis.fetch; const calls = [];
+  globalThis.fetch = async (url, options) => { calls.push({ url, options }); return new Response(JSON.stringify({ taskMayHaveCommitted: true }), { status: 503 }); };
+  try {
+    const client = createSemanticOperationsClient({ baseUrl: 'http://127.0.0.1:9999/api' });
+    const fp = 'c'.repeat(24); const body = { confirmed: true, kind: 'simulate_model', requestId: 'a11ce000-0000-4000-8000-000000000007', expectedDraftFingerprint: fp };
+    assert.throws(() => client.createLocalSimulationTask('../escape', body), TypeError);
+    assert.throws(() => client.createLocalSimulationTask('model-a', { ...body, kind: 'publish_model' }), TypeError);
+    assert.throws(() => client.confirmLocalSimulationTask('model-a', 'task-a', { confirmed: true, expectedTaskFingerprint: fp, executionKind: 'adopt' }), TypeError);
+    assert.throws(() => client.executeLocalSimulationTask('model-a', 'task-a', { confirmed: true, expectedTaskFingerprint: fp, confirmationToken: 'bad' }), TypeError);
+    assert.throws(() => client.recoverLocalSimulationEvidence('model-a', 'task-a', { confirmed: false }), TypeError);
+    assert.equal(calls.length, 0);
+    for (const invoke of [() => client.createLocalSimulationTask('model-a', body), () => client.confirmLocalSimulationTask('model-a', 'task-a', { confirmed: true, expectedTaskFingerprint: fp }),
+      () => client.executeLocalSimulationTask('model-a', 'task-a', { confirmed: true, expectedTaskFingerprint: fp, confirmationToken: 'x'.repeat(43) }), () => client.recoverLocalSimulationEvidence('model-a', 'task-a', { confirmed: true })]) await assert.rejects(invoke(), error => error.payload.taskMayHaveCommitted === true);
+    assert.equal(calls.length, 4); assert.ok(calls.every(call => call.options.method === 'POST' && !call.options.headers['x-semantic-model']));
+    assert.match(calls[0].url, /local-simulation-tasks$/u); assert.match(calls[2].url, /simulation-execute$/u);
   } finally { globalThis.fetch = original; }
 });
 

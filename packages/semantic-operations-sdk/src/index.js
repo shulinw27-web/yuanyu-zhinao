@@ -145,6 +145,28 @@ export function createSemanticOperationsClient({ baseUrl, platform = 'semantic-w
     },
     effectiveAccess: () => request('/access/me'),
     modelWorkspaces: () => request('/semantic-operations/models'),
+    createLocalSimulationTask: (modelId, body) => {
+      if (typeof modelId !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId) || !localTaskBody(body, ['confirmed', 'kind', 'requestId', 'expectedDraftFingerprint'])
+        || body.kind !== 'simulate_model' || typeof body.requestId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(body.requestId)
+        || typeof body.expectedDraftFingerprint !== 'string' || !/^[a-f0-9]{24}$/u.test(body.expectedDraftFingerprint)) throw new TypeError('Invalid local simulation task request.');
+      return post(`/semantic-operations/models/${encodeURIComponent(modelId)}/local-simulation-tasks`, body);
+    },
+    confirmLocalSimulationTask: (modelId, taskId, body) => {
+      const path = localTaskPath(modelId, taskId, 'simulation-confirm');
+      if (!localTaskBody(body, ['confirmed', 'expectedTaskFingerprint']) || typeof body.expectedTaskFingerprint !== 'string' || !/^[a-f0-9]{24}$/u.test(body.expectedTaskFingerprint)) throw new TypeError('Invalid simulation confirmation request.');
+      return post(path, body);
+    },
+    executeLocalSimulationTask: (modelId, taskId, body) => {
+      const path = localTaskPath(modelId, taskId, 'simulation-execute');
+      if (!localTaskBody(body, ['confirmed', 'expectedTaskFingerprint', 'confirmationToken']) || typeof body.expectedTaskFingerprint !== 'string' || !/^[a-f0-9]{24}$/u.test(body.expectedTaskFingerprint)
+        || typeof body.confirmationToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/u.test(body.confirmationToken)) throw new TypeError('Invalid simulation execution request.');
+      return post(path, body);
+    },
+    recoverLocalSimulationEvidence: (modelId, taskId, body) => {
+      const path = localTaskPath(modelId, taskId, 'simulation-evidence-recover');
+      if (!localTaskBody(body, ['confirmed'])) throw new TypeError('Invalid simulation evidence recovery request.');
+      return post(path, body);
+    },
     createLocalValidationTask: (modelId, body) => {
       if (typeof modelId !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId) || !localTaskBody(body, ['confirmed', 'kind', 'requestId', 'expectedDraftFingerprint'])
         || body.kind !== 'validate_model' || typeof body.requestId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(body.requestId)

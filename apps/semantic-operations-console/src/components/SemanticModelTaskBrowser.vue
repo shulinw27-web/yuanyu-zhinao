@@ -9,6 +9,7 @@ const nextOffset = ref(0);
 const taskFingerprint = ref(''); const actionBusy = ref(false); const notice = ref('');
 const createAcknowledged = ref(false); const confirmAcknowledged = ref(false); const executeAcknowledged = ref(false); const recoverAcknowledged = ref(false);
 const creationAttempt = ref(null); const localToken = ref(null);
+const localKind = ref(props.canValidate || !props.canSimulate ? 'validate_model' : 'simulate_model');
 const sourceCodesText = ref(''); const sourceInspection = ref(null); const sourceAcknowledged = ref(false);
 const previewRequestId = ref(''); const previewRequestStatus = ref(null);
 const previewText = ref(''); const previewAcknowledged = ref(false); const previewAttempt = ref(null);
@@ -116,7 +117,11 @@ async function inspectPreviewRequest() {
       : '无法核对请求状态，请检查当前权限、模型及请求号；旧摘要已清除，不自动恢复或执行。'; }
   } finally { if (request === generation) actionBusy.value = false; }
 }
-const localTask = computed(() => dialogue.value?.localValidationTask === true && !dialogue.value?.reviewerAccess);
+const simulationTask = computed(() => dialogue.value?.localSimulationTask === true);
+const localTask = computed(() => (dialogue.value?.localValidationTask === true || simulationTask.value) && !dialogue.value?.reviewerAccess);
+const localLabel = computed(() => simulationTask.value ? '合成模拟' : '结构校验');
+const canExecuteLocal = computed(() => simulationTask.value ? props.canSimulate : props.canValidate);
+const canCreateLocal = computed(() => localKind.value === 'simulate_model' ? props.canSimulate : props.canValidate);
 function recordAdoption(result) {
   if (!props.canReview || reading.value || !dialogue.value || result?.modelId !== modelId.value || result.task?.id !== selectedId.value || result.task.modelId !== modelId.value || result.task.status !== 'completed' || result.task.structuredAdoptionTask !== true) return;
   clearAuthorization(); dialogue.value = { ...dialogue.value, ...result.task };
@@ -195,8 +200,8 @@ async function openTask(task) {
 }
 async function localAction(kind) {
   if (actionBusy.value || loading.value || reading.value || !modelId.value) return;
-  if (kind === 'create' ? !props.canValidate || !createAcknowledged.value
-    : !localTask.value || (kind === 'execute' ? !props.canValidate || !executeAcknowledged.value : !props.canConfirm || !(kind === 'recover' ? recoverAcknowledged.value : confirmAcknowledged.value))) return;
+  if (kind === 'create' ? !canCreateLocal.value || !createAcknowledged.value
+    : !localTask.value || (kind === 'execute' ? !canExecuteLocal.value || !executeAcknowledged.value : !props.canConfirm || !(kind === 'recover' ? recoverAcknowledged.value : confirmAcknowledged.value))) return;
   if (kind === 'confirm' && (dialogue.value.confirmationEvidenceState === 'pending' || dialogue.value.evidenceState !== 'ready')) return;
   const selectedModel = modelId.value; const id = selectedId.value; const request = generation; const detail = detailGeneration;
   const current = () => request === generation && detail === detailGeneration;
@@ -206,23 +211,25 @@ async function localAction(kind) {
     if (kind === 'create') {
       if (!creationAttempt.value) {
         const draft = await props.client.modelDraft(selectedModel);
-        if (!current() || !props.canValidate) return;
+        if (!current() || !canCreateLocal.value) return;
         if (draft.modelId !== selectedModel || !/^[a-f0-9]{24}$/u.test(draft.draft?.fingerprint || '')) throw new Error('MODEL_RESPONSE_MISMATCH');
-        creationAttempt.value = { modelId: selectedModel, body: { confirmed: true, kind: 'validate_model', requestId: globalThis.crypto.randomUUID(), expectedDraftFingerprint: draft.draft.fingerprint } };
+        creationAttempt.value = { modelId: selectedModel, body: { confirmed: true, kind: localKind.value, requestId: globalThis.crypto.randomUUID(), expectedDraftFingerprint: draft.draft.fingerprint } };
       }
-      result = await props.client.createLocalValidationTask(selectedModel, creationAttempt.value.body);
+      const simulation = creationAttempt.value.body.kind === 'simulate_model';
+      result = await props.client[simulation ? 'createLocalSimulationTask' : 'createLocalValidationTask'](selectedModel, creationAttempt.value.body);
       if (!current()) return;
-      if (result.modelId !== selectedModel || result.task?.modelId !== selectedModel || !result.task?.localValidationTask || result.evidenceState !== 'ready') throw new Error('MODEL_RESPONSE_MISMATCH');
+      if (result.modelId !== selectedModel || result.task?.modelId !== selectedModel || result.task?.[simulation ? 'localSimulationTask' : 'localValidationTask'] !== true || result.evidenceState !== 'ready') throw new Error('MODEL_RESPONSE_MISMATCH');
       creationAttempt.value = null; createAcknowledged.value = false;
       tasks.value = [result.task, ...tasks.value.filter(task => task.id !== result.task.id)];
       await openTask(result.task);
-      if (request === generation && modelId.value === selectedModel && selectedId.value === result.task.id) notice.value = result.reused ? '已复用原创建请求，没有新建第二条任务或自动执行。' : '本地校验任务已创建，尚未确认或执行。';
+      if (request === generation && modelId.value === selectedModel && selectedId.value === result.task.id) notice.value = result.reused ? '已复用原创建请求，没有新建第二条任务或自动执行。' : '本地任务已创建，尚未确认或执行。';
     } else if (kind === 'confirm') {
       if (!taskFingerprint.value) throw new Error('TASK_REFRESH_REQUIRED');
       localToken.value = null; confirmAcknowledged.value = false;
-      result = await props.client.confirmLocalValidationTask(selectedModel, id, { confirmed: true, expectedTaskFingerprint: taskFingerprint.value });
+      const simulation = simulationTask.value;
+      result = await props.client[simulation ? 'confirmLocalSimulationTask' : 'confirmLocalValidationTask'](selectedModel, id, { confirmed: true, expectedTaskFingerprint: taskFingerprint.value });
       if (!current() || !props.canConfirm) return;
-      if (result.modelId !== selectedModel || result.task?.id !== id || result.task.modelId !== selectedModel || result.task.localValidationTask !== true || result.confirmationEvidenceState !== 'ready' || !/^[a-f0-9]{24}$/u.test(result.taskFingerprint || '')
+      if (result.modelId !== selectedModel || result.task?.id !== id || result.task.modelId !== selectedModel || result.task[simulation ? 'localSimulationTask' : 'localValidationTask'] !== true || result.confirmationEvidenceState !== 'ready' || !/^[a-f0-9]{24}$/u.test(result.taskFingerprint || '')
         || !/^[A-Za-z0-9_-]{43}$/u.test(result.confirmationToken || '') || !(Date.parse(result.expiresAt) > Date.now())) throw new Error('MODEL_RESPONSE_MISMATCH');
       localToken.value = { modelId: selectedModel, taskId: id, value: result.confirmationToken, fingerprint: result.taskFingerprint, expiresAt: result.expiresAt };
       taskFingerprint.value = result.taskFingerprint; dialogue.value = { ...dialogue.value, ...result.task };
@@ -230,14 +237,17 @@ async function localAction(kind) {
     } else if (kind === 'execute') {
       const token = localToken.value; localToken.value = null; executeAcknowledged.value = false;
       if (!token || token.modelId !== selectedModel || token.taskId !== id || Date.parse(token.expiresAt) <= Date.now()) throw new Error('TOKEN_EXPIRED_OR_MISSING');
-      result = await props.client.executeLocalValidationTask(selectedModel, id, { confirmed: true, expectedTaskFingerprint: token.fingerprint, confirmationToken: token.value });
+      const simulation = simulationTask.value;
+      result = await props.client[simulation ? 'executeLocalSimulationTask' : 'executeLocalValidationTask'](selectedModel, id, { confirmed: true, expectedTaskFingerprint: token.fingerprint, confirmationToken: token.value });
       if (!current()) return;
-      if (result.modelId !== selectedModel || result.task?.id !== id || result.task.modelId !== selectedModel || result.task.localValidationTask !== true || result.executedCommand !== 'validate_model') throw new Error('MODEL_RESPONSE_MISMATCH');
+      if (result.modelId !== selectedModel || result.task?.id !== id || result.task.modelId !== selectedModel || result.task[simulation ? 'localSimulationTask' : 'localValidationTask'] !== true || result.executedCommand !== (simulation ? 'simulate_model' : 'validate_model')
+        || simulation && (result.simulation?.sourceMode !== 'synthetic' || result.simulation?.verifiesLiveSystems !== false || result.simulation?.status !== 'simulated')) throw new Error('MODEL_RESPONSE_MISMATCH');
       dialogue.value = { ...dialogue.value, ...result.task }; taskFingerprint.value = '';
-      notice.value = `本地校验任务已归档，校验状态：${result.validation?.status || '未返回'}。未发布或写入源系统。`;
+      tasks.value = tasks.value.map(task => task.id === id ? { ...task, ...result.task } : task);
+      notice.value = simulation ? `本地合成模拟任务已归档，校验状态：${result.simulation.validation?.status || '未返回'}。未连接真实系统或发布。` : `本地校验任务已归档，校验状态：${result.validation?.status || '未返回'}。未发布或写入源系统。`;
     } else if (kind === 'recover') {
       localToken.value = null; recoverAcknowledged.value = false;
-      result = await props.client.recoverLocalConfirmationEvidence(selectedModel, id, { confirmed: true });
+      result = await props.client[simulationTask.value ? 'recoverLocalSimulationEvidence' : 'recoverLocalConfirmationEvidence'](selectedModel, id, { confirmed: true });
       if (!current()) return;
       if (result.modelId !== selectedModel || result.taskId !== id || result.confirmationEvidenceState !== 'ready' || result.confirmationTokenReturned !== false) throw new Error('MODEL_RESPONSE_MISMATCH');
       dialogue.value = { ...dialogue.value, confirmationEvidenceState: 'ready' }; taskFingerprint.value = '';
@@ -254,6 +264,7 @@ async function localAction(kind) {
 }
 onMounted(loadModels);
 watch(() => props.client, () => { creationAttempt.value = null; loadModels(); });
+watch(localKind, () => { createAcknowledged.value = false; });
 watch(sourceCodesText, () => { sourceInspection.value = null; sourceAcknowledged.value = false; previewAcknowledged.value = false; });
 watch(previewText, () => { previewAcknowledged.value = false; });
 watch(previewRequestId, () => { statusGeneration++; previewRequestStatus.value = null; statusBinding.value = null; preparedProof.value = null; previewReceipt.value = null; recoveryAcknowledged.value = false; });
@@ -294,7 +305,7 @@ onBeforeUnmount(() => { generation++; detailGeneration++; clear(); });
         <button v-if="previewReceipt?.evidenceState === 'pending'" type="button" :disabled="!recoveryAcknowledged || actionBusy" @click="recoverPreview('evidence')">核验并恢复原任务证据</button>
       </template>
     </section>
-    <div v-if="modelId && canValidate" class="local-actions"><label><input v-model="createAcknowledged" type="checkbox" :disabled="actionBusy">我确认只创建本地结构校验任务，不自动执行</label><button type="button" :disabled="!createAcknowledged || actionBusy || loading || reading" @click="localAction('create')">{{ creationAttempt ? '明确恢复原创建请求' : '1. 创建本地校验任务' }}</button></div>
+    <div v-if="modelId && (canValidate || canSimulate)" class="local-actions"><label>本地任务类型<select v-model="localKind" :disabled="actionBusy || Boolean(creationAttempt)"><option v-if="canValidate" value="validate_model">结构校验</option><option v-if="canSimulate" value="simulate_model">合成模拟（不连接外部服务）</option></select></label><label><input v-model="createAcknowledged" type="checkbox" :disabled="actionBusy">我确认只创建所选本地任务，不自动执行</label><button type="button" :disabled="!canCreateLocal || !createAcknowledged || actionBusy || loading || reading" @click="localAction('create')">{{ creationAttempt ? '明确恢复原创建请求' : '1. 创建本地任务' }}</button></div>
     <p v-if="notice" role="status" class="dialogue-status">{{ notice }}</p>
     <p v-if="error" role="alert" class="browser-error">{{ error }}</p>
     <p v-if="!modelId">{{ loading ? '正在读取模型列表…' : '选择模型后加载任务，不自动选择或激活模型。' }}</p>
@@ -310,10 +321,11 @@ onBeforeUnmount(() => { generation++; detailGeneration++; clear(); });
         <div v-if="localTask && ['waiting_confirmation','retryable'].includes(dialogue.status)" class="local-actions">
           <button type="button" :disabled="actionBusy" @click="openTask({ id: selectedId })">刷新当前任务（清除旧凭证）</button>
           <template v-if="canConfirm && dialogue.confirmationEvidenceState !== 'pending'"><label><input v-model="confirmAcknowledged" type="checkbox" :disabled="actionBusy">我确认当前任务版本，只签发凭证，不执行</label><button type="button" :disabled="!confirmAcknowledged || !taskFingerprint || dialogue.evidenceState !== 'ready' || actionBusy || reading" @click="localAction('confirm')">2. 确认当前任务</button></template>
-          <template v-if="canValidate && localToken"><label><input v-model="executeAcknowledged" type="checkbox" :disabled="actionBusy">我确认执行本地结构校验，不发布或写入源系统</label><button type="button" :disabled="!executeAcknowledged || actionBusy || reading" @click="localAction('execute')">3. 执行本地校验</button></template>
+          <template v-if="canExecuteLocal && localToken"><label><input v-model="executeAcknowledged" type="checkbox" :disabled="actionBusy">我确认执行本地{{ localLabel }}，不发布或写入源系统</label><button type="button" :disabled="!executeAcknowledged || actionBusy || reading" @click="localAction('execute')">3. 执行本地{{ localLabel }}</button></template>
           <template v-if="canConfirm && dialogue.confirmationEvidenceState === 'pending'"><label><input v-model="recoverAcknowledged" type="checkbox" :disabled="actionBusy">仅恢复既有确认证据，不重签或执行</label><button type="button" :disabled="!recoverAcknowledged || actionBusy" @click="localAction('recover')">恢复确认证据</button></template>
         </div>
         <p v-if="reading" role="status">正在复验身份、模型与任务引用…</p>
+        <p v-if="!reading && simulationTask && dialogue.status === 'completed' && dialogue.simulation" role="status">合成模拟结果：{{ dialogue.simulation.validation?.status }} · {{ dialogue.simulation.nodeCount }} 个节点 / {{ dialogue.simulation.relationshipCount }} 条关系。仅本地合成数据，不代表真实业务验收。</p>
         <template v-else-if="dialogue"><p class="dialogue-status">{{ statusLabel(dialogue.status) }} · 任务证据：{{ dialogue.evidenceState }} · 确认证据：{{ dialogue.confirmationEvidenceState || '未要求或旧记录' }} · 仅查看</p><div v-for="(item, index) in dialogue.messages" :key="index" :class="['model-message', item.role]"><strong>{{ item.role === 'user' ? '我' : '语义 Agent' }}</strong><p>{{ item.content }}</p><small v-if="item.time">{{ item.time }}</small></div></template>
         <p v-else>选择任务查看自己的对话。审核权限不会授予他人的聊天或私有资料访问权限。</p>
       </article>

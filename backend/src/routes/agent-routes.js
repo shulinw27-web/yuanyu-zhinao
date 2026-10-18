@@ -1,6 +1,7 @@
 import { normalizeAgentMessageBody } from '@healthcare-ai/api-contracts';
 import {
   correctAgentLongTermMemory,
+  agentPublishedModels,
   archiveAgentConversation,
   cancelPrivateAgentCommand,
   cancelAgentLongTask,
@@ -60,6 +61,19 @@ function resolveCommandRole(role, identity) {
 }
 
 export async function handleAgentRoutes({ req, res, url, role, agentIdentity, effectiveAccess, selectActionRole, denyButton, readBody, send }) {
+  const modelConversation = url.pathname.match(/^\/api\/agent\/published-models\/([^/]+)\/conversations$/u);
+  if (modelConversation) {
+    if (req.method !== 'POST' || url.search) { send(res, 400, { message: '创建结构会话需要明确POST及版本确认。', code: 'AGENT_MODEL_CONVERSATION_INPUT_INVALID' }); return true; }
+    const result = await agentPublishedModels.createConversation({ identityScope: agentIdentity, modelId: modelConversation[1], body: await readBody(req) });
+    send(res, result.error ? result.status || 409 : 201, result.error ? { message: result.error, code: result.code, ...(result.conversationMayHaveCommitted ? { conversationMayHaveCommitted: true } : {}) } : result); return true;
+  }
+  const publishedModel = url.pathname.match(/^\/api\/agent\/published-models(?:\/([^/]+))?$/u);
+  if (publishedModel) {
+    if (req.method !== 'GET' || url.search) { send(res, 400, { message: '模型定义只接受明确模型路径的只读请求。', code: 'AGENT_MODEL_REQUEST_INVALID' }); return true; }
+    const options = { identityScope: agentIdentity, ...(publishedModel[1] === undefined ? {} : { modelId: publishedModel[1] }) };
+    const result = await (publishedModel[1] === undefined ? agentPublishedModels.list(options) : agentPublishedModels.definition(options));
+    send(res, result.error ? result.status : 200, result.error ? { message: result.error, code: result.code } : result); return true;
+  }
   if (req.method === 'GET' && url.pathname === '/api/agent/runtime') { send(res, 200, await getPrivateAgentStatus(role, agentIdentity)); return true; }
   if (req.method === 'GET' && url.pathname === '/api/agent/authorization') { send(res, 200, getZhiNaoAuthorizationProfile(role)); return true; }
   if (req.method === 'GET' && url.pathname === '/api/agent/model-config') { send(res, 200, getModelConnectionConfiguration()); return true; }
@@ -146,6 +160,7 @@ export async function handleAgentRoutes({ req, res, url, role, agentIdentity, ef
   if (req.method === 'GET' && url.pathname === '/api/agent/conversations') { send(res, 200, { items: await listAgentConversations(agentIdentity, effectiveAccess), limits: getAgentConversationLimits() }); return true; }
   if (req.method === 'POST' && url.pathname === '/api/agent/conversations') {
     const body = await readBody(req);
+    if (!body || Array.isArray(body) || ['modelId', 'modelBinding', 'modelVersion', 'modelFingerprint'].some(key => Object.hasOwn(body, key))) { send(res, 400, { message: '普通任务不能夹带模型绑定，请从已发布模型入口创建结构会话。', code: 'AGENT_MODEL_BINDING_INVALID' }); return true; }
     const result = await createAgentConversation({ roleId: role, identityScope: agentIdentity, accessContext: effectiveAccess, title: body.title });
     send(res, result.error ? 400 : 201, result.error ? { message: result.error, code: result.code } : result);
     return true;
@@ -197,6 +212,10 @@ export async function handleAgentRoutes({ req, res, url, role, agentIdentity, ef
     const conversationId = String(input.conversationId || '').trim();
     const context = conversationId ? await getAgentConversationContext(conversationId, agentIdentity, effectiveAccess, input.text || '') : null;
     if (conversationId && !context) { send(res, 404, { message: '智脑任务不存在、已归档或不属于当前用户。', code: 'AGENT_CONVERSATION_NOT_FOUND' }); return true; }
+    if (context?.modelBinding) {
+      const result = await agentPublishedModels.answerConversation({ identityScope: agentIdentity, input });
+      send(res, result.error ? result.status || 409 : 200, result.error ? { message: result.error, code: result.code, ...(result.conversationMayHaveCommitted ? { conversationMayHaveCommitted: true } : {}) } : result); return true;
+    }
     const result = await runPrivateAgent(input, actionRole, agentIdentity, {
       resolveCommandRole: () => resolveCommandRole(role, agentIdentity),
       requestId: res.requestId,
@@ -217,6 +236,7 @@ export async function handleAgentRoutes({ req, res, url, role, agentIdentity, ef
 
   if (req.method === 'POST' && url.pathname === '/api/agent/execute') {
     const body = await readBody(req);
+    if (body.conversationId && (await getAgentConversation(String(body.conversationId), agentIdentity, effectiveAccess))?.modelBinding) { send(res, 403, { message: '结构咨询不能执行或关联业务命令。', code: 'AGENT_MODEL_ACTION_FORBIDDEN' }); return true; }
     if (!selectActionRole('agent.command.execute')) {
       const evidenceTrace = await createDeniedAgentExecutionTrace({ roleId: role, identityScope: agentIdentity, runId: body.runId, commandId: body.commandId, reason: '当前有效权限未授予 agent.command.execute。', requestId: res.requestId });
       send(res, 403, { message: '当前有效权限未授予按钮操作：agent.command.execute。', code: 'BUTTON_PERMISSION_DENIED', traceId: evidenceTrace.id, evidenceTrace });
@@ -238,6 +258,7 @@ export async function handleAgentRoutes({ req, res, url, role, agentIdentity, ef
   }
   if (req.method === 'POST' && url.pathname === '/api/agent/cancel') {
     const body = await readBody(req);
+    if (body.conversationId && (await getAgentConversation(String(body.conversationId), agentIdentity, effectiveAccess))?.modelBinding) { send(res, 403, { message: '结构咨询不能关联业务命令。', code: 'AGENT_MODEL_ACTION_FORBIDDEN' }); return true; }
     const origin = await getAgentRunOriginContext(body.runId, agentIdentity);
     if (!origin || !effectiveAccess.roleIds.includes(origin.roleId)) {
       send(res, 403, { message: '智脑无法撤回该动作：原任务角色已失效或任务不属于当前用户。', code: 'AGENT_ORIGIN_ROLE_DENIED' });

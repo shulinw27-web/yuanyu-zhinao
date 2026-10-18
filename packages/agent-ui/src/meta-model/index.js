@@ -2,6 +2,7 @@
 export { default as CoreMetaObjectLayer } from './CoreMetaObjectLayer.vue';
 export { default as OAMetaModelStudio } from './OAMetaModelStudio.vue';
 export { default as OntologyGraph } from './OntologyGraph.vue';
+export { default as PublishedModelPanel } from './PublishedModelPanel.vue';
 export { default as OntologyWorkspaceTools } from './OntologyWorkspaceTools.vue';
 export { default as OntologySavedViewsPanel } from './OntologySavedViewsPanel.vue';
 export { default as OntologyCaseReplay } from './OntologyCaseReplay.vue';

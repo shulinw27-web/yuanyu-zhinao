@@ -5,6 +5,7 @@ import { rememberAgentLongTermGoal } from './agent-run-store.js';
 import { structuredMemoryPrompt, updateStructuredConversationMemory } from './agent-structured-memory-service.js';
 import { boundedMaterial, conversationMaterial } from './agent-turn-understanding-service.js';
 import { conversationDocuments, indexScannedMaterials, selectConversationMaterial } from './conversation-material-index.js';
+import { validAgentModelBinding, agentModelBindingsMatch } from './agent-model-binding.js';
 
 const NAMESPACE = 'agent_conversations';
 const SUBJECT_INDEX_NAMESPACE = 'agent_conversation_subjects';
@@ -106,6 +107,7 @@ const publicConversation = (conversation, { includeMessages = false, accessConte
   title: conversation.title,
   status: conversation.status,
   roleId: conversation.roleId,
+  ...(conversation.modelBinding ? { modelBinding: structuredClone(conversation.modelBinding) } : {}),
   createdAt: conversation.createdAt,
   updatedAt: conversation.updatedAt,
   context: accessChanged ? { ...contextUsage(conversation), summary: '', structuredMemory: null, summaryHash: null } : contextUsage(conversation),
@@ -164,7 +166,8 @@ const trimSubjectConversations = async (identityScope) => {
   }
 };
 
-export async function createAgentConversation({ roleId, identityScope: suppliedIdentity, accessContext = null, title = '新的智脑任务' }) {
+export async function createAgentConversation({ roleId, identityScope: suppliedIdentity, accessContext = null, title = '新的智脑任务', modelBinding = null }) {
+  if (modelBinding !== null && !validAgentModelBinding(modelBinding)) return { error: '模型会话绑定无效。', code: 'AGENT_MODEL_BINDING_INVALID' };
   const identityScope = normalizeIdentity(suppliedIdentity);
   if (!identityScope) return { error: '必须使用已认证身份创建智脑任务。', code: 'AGENT_IDENTITY_REQUIRED' };
   const createdAt = now();
@@ -174,6 +177,7 @@ export async function createAgentConversation({ roleId, identityScope: suppliedI
     tenantId: identityScope.tenantId,
     subjectId: identityScope.subjectId,
     roleId,
+    ...(modelBinding ? { modelBinding: structuredClone(modelBinding) } : {}),
     title: normalizeUntrustedText(title).slice(0, 80) || '新的智脑任务',
     status: 'active',
     messages: [],
@@ -257,6 +261,7 @@ export async function pinAgentConversationGoal(conversationId, identityScope, ac
   if (!identity) return { error: '必须使用已认证身份固定任务。', code: 'AGENT_IDENTITY_REQUIRED' };
   const conversation = postgresRepository ? await postgresRepository.readState(NAMESPACE, conversationId) : readState(NAMESPACE, conversationId);
   if (!owns(conversation, identity) || conversation.status !== 'active') return { error: '未找到可固定的活动任务。', code: 'AGENT_CONVERSATION_NOT_FOUND' };
+  if (conversation.modelBinding) return { error: '结构咨询不能固定为跨模型业务记忆。', code: 'AGENT_MODEL_MEMORY_FORBIDDEN' };
   const goal = String(conversation.task?.goal || '').trim();
   if (!goal) return { error: '当前任务尚无可固定的业务目标。', code: 'AGENT_TASK_GOAL_MISSING' };
   const remembered = await rememberAgentLongTermGoal({ roleId: conversation.roleId, identityScope, goal, domain: conversation.task?.primaryDomain || null });
@@ -274,6 +279,7 @@ export async function getAgentConversationContext(conversationId, identityScope,
   const identity = normalizeIdentity(identityScope);
   const conversation = identity ? (postgresRepository ? await postgresRepository.readState(NAMESPACE, conversationId) : readState(NAMESPACE, conversationId)) : null;
   if (!owns(conversation, identity) || conversation.status !== 'active') return null;
+  if (conversation.modelBinding && !validAgentModelBinding(conversation.modelBinding)) return null;
   const currentAccessFingerprint = authorizationFingerprint(accessContext);
   const accessUnchanged = !currentAccessFingerprint || !conversation.context.accessFingerprint || currentAccessFingerprint === conversation.context.accessFingerprint;
   const recentMessages = conversation.messages.filter((message) => message.type !== 'agent' || !message.accessFingerprint || !currentAccessFingerprint || message.accessFingerprint === currentAccessFingerprint);
@@ -292,6 +298,7 @@ export async function getAgentConversationContext(conversationId, identityScope,
   ].filter(Boolean).join('\n');
   return {
     conversationId: conversation.id,
+    ...(conversation.modelBinding ? { modelBinding: structuredClone(conversation.modelBinding), modelObjectIds: [...(conversation.modelContext?.objectIds || [])], modelConversationRevision: conversation.messages.length } : {}),
     materialRetrieval: accessUnchanged ? selectConversationMaterial(conversation.materialIndex || [], query) : { text: '', selected: 0, total: 0 },
     prompt: trustedPrompt.slice(0, 32_000),
     taskGoal: conversation.task?.goal || null,
@@ -303,11 +310,14 @@ export async function getAgentConversationContext(conversationId, identityScope,
   };
 }
 
-export async function recordAgentConversationExchange({ conversationId, identityScope, roleId, accessContext = null, userText, response }) {
+export async function recordAgentConversationExchange({ conversationId, identityScope, roleId, accessContext = null, userText, response, expectedModelRevision }) {
   const identity = normalizeIdentity(identityScope);
   if (!identity) return null;
   const mutation = (conversation) => {
     if (!owns(conversation, identity) || conversation.status !== 'active') return { commit: false, result: null };
+    if (conversation.modelBinding && (!Number.isSafeInteger(expectedModelRevision) || expectedModelRevision !== conversation.messages.length)) return { commit: false, result: null };
+    if (conversation.modelBinding ? !agentModelBindingsMatch(conversation.modelBinding, response?.modelBinding) || response?.command || response?.runId : response?.modelBinding) return { commit: false, result: null };
+    if (conversation.modelBinding) conversation.modelContext = { objectIds: Array.isArray(response?.schemaObjectIds) ? response.schemaObjectIds.filter(id => typeof id === 'string' && id.length <= 64).slice(0, 3) : [] };
     const createdAt = now();
     const currentAccessFingerprint = authorizationFingerprint(accessContext);
     if (currentAccessFingerprint && conversation.context.accessFingerprint && currentAccessFingerprint !== conversation.context.accessFingerprint) {
@@ -387,6 +397,7 @@ export async function recordAgentConversationTaskOutcome({ conversationId, ident
   if (!identity) return null;
   const mutation = (conversation) => {
     if (!owns(conversation, identity) || conversation.status !== 'active') return { commit: false, result: null };
+    if (conversation.modelBinding) return { commit: false, result: null };
     const createdAt = now();
     const currentAccessFingerprint = authorizationFingerprint(accessContext);
     const agent = safeStoredText(response?.text || '任务状态已更新。', 'conversation_agent_outcome');

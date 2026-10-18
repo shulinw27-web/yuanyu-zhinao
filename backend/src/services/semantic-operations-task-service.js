@@ -362,6 +362,7 @@ const commandLabel = {
   inspect_status: '读取当前语义层状态'
 };
 
+const taskCommandLabel = task => task.command === 'simulate_model' && task.routing?.reason === 'explicit_local_simulation_task' ? '运行本地合成模拟（不连接外部服务）' : commandLabel[task.command] || null;
 const publicTask = (task) => task && ({
   evidenceState: task.traceProvisioning || (task.traceId ? 'existing' : 'not_recorded'),
   creationMode: task.creationMode || 'configured_agent',
@@ -382,7 +383,7 @@ const publicTask = (task) => task && ({
   request: task.request,
   plan: task.plan,
   command: task.command,
-  commandLabel: commandLabel[task.command] || null,
+  commandLabel: taskCommandLabel(task),
   requiredPermission: task.requiredPermission,
   reviewPermission: reviewPermissionOf(task),
   confirmationRequired: task.confirmationRequired,
@@ -999,7 +1000,7 @@ const reserveExecution = ({ id, identityScope, accessContext, confirmationToken,
   task.updatedAt = startedAt;
   task.execution = { attempt: (task.execution?.attempt || 0) + 1, startedAt, leaseToken: randomBytes(24).toString('base64url'), leaseExpiresAt: new Date(Date.now() + 2 * 60 * 1000).toISOString() };
   task.confirmation = { ...task.confirmation, state: 'consumed', tokenHash: null, consumedAt: startedAt };
-  task.events.push({ time: startedAt, type: 'execution_started', detail: commandLabel[task.command] });
+  task.events.push({ time: startedAt, type: 'execution_started', detail: taskCommandLabel(task) });
   index[id] = task;
   return { value: index, result: { task: structuredClone(task) } };
   });
@@ -1025,8 +1026,8 @@ const finalizeExecution = ({ id, identityScope, accessContext, result, leaseToke
   } else {
     task.status = 'completed';
     task.result = result;
-    task.response = task.command === 'apply_proposal' ? result.message : `${commandLabel[task.command]}已完成，结果已写入受控审计记录。`;
-    task.events.push({ time: task.updatedAt, type: 'execution_completed', detail: commandLabel[task.command] });
+    task.response = task.command === 'apply_proposal' ? result.message : `${taskCommandLabel(task)}已完成，结果已写入受控审计记录。`;
+    task.events.push({ time: task.updatedAt, type: 'execution_completed', detail: taskCommandLabel(task) });
   }
   index[id] = task;
   return { value: index, result: result.error
@@ -1034,7 +1035,7 @@ const finalizeExecution = ({ id, identityScope, accessContext, result, leaseToke
     : { task: publicTask(task), result } };
 });
 
-export async function executeSemanticOperationsTask({ taskId: id, role, identityScope, accessContext, confirmationToken, expectedTaskFingerprint, executionAdmission }) {
+export async function executeSemanticOperationsTask({ taskId: id, role, identityScope, accessContext, confirmationToken, expectedTaskFingerprint, executionAdmission, localSimulationOnly = false }) {
   try { await assertCurrentSemanticModelAdmission(); }
   catch { return { error: '模型工作区准入已失效，未执行任务。', code: 'SEMANTIC_MODEL_WORKSPACE_REVOKED' }; }
   const existing = (await getIndex())[id];
@@ -1067,8 +1068,9 @@ export async function executeSemanticOperationsTask({ taskId: id, role, identity
     } else if (task.command === 'validate_model') {
       result = await validateOAMetaModelDraft(role);
     } else if (task.command === 'simulate_model') {
-      result = await simulateBuildOAMetaModel(role);
-      if (!result.error) {
+      if (localSimulationOnly && (task.routing?.reason !== 'explicit_local_simulation_task' || !/^[a-f0-9]{24}$/u.test(task.reviewContext?.draftFingerprint || ''))) throw new Error('LOCAL_SIMULATION_TASK_BINDING_INVALID');
+      result = await simulateBuildOAMetaModel(role, localSimulationOnly ? { expectedFingerprint: task.reviewContext.draftFingerprint } : {});
+      if (!result.error && !localSimulationOnly) {
         const semanticValidation = await validateSemanticaModelDefinition(result.metaModel);
         result = { ...result, semanticValidation };
         if (semanticValidation.status === 'failed' || semanticValidation.status === 'unavailable') {

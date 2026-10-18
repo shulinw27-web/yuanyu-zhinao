@@ -208,6 +208,70 @@ paths:
         '400': { description: 方法、查询或请求载荷无效 }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { description: 草稿/任务/权限/证据变化；保留taskMayHaveCommitted与evidencePending，不自动重试 }
+  /semantic-operations/models/{modelId}/local-simulation-tasks:
+    post:
+      operationId: createLocalSimulationTask
+      x-button-permission: meta_model.simulate
+      description: 仅创建本地合成模拟任务；请求号幂等、草稿CAS和所有者隔离。不自动确认/执行，不调用模型、Python服务或上游。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LocalSimulationTaskRequest' } } }
+      responses:
+        '201': { description: 创建待确认任务及证据回执 }
+        '200': { description: 原请求复用，不自动执行 }
+        '400': { description: 方法、查询、命令或请求体无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 版本冲突或可能已提交；核对状态，不自动重试 }
+  /semantic-operations/models/{modelId}/tasks/{taskId}/simulation-confirm:
+    post:
+      operationId: confirmLocalSimulationTask
+      x-button-permission: meta_model.simulate
+      description: 只允许当前所有者的本地合成模拟任务，保留任务审核权限、草稿版本及确认证据门禁。签发一次性凭证但不执行。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string } }
+        - { in: path, name: taskId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LocalTaskConfirmationRequest' } } }
+      responses:
+        '200': { description: 当前任务摘要、taskFingerprint、内存使用的一次性凭证及有效期 }
+        '400': { description: 无效请求 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 旧草稿、任务或证据冲突；不签发新凭证 }
+  /semantic-operations/models/{modelId}/tasks/{taskId}/simulation-execute:
+    post:
+      operationId: executeLocalSimulationTask
+      x-button-permission: meta_model.simulate
+      description: 消费匹配版本的一次性凭证后执行本地合成模拟，事务内核对草稿指纹。仅返回有界统计及校验摘要，不返回样本、材料或凭据，不调用外部服务，不发布。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string } }
+        - { in: path, name: taskId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LocalTaskExecutionRequest' } } }
+      responses:
+        '200': { description: 已归档任务与simulation摘要，sourceMode为synthetic，verifiesLiveSystems为false }
+        '400': { description: 无效请求 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 拒绝重复凭证/旧版本，或结果不确定；不自动重试 }
+  /semantic-operations/models/{modelId}/tasks/{taskId}/simulation-evidence-recover:
+    post:
+      operationId: recoverLocalSimulationEvidence
+      x-button-permission: meta_model.simulate
+      description: 仅恢复既有模拟任务的确认证据，不重签凭证或执行；缺失原记录时拒绝补造。
+      parameters:
+        - { in: path, name: modelId, required: true, schema: { type: string } }
+        - { in: path, name: taskId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [confirmed], properties: { confirmed: { type: boolean, const: true } } } } }
+      responses:
+        '200': { description: 证据状态，confirmationTokenReturned为false }
+        '400': { description: 无效请求 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 引用、权限或证据发生变化 }
   /semantic-operations/models/{modelId}/tasks/{taskId}/adoption-review:
     get:
       operationId: reviewAdoptionTask
@@ -810,6 +874,82 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: 当前租户不存在该事件 }
         '409': { description: 事件不是死信状态 }
+  /agent/published-models:
+    get:
+      tags: [Agent]
+      operationId: listAgentPublishedModels
+      x-button-permission: agent.prompt.run
+      description: 当前业务主体的独立模型定义目录。要求智脑页面权限及每模型显式metadata授权；不继承默认模型授权。只含已登记且发布记录与完成锁一致的结构摘要，不返回图或底层记录，不切换聊天模型、不启用业务读取。不接受查询参数或POST。
+      responses:
+        '200':
+          description: 授权目录，未授权和未发布模型不出现
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [contentScope, runtimeReadEnabled, chatSelectionEnabled, models]
+                properties:
+                  contentScope: { type: string, const: published_model_catalog_only }
+                  runtimeReadEnabled: { type: boolean, const: false }
+                  chatSelectionEnabled: { type: boolean, const: false }
+                  models: { type: array, maxItems: 31, items: { $ref: '#/components/schemas/AgentPublishedModelSummary' } }
+        '400': { description: 无效方法或额外参数 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 授权/登记/发布记录变化或结构超预算，拒绝部分成功 }
+  /agent/published-models/{modelId}:
+    get:
+      tags: [Agent]
+      operationId: readAgentPublishedModel
+      x-button-permission: agent.prompt.run
+      description: 读取指定独立模型的已发布结构快照，非草稿；最多200对象/400关系/每对象100字段，不返回样本、规则表达式、连接设置、部署标识或凭据。只读结构不是业务事实或执行授权；旧缺失原始modelId的发布记录需由运营人员核对后重新受控发布，不能靠读取器补造归属。
+      parameters:
+        - { name: modelId, in: path, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$' } }
+      responses:
+        '200':
+          description: 有界结构图及发布版本
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [contentScope, model]
+                properties:
+                  contentScope: { type: string, const: published_schema_only }
+                  model:
+                    allOf:
+                      - { $ref: '#/components/schemas/AgentPublishedModelSummary' }
+                      - type: object
+                        required: [graph]
+                        properties:
+                          graph:
+                            type: object
+                            additionalProperties: false
+                            required: [nodes, edges]
+                            properties:
+                              nodes: { type: array, minItems: 1, maxItems: 200, items: { $ref: '#/components/schemas/AgentPublishedModelNode' } }
+                              edges: { type: array, maxItems: 400, items: { $ref: '#/components/schemas/AgentPublishedModelEdge' } }
+        '400': { description: 无效标识、方法或额外参数；默认模型不走此入口 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 当前身份下没有该已发布模型，不透露未授权模型 }
+        '409': { description: 版本、绑定、权限或结构预算复验失败 }
+  /agent/published-models/{modelId}/conversations:
+    post:
+      tags: [Agent]
+      operationId: createModelSchemaConversation
+      x-button-permission: agent.prompt.run
+      description: 明确确认当前已发布模型版本后新建不可切换的结构咨询会话。实际IAM及显式模型metadata权限复验；只解释对象/字段/关系，不调用大模型或连接器，不继承普通业务会话、附件或全局记忆。不接受查询参数/身份/模型覆盖。未知回执可能已创建，不能自动重发，应先读取自己的任务列表核对。
+      parameters:
+        - { name: modelId, in: path, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$' } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ModelSchemaConversationRequest' } } }
+      responses:
+        '201': { description: 固定agent-model-binding.v1绑定的个人结构会话；contentScope=model_bound_schema_conversation，runtimeReadEnabled=false }
+        '400': { description: 请求未明确确认、参数或方法无效 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 当前身份下没有该已发布模型 }
+        '409': { description: 发布版本/权限/会话配额变化或不确定写回执；可能含conversationMayHaveCommitted=true，不自动重试 }
   /agent/workflow-context:
     get:
       tags: [Agent]
@@ -1946,6 +2086,7 @@ paths:
     post:
       tags: [Agent]
       operationId: runAgent
+      description: 普通业务会话沿用现有Agent；绑定published_schema_only的会话仅运行确定性结构咨询，不查询业务数据、不调用模型或源系统。对象按名称/编码显式匹配，最多三个，允许同会话代词续问及明确纠正；不承诺任意自然语言理解。新发布版本/撤权拒绝继续，不回退默认模型。消息内modelId/modelBinding/modelVersion/modelFingerprint一律拒绝，绑定只能由受控创建决定。
       x-button-permission: agent.prompt.run
       requestBody:
         required: true
@@ -1964,6 +2105,8 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 会话不属于当前主体、已归档或当前身份不能读取绑定模型 }
+        '409': { description: 绑定的发布版本/权限/会话修订变化或保存回执不确定；可能含conversationMayHaveCommitted=true，不返回伪造成功，不自动重发 }
   /agent/execute:
     post:
       tags: [Agent]
@@ -2538,6 +2681,57 @@ components:
         executionEnabled: { type: boolean, const: false }
         contentReturned: { type: boolean, const: false }
         runtimeReadEnabled: { type: boolean, const: false }
+    AgentModelBinding:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, mode, modelId, version, fingerprint]
+      properties:
+        schemaVersion: { type: string, const: agent-model-binding.v1 }
+        mode: { type: string, const: published_schema_only }
+        modelId: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$' }
+        version: { type: string, minLength: 1, maxLength: 120 }
+        fingerprint: { type: string, pattern: '^[a-f0-9]{24}$' }
+    ModelSchemaConversationRequest:
+      type: object
+      additionalProperties: false
+      required: [confirmed, expectedVersion, expectedFingerprint]
+      properties:
+        confirmed: { type: boolean, const: true }
+        expectedVersion: { type: string, minLength: 1, maxLength: 120 }
+        expectedFingerprint: { type: string, pattern: '^[a-f0-9]{24}$' }
+    AgentPublishedModelSummary:
+      type: object
+      required: [modelId, label, version, fingerprint, publishedAt, authority, runtimeReadEnabled, chatSelectionEnabled, nodeCount, relationshipCount]
+      properties:
+        modelId: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$' }
+        label: { type: string, maxLength: 80 }
+        version: { type: string, maxLength: 120 }
+        fingerprint: { type: string, pattern: '^[a-f0-9]{24}$' }
+        publishedAt: { type: string, maxLength: 40 }
+        authority: { type: string, const: published_schema_not_business_facts_or_permissions }
+        runtimeReadEnabled: { type: boolean, const: false }
+        chatSelectionEnabled: { type: boolean, const: false }
+        nodeCount: { type: integer, minimum: 1, maximum: 200 }
+        relationshipCount: { type: integer, minimum: 0, maximum: 400 }
+    AgentPublishedModelNode:
+      type: object
+      additionalProperties: false
+      required: [id, label, key, fields, sourceSystems]
+      properties:
+        id: { type: string, maxLength: 64 }
+        label: { type: string, maxLength: 160 }
+        key: { type: string, maxLength: 64 }
+        fields: { type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: { type: string, maxLength: 64 } }
+        sourceSystems: { type: array, maxItems: 16, items: { type: string, maxLength: 40 } }
+    AgentPublishedModelEdge:
+      type: object
+      additionalProperties: false
+      required: [from, to, predicate]
+      properties:
+        from: { type: string, maxLength: 64 }
+        to: { type: string, maxLength: 64 }
+        predicate: { type: string, maxLength: 80 }
+        cardinality: { type: string, enum: ['1:1', '1:n', 'n:1', 'n:n'] }
     LocalValidationTaskRequest:
       type: object
       additionalProperties: false
@@ -2545,6 +2739,15 @@ components:
       properties:
         confirmed: { type: boolean, const: true }
         kind: { type: string, const: validate_model }
+        requestId: { type: string, pattern: '^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$' }
+        expectedDraftFingerprint: { type: string, pattern: '^[a-f0-9]{24}$' }
+    LocalSimulationTaskRequest:
+      type: object
+      additionalProperties: false
+      required: [confirmed, kind, requestId, expectedDraftFingerprint]
+      properties:
+        confirmed: { type: boolean, const: true }
+        kind: { type: string, const: simulate_model }
         requestId: { type: string, pattern: '^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$' }
         expectedDraftFingerprint: { type: string, pattern: '^[a-f0-9]{24}$' }
     LocalTaskConfirmationRequest:

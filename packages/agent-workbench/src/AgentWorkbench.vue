@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { createAgentClient } from '@healthcare-ai/agent-sdk';
 import { KnowledgeLibraryPanel, MemoryReviewPanel } from '@healthcare-ai/agent-ui/knowledge';
 import { AnomalyAssistantPanel } from '@healthcare-ai/agent-ui/agent';
-import { OntologyGraph } from '@healthcare-ai/agent-ui/meta-model';
+import { OntologyGraph, PublishedModelPanel } from '@healthcare-ai/agent-ui/meta-model';
 
 const props = defineProps({
   layout: { type: String, default: 'desktop' },
@@ -155,6 +155,7 @@ function mergeConversation(next) {
   if (index >= 0) conversations.value[index] = { ...conversations.value[index], ...next };
   else conversations.value.unshift(next);
 }
+const modelConversationGreeting = binding => ({ type: 'agent', text: `已绑定 ${binding.modelId} 的 ${binding.version} 版本。这里只解释已发布对象、字段、来源与关系；不查询实时业务数据，不执行或发布。请指定对象名称或编码。`, createdAt: new Date().toISOString() });
 
 async function selectConversation(conversationId) {
   activeConversationId.value = conversationId;
@@ -164,7 +165,7 @@ async function selectConversation(conversationId) {
     try {
       const detail = await client.agentConversation(conversationId);
       mergeConversation(detail);
-      state.messages = detail.messages?.length ? detail.messages : [greeting()];
+      state.messages = detail.messages?.length ? detail.messages : [detail.modelBinding ? modelConversationGreeting(detail.modelBinding) : greeting()];
       state.loaded = true;
     } catch (cause) {
       setError(cause, '无法加载该智脑任务。');
@@ -187,6 +188,14 @@ async function startConversation() {
   } catch (cause) {
     setError(cause, '无法创建新的智脑任务。');
   }
+}
+async function openModelConversation(created) {
+  if (!created?.id || created.modelBinding?.mode !== 'published_schema_only') return;
+  mergeConversation(created);
+  const state = ensureTaskState(created.id);
+  state.messages = [modelConversationGreeting(created.modelBinding)];
+  state.loaded = true; state.pending = null; state.attachments = [];
+  activeConversationId.value = created.id; view.value = 'assistant'; await scrollToLatest();
 }
 
 async function loadConversations() {
@@ -780,7 +789,7 @@ onUnmounted(() => {
         <template v-if="view === 'assistant'">
           <div ref="chatViewport" class="conversation-viewport">
             <div class="conversation-content">
-              <div class="conversation-heading"><span class="agent-orb">Z</span><div><span>元域智脑</span><h2>今天想聊聊什么，或推进什么工作？</h2><p>用自然语言说出问题、想法或目标；智脑会判断是否需要进入受控任务流程。</p></div></div>
+              <div class="conversation-heading"><span class="agent-orb">Z</span><div><span>元域智脑</span><h2>{{ conversation?.modelBinding ? '已发布模型结构咨询' : '今天想聊聊什么，或推进什么工作？' }}</h2><p v-if="conversation?.modelBinding">{{ conversation.modelBinding.modelId }} · {{ conversation.modelBinding.version }} · 仅结构解释；不查询业务数据、不执行或发布。更换模型或版本需新建结构会话。</p><p v-else>用自然语言说出问题、想法或目标；智脑会判断是否需要进入受控任务流程。</p></div></div>
               <div v-if="!isDesktop" class="mobile-task-strip"><button class="create" @click="startConversation">＋</button><button v-for="task in conversations.filter((item) => item.status === 'active')" :key="task.id" :class="{ active: task.id === activeConversationId }" @click="selectConversation(task.id)"><i :class="{ running: taskStates[task.id]?.sending || taskStates[task.id]?.executing }"/>{{ task.title }}</button></div>
               <div v-if="!isDesktop" class="mobile-runtime-line"><span><i :class="{ offline: !agentHealthy }"/>{{ agentHealthy ? '智脑运行正常' : '正在同步智脑' }}</span><b>审计 {{ operations?.telemetry?.auditCoverage || '--' }} · 队列 {{ operations?.metrics?.queueDepth ?? '--' }}</b></div>
               <div v-if="!isDesktop" class="mobile-quick-actions"><button @click="send('请汇总我当前需要处理的风险、审批和任务，并按优先级给出建议。')">今日待办</button><button @click="send('请检查生产批次和原料质量风险，并列出需要我确认的事项。')">生产质控</button><button @click="send('我需要采购一批生产原料，请先生成受控协同计划。')">发起采购</button></div>
@@ -814,7 +823,7 @@ onUnmounted(() => {
             <div class="composer-wrap">
               <div v-if="attachments.length" class="attachment-strip"><div v-for="(attachment, index) in attachments" :key="`${attachment.name}-${index}`" class="attachment-chip"><span>{{ attachment.type }}</span><b>{{ attachment.name }}</b><button aria-label="移除材料" @click="attachments.splice(index, 1)">×</button></div></div>
               <textarea v-model="input" rows="1" placeholder="直接说出你的问题、想法或想推进的事情…" @keydown.enter.exact.prevent="send()"/>
-              <div class="composer-actions"><div><button aria-label="上传图片或文档" @click="attachmentInput?.click()">＋</button><button :class="{ listening }" aria-label="语音输入" @click="startVoice">{{ listening ? '●' : '◉' }}</button></div><span>Enter 发送</span><button class="send-button" :disabled="sending || (!input.trim() && !attachments.length)" aria-label="发送消息" @click="send()">↑</button></div>
+              <div class="composer-actions"><div><button v-if="!conversation?.modelBinding" aria-label="上传图片或文档" @click="attachmentInput?.click()">＋</button><button :class="{ listening }" aria-label="语音输入" @click="startVoice">{{ listening ? '●' : '◉' }}</button></div><span>Enter 发送</span><button class="send-button" :disabled="sending || (!input.trim() && !attachments.length)" aria-label="发送消息" @click="send()">↑</button></div>
               <input ref="attachmentInput" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/json,text/csv,application/yaml,text/yaml" multiple @change="selectAttachments"/>
             </div>
             <small>智脑可能会出错。重要决策请核对来源证据；业务写入必须经过权限与确认。</small>
@@ -827,7 +836,7 @@ onUnmounted(() => {
         </section>
 
         <AnomalyAssistantPanel v-else-if="view === 'anomalies'" :client="client.anomalies" />
-        <KnowledgeLibraryPanel v-else-if="view === 'knowledge'" :client="client.knowledge" :can-write="true"><MemoryReviewPanel :client="client" :snapshot="memories" @updated="memories = $event" /></KnowledgeLibraryPanel>
+        <template v-else-if="view === 'knowledge'"><PublishedModelPanel :client="client" @conversation-created="openModelConversation" /><KnowledgeLibraryPanel :client="client.knowledge" :can-write="true"><MemoryReviewPanel :client="client" :snapshot="memories" @updated="memories = $event" /></KnowledgeLibraryPanel></template>
         <section v-else class="collection-view">
           <div v-if="!workItems.length" class="empty-state"><span>✓</span><h2>当前没有待办</h2><p>需要确认、审批或复核的任务会出现在这里。</p></div>
           <article v-for="item in workItems" :key="item.id" class="collection-card task-card"><div class="card-icon">✓</div><div><span>{{ item.risk }} 风险工作项</span><h3>{{ item.title }}</h3><p>{{ item.approvers.join(' → ') }}</p><small>{{ item.id }}</small></div><em>{{ item.status || '待处理' }}</em></article>
@@ -843,7 +852,7 @@ onUnmounted(() => {
         <section v-if="desktopBridge" class="context-section artifact-context"><span class="context-label">本机工作区</span><div class="endpoint-capability"><i :class="{ ready: desktopEndpointStatus?.connected && desktopEndpointStatus?.allowed, blocked: desktopEndpointStatus && !desktopEndpointStatus.allowed }"/><b>{{ desktopEndpointStatus?.allowed ? '端侧运行环境可信在线' : desktopEndpointStatus?.connected ? '端侧版本未获信任' : desktopCapabilities ? '等待端侧心跳' : '端侧执行器不可用' }}</b><small>{{ desktopCapabilities?.tools?.length || 0 }} 个工具 · {{ desktopEndpointStatus?.appVersion ? `v${desktopEndpointStatus.appVersion}` : '版本待验证' }}</small></div><em v-if="desktopEndpointStatus?.publicKeyFingerprint" class="endpoint-proof">{{ desktopEndpointStatus.trustState }} · {{ desktopEndpointStatus.keyProtection === 'os_user_bound' ? '系统加密' : '文件保护' }} · key #{{ desktopEndpointStatus.publicKeyFingerprint.slice(0, 12) }}</em><em v-if="desktopEndpointStatus && !desktopEndpointStatus.allowed" class="endpoint-reason">{{ desktopEndpointStatus.reason }}</em><button v-for="artifact in desktopArtifacts.slice(0, 5)" :key="`${artifact.destination || 'desktop'}:${artifact.name}`" @click="openDesktopArtifact(artifact)"><b>{{ artifact.name }}</b><small>{{ artifact.workspace || '桌面\\元域智脑工作区' }} · {{ artifact.type.toUpperCase() }} · {{ formatBytes(artifact.bytes) }} · {{ new Date(artifact.modifiedAt).toLocaleString() }}</small><em>打开</em></button><small v-if="desktopCapabilities && !desktopArtifacts.length">尚无本地产物。可以指定保存到桌面、文档或下载目录；未指定时默认桌面。</small></section>
         <section v-if="activeAlert" class="context-section alert-context"><span class="context-label">{{ activeAlert.severity || 'P2' }} 优先告警 · {{ activeAlert.channel || '站内信' }}</span><h3>{{ activeAlert.title }}</h3><p>{{ activeAlert.description || activeAlert.detail }}</p><button @click="askAboutAlert()">分析此告警 <em>↗</em></button></section>
         <section v-if="operations?.telemetry?.enterpriseConnectors?.length" class="context-section connector-context"><span class="context-label">企业数据通道</span><p v-for="connector in operations.telemetry.enterpriseConnectors" :key="connector.systemId"><i :class="connector.status"/><b>{{ connector.code }}</b><small>{{ connector.status === 'ready_for_scoped_access' ? '已配置，待受控验证' : connector.status === 'not_configured' ? '本地模拟' : '配置待处理' }}</small></p><em v-if="operations.telemetry.enterpriseConnectors.some((item) => item.status === 'not_configured')">本地模拟数据不会被表述为实时企业数据。</em></section>
-        <section v-if="conversation?.task?.goal" class="context-section pin-context"><span class="context-label">当前任务目标</span><p>{{ conversation.task.goal }}</p><button :disabled="pinningMemory || currentGoalPinned" @click="pinCurrentTask">{{ currentGoalPinned ? '已固定为长期记忆' : pinningMemory ? '正在固定…' : '固定为长期记忆' }}</button><em>仅在您主动固定后保存；不会把模型推测或企业数据写入长期记忆。</em></section>
+        <section v-if="conversation?.task?.goal && !conversation.modelBinding" class="context-section pin-context"><span class="context-label">当前任务目标</span><p>{{ conversation.task.goal }}</p><button :disabled="pinningMemory || currentGoalPinned" @click="pinCurrentTask">{{ currentGoalPinned ? '已固定为长期记忆' : pinningMemory ? '正在固定…' : '固定为长期记忆' }}</button><em>仅在您主动固定后保存；不会把模型推测或企业数据写入长期记忆。</em></section>
         <section v-if="memories.length" class="context-section memory-context"><span class="context-label">长期记忆</span><p v-for="memory in memories.slice(0, 4)" :key="memory.id"><b>{{ memory.domain || '通用' }}</b><small>{{ memory.summary }}<em v-if="memory.entities?.length"> · {{ memory.entities.map((entity) => entity.id).join('、') }}</em></small><button :aria-label="`删除记忆 ${memory.summary}`" @click="forgetMemory(memory.id)">×</button></p><em>只保存安全通过的用户目标，90 天后自动清理；可随时删除。</em></section>
         <section v-if="learningProfile" class="context-section learning-context"><span class="context-label">学习与数据使用</span><button class="learning-toggle" :disabled="savingLearningProfile" @click="updateLearningSetting('workflowLearningEnabled')"><span><b>成功工作流学习</b><small>仅记录本人确认且执行成功的工具类型</small></span><i :class="{ enabled: learningProfile.workflowLearningEnabled }">{{ learningProfile.workflowLearningEnabled ? '已开启' : '默认关闭' }}</i></button><button class="learning-toggle" :disabled="savingLearningProfile" @click="updateLearningSetting('personalizationEnabled')"><span><b>个性化偏好</b><small>为后续偏好能力预留的独立授权</small></span><i :class="{ enabled: learningProfile.personalizationEnabled }">{{ learningProfile.personalizationEnabled ? '已开启' : '默认关闭' }}</i></button><div class="learning-policy"><b>企业数据</b><small>只做权限内检索，不用于模型训练</small></div><p v-for="signal in learningProfile.signals?.slice(0, 3)" :key="signal.id"><span><b>{{ signal.toolId }}</b><small>已确认成功 {{ signal.confirmedSuccessCount }} 次 · 30 天内有效</small></span><button :aria-label="`撤销学习记录 ${signal.toolId}`" @click="forgetLearningSignal(signal.id)">×</button></p><em>关闭工作流学习会立即清除全部个人学习信号；不保存原始提问和企业载荷。</em></section>
         <section class="context-section safety-context"><span class="context-label">安全边界</span><p><i/>仅使用当前身份可访问的数据</p><p><i/>模型不直接执行系统写入</p><p><i/>高风险动作需要确认与审批</p></section>

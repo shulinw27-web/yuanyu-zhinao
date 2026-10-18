@@ -88,14 +88,16 @@ export const semanticModelEvidence = {
     const identity = structuredClone(identityScope); assertSemanticTenant(identity);
     try { return await admitted(async modelId => {
       const task = (await readSemanticGovernanceState('semantic_operations_agent_tasks', 'index', {}))[taskId];
+      const simulation = task?.command === 'simulate_model' && task.routing?.reason === 'explicit_local_simulation_task';
+      const creationEvent = simulation ? 'local_simulation_task_created' : 'local_validation_task_created';
       if (!semanticModelReferenceMatches(task) || !semanticOperationsOwnerMatches(task.owner, identity) || task.originRoleId !== roleId
-        || task.command !== 'validate_model' || task.routing?.reason !== 'explicit_local_validation_task' || !task.creationRequestId || !task.traceId) throw new Error('LOCAL_TASK_BINDING_INVALID');
+        || !simulation && (task.command !== 'validate_model' || task.routing?.reason !== 'explicit_local_validation_task') || !task.creationRequestId || !task.traceId) throw new Error('LOCAL_TASK_BINDING_INVALID');
       const previous = await getAgentEvidenceTrace(task.traceId, [roleId], identity, { expectedModelId: modelId }).catch(() => null);
       if (task.traceProvisioning === 'missing') throw new Error('LOCAL_READY_TRACE_MISSING');
       if (task.traceProvisioning === 'ready') {
         const bound = previous && await getAgentEvidenceTraceInternal(task.traceId, { expectedModelId: modelId });
         if (!bound || bound.requestId !== task.id || bound.roleId !== roleId || !semanticOperationsOwnerMatches(task.owner, bound.identityScope)
-          || !previous.events.some(event => event.type === 'local_validation_task_created' && event.details?.creationRequestId === task.creationRequestId)) {
+          || !previous.events.some(event => event.type === creationEvent && event.details?.creationRequestId === task.creationRequestId)) {
           await mutateSemanticGovernanceState('semantic_operations_agent_tasks', 'index', {}, index => {
             if (JSON.stringify(index[taskId]) !== JSON.stringify(task)) return { commit: false, result: false };
             index[taskId].traceProvisioning = 'missing'; return { value: index };
@@ -106,8 +108,8 @@ export const semanticModelEvidence = {
       }
       if (task.traceProvisioning !== 'pending' || task.status !== 'waiting_confirmation' || task.confirmation?.state !== 'not_issued') throw new Error('LOCAL_TASK_STATE_CHANGED');
       await createAgentEvidenceTrace({ modelId, kind: 'semantic_operations_task', reservedTraceId: task.traceId, roleId, identityScope: identity, input: task.request, requestId: task.id });
-      await appendAgentEvidenceEvent(task.traceId, { idempotencyKey: 'local-task-creation-v1', type: 'local_validation_task_created', stage: 'planning', status: 'completed',
-        summary: '创建本地结构校验任务，等待明确确认；没有调用大模型、执行或发布。', details: { creationRequestId: task.creationRequestId, createdAt: task.createdAt } },
+      await appendAgentEvidenceEvent(task.traceId, { idempotencyKey: 'local-task-creation-v1', type: creationEvent, stage: 'planning', status: 'completed',
+        summary: '创建本地校验或合成模拟任务，等待明确确认；没有调用大模型、执行或发布。', details: { creationRequestId: task.creationRequestId, createdAt: task.createdAt } },
       { expectedModelId: modelId, expectedTenantId: expectedTenant() });
       const trace = await getAgentEvidenceTrace(task.traceId, [roleId], identity, { expectedModelId: modelId });
       if (!trace?.integrity.valid) throw new Error('LOCAL_TRACE_INVALID');

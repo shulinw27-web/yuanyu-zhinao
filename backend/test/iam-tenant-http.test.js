@@ -4,6 +4,57 @@ import { fork } from 'node:child_process';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
 
+test('isolated HTTP simulation tasks preserve command, tenant, consent and single-use boundaries', { timeout: 20000 }, async () => {
+  const probe = createServer(); await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve));
+  const port = probe.address().port; await new Promise(resolve => probe.close(resolve));
+  const child = fork('backend/test/helpers/tenant-iam-http-worker.mjs', [], {
+    execArgv: [], windowsHide: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    env: { ...process.env, NODE_ENV: 'test', NODE_TEST_CONTEXT: 'child-v8', RUNTIME_STORE_DRIVER: 'memory', IAM_STORE_DRIVER: 'runtime', IDENTITY_SESSION_STORE_DRIVER: 'runtime',
+      IDENTITY_PROVIDERS_FILE: '', DEMO_ALLOW_ROLE_HEADER: 'false', API_HOST: '127.0.0.1', PORT: String(port) }
+  });
+  let childLog = ''; child.stdout.on('data', data => { childLog += data; }); child.stderr.on('data', data => { childLog += data; });
+  const closed = once(child, 'close');
+  try {
+    const [{ sessions }] = await Promise.race([once(child, 'message'), closed.then(() => { throw new Error(`Synthetic API failed: ${childLog}`); })]);
+    const base = `http://127.0.0.1:${port}`; let ready = false;
+    for (let i = 0; i < 50; i++) {
+      try { if ((await fetch(`${base}/api/health/live`)).ok) { ready = true; break; } } catch { /* Isolated listener startup only. */ }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.equal(ready, true);
+    const models = async (tenant, path = '', body) => {
+      const response = await fetch(`${base}/api/semantic-operations/models${path}`, { method: body === undefined ? 'GET' : 'POST',
+        headers: { 'x-identity-session': sessions[tenant], 'x-client-device-id': 'test-device', 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      return { status: response.status, body: await response.json() };
+    };
+    const ids = {};
+    for (const tenant of ['http-a', 'http-b']) {
+      assert.equal((await models(tenant, '', { id: 'supply-chain', label: '合成模拟', expectedRevision: 0 })).status, 201);
+      const fp = (await models(tenant, '/supply-chain/draft')).body.draft.fingerprint;
+      const body = { confirmed: true, kind: 'simulate_model', requestId: 'a11ce000-0000-4000-8000-000000000006', expectedDraftFingerprint: fp };
+      const simulation = await models(tenant, '/supply-chain/local-simulation-tasks', body);
+      assert.equal(simulation.status, 201, JSON.stringify(simulation.body)); assert.equal(simulation.body.task.localSimulationTask, true); ids[tenant] = simulation.body.taskId;
+      const path = `/supply-chain/tasks/${simulation.body.taskId}`;
+      assert.equal((await models(tenant, '/supply-chain/local-simulation-tasks', body)).body.taskId, simulation.body.taskId);
+      assert.equal((await models(tenant, `${path}/local-confirm`, { confirmed: true, expectedTaskFingerprint: simulation.body.taskFingerprint })).body.code, 'MODEL_TASK_EXECUTION_COMMAND_UNSUPPORTED');
+      assert.equal((await models(tenant, '/supply-chain/local-simulation-tasks', { ...body, kind: 'publish_model' })).status, 400);
+      assert.equal((await models(tenant, '/supply-chain/local-simulation-tasks?executionKind=adopt', body)).status, 400);
+      assert.equal((await models(tenant, `${path}/simulation-confirm`)).status, 400);
+      assert.equal((await models(tenant, `${path}/simulation-evidence-recover`, { confirmed: true, executionKind: 'adopt' })).status, 400);
+      const confirmation = await models(tenant, `${path}/simulation-confirm`, { confirmed: true, expectedTaskFingerprint: simulation.body.taskFingerprint });
+      assert.equal(confirmation.status, 200, JSON.stringify(confirmation.body));
+      const executeBody = { confirmed: true, expectedTaskFingerprint: confirmation.body.taskFingerprint, confirmationToken: confirmation.body.confirmationToken };
+      const simulated = await models(tenant, `${path}/simulation-execute`, executeBody);
+      assert.equal(simulated.status, 200, JSON.stringify(simulated.body)); assert.equal(simulated.body.simulation.sourceMode, 'synthetic'); assert.equal(simulated.body.simulation.verifiesLiveSystems, false);
+      assert.equal((await models(tenant, `${path}/simulation-execute`, executeBody)).status, 409);
+      assert.equal((await models(tenant, `${path}/dialogue`)).body.task.simulation.sourceFingerprint, fp);
+    }
+    assert.notEqual(ids['http-a'], ids['http-b']);
+    assert.equal((await models('http-a', `/supply-chain/tasks/${ids['http-b']}/dialogue`)).status, 404);
+    assert.equal((await models('http-a', `/supply-chain/tasks/${ids['http-b']}/simulation-confirm`, { confirmed: true, expectedTaskFingerprint: 'a'.repeat(24) })).status, 403);
+  } finally { child.kill(); await closed; }
+});
+
 test('real HTTP auth → tenant IAM → permissions stays isolated; only changed tenant session is revoked', { timeout: 20000 }, async () => {
   const probe = createServer();
   await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve));

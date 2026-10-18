@@ -34,6 +34,26 @@ npm ci
 
 Electron 开发启动与同端 Web 可能争用端口；先确认已有实例。遇到端口占用不要直接终止所有 Node 进程，应核实对应服务后关闭该实例。
 
+### API 默认端口被其他项目占用
+
+不要停止其他项目。例如元域 API 改用 `15181` 时，在 API 终端设置 `$env:PORT='15181'` 后启动原配置入口。两端各自的启动终端还必须同时设置代理与 Electron 地址：只设置 `VITE_DEV_API_TARGET` 对网页有效，Electron preload 会优先使用独立配置，否则仍请求默认 `3001`。
+
+```powershell
+# 智脑启动终端
+$env:VITE_DEV_API_TARGET='http://127.0.0.1:15181'
+$env:ZHINAO_API_BASE_URL='http://127.0.0.1:15181/api'
+npm run dev:zhinao:electron
+
+# 语义运营启动终端
+$env:VITE_DEV_API_TARGET='http://127.0.0.1:15181'
+$env:SEMANTIC_OPS_API_BASE_URL='http://127.0.0.1:15181/api'
+npm run dev:semantic-ops:electron
+```
+
+修改地址后须重启桌面窗口，刷新页面不会重新注入 preload 地址。若智脑 `5184` 渲染器已经运行且代理正确，不重复启动 Vite：设置上述智脑 API 地址及 `$env:ELECTRON_RENDERER_URL='http://127.0.0.1:5184'`，运行 `npm run start:electron -w @healthcare-ai/desktop-app` 复用渲染器。接口验证应包含业务初始化请求，不能仅根据网页 HTML 或健康接口成功判断桌面请求正确。
+
+开发 Vite 页面会根据 `VITE_DEV_API_TARGET` 向 CSP 的 `connect-src` 加入该地址的精确 origin，允许本机 HTTP 或 HTTPS，拒绝非本机明文 HTTP、带凭据及控制字符的地址；不使用全端口通配符、不关闭 Electron `webSecurity`。该转换只用于开发服务，不修改生产构建的 CSP；打包桌面非默认明文端口仍需独立配置和验收，不能将本开发验证当作安装包验收。2026-10-13已复现并修复网页代理正常但桌面直连被 CSP 拦截的情况；浏览器直连15181返回200、真实Electron隔离启动无连接错误，运营端131/131、桌面组件11/11和架构10/10通过。
+
 检查 API：
 
 ```powershell
@@ -72,6 +92,16 @@ Invoke-RestMethod http://127.0.0.1:3011/health
 Worker 与 API 要使用一致的存储和租户配置。生产启动顺序与开关见 [运行配置](../modules/11-runtime-platform/CONFIGURATION.md)。
 
 ## 使用本地大模型
+
+### 智谱 GLM 私密输入（普通 API）
+
+首选统一文件：`D:\wsl\private\yuanyu-zhinao\models.json`（仓库之外，当前用户限定 ACL）。`activeProvider` 选择 `glm`、`ark`、`deepseek`、`qwen`、`kimi` 或 `compatible`；在对应 `providers` 项填 `apiKey`，已有有效 `model`/`baseUrl` 时只需要填密钥，其他空项不影响当前选择。通义/Kimi/通用兼容项未预填型号和地址，首次使用还需明确已开通的型号与官方 HTTPS 网关，不能仅填 Key 就猜测路由。原有方舟/GLM 独立文件保留，统一入口不会读取或迁移其密钥。
+
+`npm run check:models` 只检查配置，不调用大模型；通过后保留原 `PORT` 设置，使用 `npm run dev:models` 启动两端共用 API。修改文件后须重启 API（不会自动调用新供应商，不需要重装客户端）。选定模型严格固定，显式环境端点/密钥冲突或环境白名单拒绝时停止，不把文件密钥发送到其他环境端点；不回退到其他密钥。密钥仅由服务端使用，不发给 Renderer，也不输出原始 JSON/解析错误。文件为受限明文，不是加密密钥库；`models.json` 已加入 Git 忽略规则。以下独立 GLM 输入方式作为旧入口保留，今后优先使用统一文件。
+
+运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\wsl\workspace\project\demo-platform\scripts\save-glm-config.ps1"`，在本机窗口输入已开通的精确模型 ID（回车默认 `glm-5`）和隐藏的 API Key。仅保存到仓库外 `D:\wsl\private\yuanyu-zhinao\glm\glm.json`，GLM 专用目录限制当前 Windows 用户，不修改方舟文件；已有 GLM 文件拒绝覆盖。不要把密钥发到聊天、命令参数或 Git。
+
+`node scripts/glm-runtime.mjs --check-config` 只检查配置及模型白名单，不调用外部模型；配置有效后，可沿原 API 启动端口执行 `node scripts/glm-runtime.mjs`，两端共用后端 `compatible` 通道。启动明确选择该通道并保留脱敏、结构化回答、额度、权限门禁，不自动回退到方舟。默认地址限定为 `https://open.bigmodel.cn/api/paas/v4`，不接 Coding Plan；实际余额、模型权限与回答质量须在用户保存后单独联调，配置成功不是调用成功。依据：[智谱官方 GLM 接口](https://docs.bigmodel.cn/cn/guide/models/text/glm-5)。密钥保存在受限明文文件，不是 Windows 密钥库加密或企业 KMS。
 
 先独立启动兼容接口，再在启动 API 的终端设置 `AGENT_RUNTIME_MODE=local`、`LOCAL_LLM_BASE_URL`、`LOCAL_LLM_MODEL` 和 `MODEL_ALLOWLIST_JSON`。具体变量示例见 [.env.example](../../.env.example)。
 

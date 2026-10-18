@@ -5,13 +5,15 @@ import { issueIdentitySession } from '../../src/services/identity-session-servic
 import { runWithIAMStoreContext, getIAMRolePolicy, updateIAMRolePolicy, findIAMUserByAccount } from '../../src/services/iam-store.js';
 import { runWithSemanticTenant, semanticTenantStateKey } from '../../src/services/semantic-tenant-context.js';
 import { semanticModelRegistry } from '../../src/services/semantic-model-registry.js';
-import { mutateSemanticGovernanceState } from '../../src/services/semantic-governance-store.js';
+import { mutateSemanticGovernanceState, mutateSemanticGovernanceStates } from '../../src/services/semantic-governance-store.js';
 import { semanticPreviewRequests } from '../../src/domains/governance/model-preview-requests.js';
 import { modelSystemMaterials } from '../../src/domains/governance/model-system-materials.js';
 import { modelWorkspaces } from '../../src/domains/governance/model-workspaces.js';
 import { createSemanticOperationsTask } from '../../src/services/semantic-operations-task-service.js';
 import { getEffectiveAccess } from '../../src/services/access-control-service.js';
 import { getRole } from '../../src/services/authorization-service.js';
+import { semanticFingerprint } from '../../src/services/semantic-model-fingerprint.js';
+import { getOAMetaModelRuntimeTransactionEntry } from '../../src/services/meta-model-service.js';
 
 if (!process.send || process.env.RUNTIME_STORE_DRIVER !== 'memory') throw new Error('Test worker only.');
 const sessions = {};
@@ -26,6 +28,30 @@ for (const tenantId of fixtureTenants) {
 await import('../../src/app.js');
 process.send({ sessions });
 process.on('message', async message => {
+  if (message === 'seed-published-catalog') {
+    const readers = {}; const grants = {};
+    for (const tenantId of fixtureTenants) {
+      seedTenantIAM(tenantId, ['admin@demo.local', 'quality@demo.local']);
+      const admin = { tenantId, subjectId: 'admin@demo.local' };
+      await runWithSemanticTenant(admin, async () => {
+        const registered = await modelWorkspaces.register({ identityScope: admin, body: { id: 'catalog-model', label: `${tenantId}模型`, expectedRevision: 0 } });
+        if (registered.error) throw new Error('Synthetic catalog registration failed');
+        await semanticModelRegistry.withWorkspace({ role: getRole('executive'), identityScope: admin, modelId: 'catalog-model', work: async () => {
+          const draft = { objectTypes: [{ id: 'Lot', label: `${tenantId}批次`, key: 'id', fields: ['id'], sourceSystems: ['WMS'] }], relationshipTypes: [] };
+          const fingerprint = semanticFingerprint(draft); const version = 'synthetic-v1';
+          await mutateSemanticGovernanceStates([getOAMetaModelRuntimeTransactionEntry(), { name: 'lock', namespace: 'ontology_publication', key: 'current', initialValue: null }], values => {
+            values.oaRuntime.publishedModel = { tenantId, modelId: 'catalog-model', version, fingerprint, publishedAt: '2026-10-18T00:00:00.000Z', draft };
+            values.lock = { modelId: 'catalog-model', status: 'completed', version, fingerprint, target: { tenantId, modelId: 'catalog-model', deploymentId: 'synthetic-catalog' } };
+            return { values };
+          });
+        } });
+      });
+      readers[tenantId] = (await issueIdentitySession({ source: 'test', tenantId, account: 'quality@demo.local', roleId: 'quality_manager', deviceId: 'test-device' })).id;
+      grants[tenantId] = { quality_manager: { models: { 'catalog-model': { schemaVersion: 'ontology-model-grant.v1', modelId: 'catalog-model', metadata: true, objects: {} } } } };
+    }
+    process.env.ONTOLOGY_RUNTIME_GRANTS_JSON = JSON.stringify(grants);
+    process.send({ readers }); return;
+  }
   if (message === 'remove-b-publish') {
     await runWithIAMStoreContext(async () => {
       const policy = getIAMRolePolicy('executive');

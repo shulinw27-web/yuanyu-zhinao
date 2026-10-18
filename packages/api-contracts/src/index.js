@@ -34,6 +34,7 @@ export function normalizeAgentMessageBody(body) {
   const input = body.input
     ? { ...body.input }
     : { text: body.text, attachments: body.attachments, conversationId: body.conversationId };
+  if (['modelId', 'modelBinding', 'modelVersion', 'modelFingerprint'].some(key => Object.hasOwn(body, key) || Object.hasOwn(input, key))) return invalidBody('模型绑定只能由明确创建的结构会话决定，不能在消息中切换。');
   if (input.attachments !== undefined && !Array.isArray(input.attachments)) return invalidBody('attachments 必须是数组。');
   if (input.text !== undefined && typeof input.text !== 'string') return invalidBody('text 必须是字符串。');
   if (input.conversationId !== undefined && typeof input.conversationId !== 'string') return invalidBody('conversationId 必须是字符串。');

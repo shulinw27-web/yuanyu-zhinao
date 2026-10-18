@@ -26,9 +26,7 @@ export {
 } from '../../services/agent-conversation-service.js';
 export { createDeniedAgentExecutionTrace, getAgentEvidenceTrace, listAgentEvidenceTraces } from '../../services/agent-evidence-trace-service.js';
 export { configureModelConnection, getModelConnectionConfiguration } from '../../services/local-model-gateway.js';
-export { getEnterpriseConnectorObservability } from '../../services/system-integration-service.js';
 export { approveAuditExportRequest, createAuditExportRequest, generateApprovedAuditExport, listAuditExportRequests, runAuditIntegrityInspection } from '../../services/audit-governance-service.js';
-export { evaluateSecurityDetectionRules } from '../../services/security-detection-service.js';
-export { getModelGovernanceObservability, getModelGovernancePolicy } from '../../services/model-governance-service.js';
+export { agentPublishedModels } from './published-models.js';
 export { getZhiNaoAuthorizationProfile } from '../../services/zhinao-authorization-service.js';
 export { correctAgentLongTermMemory } from '../../services/agent-run-store.js';

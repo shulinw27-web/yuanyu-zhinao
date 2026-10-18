@@ -204,6 +204,18 @@ export const createAgentClient = ({ baseUrl, platform = 'web', appVersion = '0.1
     notifications: () => request('/notifications'),
     agentOperations: () => request('/agent/operations'),
     agentAuthorization: () => request('/agent/authorization'),
+    publishedModels: () => request('/agent/published-models'),
+    createModelConversation: (modelId, body) => {
+      if (typeof modelId !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId) || modelId === 'oa-governance' || !body || Array.isArray(body)
+        || Object.keys(body).some(key => !['confirmed', 'expectedVersion', 'expectedFingerprint'].includes(key)) || body.confirmed !== true
+        || typeof body.expectedVersion !== 'string' || !body.expectedVersion.trim() || body.expectedVersion.length > 120
+        || typeof body.expectedFingerprint !== 'string' || !/^[a-f0-9]{24}$/u.test(body.expectedFingerprint)) throw new TypeError('Invalid model conversation request.');
+      return request(`/agent/published-models/${encodeURIComponent(modelId)}/conversations`, { method: 'POST', body: JSON.stringify(body) });
+    },
+    publishedModel: modelId => {
+      if (typeof modelId !== 'string' || !/^[a-z][a-z0-9-]{1,63}$/u.test(modelId) || modelId === 'oa-governance') throw new TypeError('Invalid independent published model ID.');
+      return request(`/agent/published-models/${encodeURIComponent(modelId)}`);
+    },
     agentWorkItems: () => request('/agent/work-items'),
     agentRuns: () => request('/agent/runs'),
     agentRuntimeTasks: () => request('/agent/runtime-tasks'),

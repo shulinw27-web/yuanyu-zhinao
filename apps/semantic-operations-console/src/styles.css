@@ -473,15 +473,23 @@ body {
   font-size: 10px;
 }
 .ops-error {
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
   border-color: #78424b;
   color: #e5a4ad;
   background: #2c1820;
 }
 .ops-error button {
+  flex-shrink: 0;
+  white-space: nowrap;
+  min-height: 32px;
+  padding: 6px 10px;
   border: 0;
   color: #fff;
   background: transparent;
 }
+.semantic-auth .ops-error { margin: 0; line-height: 1.6; }
 .ops-message {
   border-color: #326b5d;
   color: #8adac2;
