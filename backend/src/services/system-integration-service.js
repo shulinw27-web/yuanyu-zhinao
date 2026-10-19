@@ -5,11 +5,12 @@ import { createHash } from 'node:crypto';
 import { businessIdDomains, extractQueryBusinessIds, matchingQueryBusinessIds, MAX_QUERY_BUSINESS_IDS, validateAgentReadInput } from './agent-query-service.js';
 import { buildAgentQueryPlan, matchesQueryPlan, validQueryInstant } from './agent-query-plan-service.js';
 import { admitSemanticRecord } from './semantic-record-contract-service.js';
-import { ontologyQueryFingerprint } from './ontology-read-plan-service.js';
+import { ontologyQueryFingerprint, assertLegacyOntologyConnectorScope } from './ontology-read-plan-service.js';
 
 // Typed ontology reads use a stricter connector contract than legacy snippets.
 // Fail closed on truncation, unverified coverage, redirects, or excess records.
 export async function retrieveOntologyConnectorRecords(type, query, roleId, scope) {
+  assertLegacyOntologyConnectorScope(scope);
   const systemId = type.sourceSystems[0].toLowerCase();
   const connector = configuredConnectors()[systemId];
   const endpoint = allowedEnterpriseEndpoint(connector?.endpoint);

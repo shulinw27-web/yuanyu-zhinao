@@ -10,6 +10,15 @@ const identifier = v => typeof v === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,63}$/.
 const object = (draft, id) => draft.objectTypes.find(o => o.id === id);
 const fingerprint = v => createHash('sha256').update(JSON.stringify(v)).digest('hex');
 export const ontologyQueryFingerprint = fingerprint;
+// The legacy transport has no per-model source/provenance binding. Registry
+// admission and even an explicit model grant must not make it a model connector.
+export function assertLegacyOntologyConnectorScope(scope) {
+  if (currentSemanticModel() !== DEFAULT_SEMANTIC_MODEL_ID) fail('ONTOLOGY_CONNECTOR_MODEL_BINDING_REQUIRED');
+  const validIdentityPart = (value, limit) => typeof value === 'string' && value.length > 0 && value.length <= limit
+    && value === value.trim() && !/[\u0000-\u001f\u007f]/u.test(value);
+  if (!validIdentityPart(scope?.tenantId, 120) || !validIdentityPart(scope?.subjectId, 128)
+    || scope.tenantId !== currentSemanticTenant()) fail('ONTOLOGY_CONNECTOR_SCOPE_INVALID');
+}
 const scalar = v => v === null || typeof v === 'string' || typeof v === 'boolean' || typeof v === 'number' && Number.isFinite(v);
 const binary = new Set(['add', 'sub', 'mul', 'max', 'eq', 'ne', 'and', 'or', 'gt']);
 

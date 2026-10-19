@@ -17,6 +17,51 @@ import { saveLibraryDocument } from '../src/services/knowledge-library-service.j
 import { createLocalKnowledgeProvider } from '../src/services/knowledge-evidence-service.js';
 import { selectPublishedReadPlan } from '../src/services/ontology-plan-selection.js';
 import { runPrivateAgent } from '../src/services/private-agent-service.js';
+import { retrieveOntologyConnectorRecords } from '../src/services/system-integration-service.js';
+
+test('legacy ontology transport rejects independent models and foreign scopes before any network access', async () => {
+  const previous = process.env.ENTERPRISE_CONNECTORS_CONFIG_JSON;
+  const originalFetch = globalThis.fetch;
+  const identity = { tenantId: 'connector-synthetic', subjectId: 'synthetic-reader' };
+  const query = { filter: { field: 'id', values: ['SYNTHETIC-1'] } };
+  let calls = 0;
+  try {
+    process.env.ENTERPRISE_CONNECTORS_CONFIG_JSON = JSON.stringify({ wms: { endpoint: 'http://127.0.0.1:19999' } });
+    globalThis.fetch = async () => {
+      calls++;
+      return new Response(JSON.stringify({ records: [], queryCoverage: {
+        schemaVersion: 'ontology-query.v1', complete: true, queryFingerprint: ontologyQueryFingerprint(query)
+      } }));
+    };
+    const read = scope => retrieveOntologyConnectorRecords({ sourceSystems: ['WMS'] }, query, 'executive', scope);
+    await runWithSemanticModelWorkspace(identity, 'independent-model', async () => {
+      const grant = { schemaVersion: 'ontology-model-grant.v1', modelId: 'independent-model', metadata: true,
+        objects: { Stock: { system: 'WMS', fields: ['id'], classifications: ['internal'] } } };
+      const settings = { ONTOLOGY_RUNTIME_GRANTS_JSON: JSON.stringify({ [identity.tenantId]: { executive: { models: { 'independent-model': grant } } } }) };
+      assert.deepEqual(getOntologyRuntimeGrant(identity, 'executive', settings), grant);
+      await assert.rejects(read(identity), /ONTOLOGY_CONNECTOR_MODEL_BINDING_REQUIRED/u);
+      assert.equal(calls, 0);
+    }, { registered: true });
+    await runWithSemanticTenant(identity, async () => {
+      for (const invalid of [{ ...identity, tenantId: 'foreign' }, { ...identity, subjectId: '' }, { ...identity, subjectId: ' reader ' },
+        { ...identity, subjectId: 'reader\u007f' }, { ...identity, subjectId: 'r'.repeat(129) }, null]) {
+        await assert.rejects(read(invalid), /ONTOLOGY_CONNECTOR_SCOPE_INVALID/u);
+        assert.equal(calls, 0);
+      }
+      assert.deepEqual(await read(identity), []);
+      assert.equal(calls, 1);
+    });
+    await assert.rejects(read(identity), /ONTOLOGY_CONNECTOR_SCOPE_INVALID/u);
+    assert.equal(calls, 1);
+    // Existing local Demo fixtures retain their default-model transport path.
+    assert.deepEqual(await read({ tenantId: 'demo-enterprise', subjectId: 'demo:synthetic-reader' }), []);
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previous === undefined) delete process.env.ENTERPRISE_CONNECTORS_CONFIG_JSON;
+    else process.env.ENTERPRISE_CONNECTORS_CONFIG_JSON = previous;
+  }
+});
 
 test('independent models require explicit server model grants and never inherit default role access', async () => {
   const scope = { tenantId: 'grant-synthetic', subjectId: 'synthetic-reader' };
